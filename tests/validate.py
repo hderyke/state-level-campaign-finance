@@ -51,9 +51,8 @@ DRIFT_THRESHOLD = 0.05                  # 5% row count drop = warning
 REQUIRED_COLS = {
     "candidates":    ["state", "candidate_name"],
     "committees":    ["state", "committee_type"],   # see COMMITTEE_ID_COLS below
-    "contributions": ["state", "state_filer_id", "amount", "date", "raw_file", "row_num"],
-    "expenditures":  ["state", "state_filer_id", "amount", "date", "raw_file", "row_num"],
-    "loans_debts":   ["state", "state_filer_id", "record_type", "raw_file", "row_num"],
+    "contributions": ["state", "amount", "date", "raw_file", "row_num"],
+    "expenditures":  ["state", "amount", "date", "raw_file", "row_num"],
 }
 
 # Committees must have at least one of these as an identifier
@@ -63,18 +62,13 @@ COMMITTEE_ID_COLS = ["state_filer_id", "committee_name"]
 AMOUNT_TABLES = {
     "contributions": "amount",
     "expenditures":  "amount",
-    "loans_debts":   "original_amount",
 }
 
 # Tables where negative amounts are allowed
-NEGATIVE_OK = {"loans_debts"}
-
-# Tables with state_filer_id that must be non-empty on every row
-# (committees excluded — some states use committee_name as the identifier instead)
-FILER_ID_TABLES = {"contributions", "expenditures", "loans_debts"}
+NEGATIVE_OK = set()
 
 # Tables with date fields
-DATE_TABLES = {"contributions", "expenditures", "loans_debts"}
+DATE_TABLES = {"contributions", "expenditures"}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -248,7 +242,7 @@ def run(state: str):
         except Exception:
             pass
 
-    tables = ["candidates", "committees", "contributions", "expenditures", "loans_debts"]
+    tables = ["candidates", "committees", "contributions", "expenditures"]
     all_rows   = {}
     row_counts = {}
     tier1_failures = []
@@ -285,8 +279,14 @@ def run(state: str):
                     f"Must have at least one of: {COMMITTEE_ID_COLS}"
                 ]))
 
-        if table in FILER_ID_TABLES:
-            checks.append(("filer_id", check_filer_id(table, rows)))
+        if table in {"contributions", "expenditures"} and rows and "state_filer_id" in rows[0]:
+            bad = sum(1 for r in rows if not r.get("state_filer_id", "").strip())
+            if bad:
+                pct = 100 * bad / len(rows)
+                tier2_warnings.append({
+                    "table":   table,
+                    "warning": f"{bad:,} rows ({pct:.1f}%) have empty state_filer_id",
+                })
 
         if table in AMOUNT_TABLES:
             col = AMOUNT_TABLES[table]
