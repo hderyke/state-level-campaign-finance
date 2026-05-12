@@ -1,0 +1,43 @@
+{
+  "state": "AK",
+  "run_at": "2026-05-08T02:51:45.966729",
+  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/alaska/cleaned",
+  "passed": true,
+  "row_counts": {
+    "candidates": 3523,
+    "committees": 1688,
+    "contributions": 2287470,
+    "expenditures": 374199,
+    "loans_debts": 12685
+  },
+  "tier1_failures": [],
+  "tier2_warnings": [
+    {
+      "table": "contributions",
+      "warning": "7376 rows have negative amount \u2014 may indicate refunds/reversals"
+    },
+    {
+      "table": "expenditures",
+      "warning": "5791 rows have negative amount \u2014 may indicate refunds/reversals"
+    },
+    {
+      "table": "loans_debts",
+      "warning": "1 rows have dates before 1990 \u2014 may be legitimate old records"
+    }
+  ],
+  "tier2_enrichment": {
+    "candidates": {
+      "total": 3523,
+      "with_office": 79.2,
+      "with_party": 0.0,
+      "with_district": 0.0
+    },
+    "committees": {
+      "total": 1688,
+      "with_treasurer": 0.0,
+      "pct_active": 0.0,
+      "pct_dissolved": 0.0
+    }
+  },
+  "drift_warnings": []
+}

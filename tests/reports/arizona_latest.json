@@ -1,0 +1,61 @@
+{
+  "state": "AZ",
+  "run_at": "2026-05-08T13:23:44.342791",
+  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/arizona/cleaned",
+  "passed": false,
+  "row_counts": {
+    "candidates": 4337,
+    "committees": 4387,
+    "contributions": 1871267,
+    "expenditures": 886244,
+    "loans_debts": 0
+  },
+  "tier1_failures": [
+    {
+      "table": "contributions",
+      "check": "filer_id",
+      "errors": [
+        "1709013 rows have empty state_filer_id"
+      ]
+    },
+    {
+      "table": "expenditures",
+      "check": "filer_id",
+      "errors": [
+        "511278 rows have empty state_filer_id"
+      ]
+    },
+    {
+      "table": "loans_debts",
+      "check": "nonempty",
+      "errors": [
+        "Table is empty (0 rows)"
+      ]
+    }
+  ],
+  "tier2_warnings": [
+    {
+      "table": "contributions",
+      "warning": "5005 rows have negative amount \u2014 may indicate refunds/reversals"
+    },
+    {
+      "table": "expenditures",
+      "warning": "9293 rows have negative amount \u2014 may indicate refunds/reversals"
+    }
+  ],
+  "tier2_enrichment": {
+    "candidates": {
+      "total": 4337,
+      "with_office": 97.5,
+      "with_party": 89.0,
+      "with_district": 0.0
+    },
+    "committees": {
+      "total": 4387,
+      "with_treasurer": 0.0,
+      "pct_active": 0.0,
+      "pct_dissolved": 0.0
+    }
+  },
+  "drift_warnings": []
+}

@@ -1,0 +1,39 @@
+{
+  "state": "AL",
+  "run_at": "2026-05-12T17:37:08.565024",
+  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/alabama/cleaned",
+  "passed": true,
+  "row_counts": {
+    "candidates": 5237,
+    "committees": 8104,
+    "contributions": 1103126,
+    "expenditures": 455160,
+    "loans_debts": 9847
+  },
+  "tier1_failures": [],
+  "tier2_warnings": [
+    {
+      "table": "contributions",
+      "warning": "10816 rows have negative amount \u2014 may indicate refunds/reversals"
+    },
+    {
+      "table": "expenditures",
+      "warning": "8362 rows have negative amount \u2014 may indicate refunds/reversals"
+    }
+  ],
+  "tier2_enrichment": {
+    "candidates": {
+      "total": 5237,
+      "with_office": 83.3,
+      "with_party": 68.0,
+      "with_district": 20.7
+    },
+    "committees": {
+      "total": 8104,
+      "with_treasurer": 18.9,
+      "pct_active": 31.0,
+      "pct_dissolved": 38.2
+    }
+  },
+  "drift_warnings": []
+}
