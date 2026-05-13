@@ -1,39 +1,63 @@
 {
   "state": "AL",
-  "run_at": "2026-05-12T17:37:08.565024",
-  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/alabama/cleaned",
+  "run_at": "2026-05-13T00:18:08.351602",
+  "clean_dir": "/sessions/relaxed-brave-faraday/mnt/state-level campaign finance/data/alabama/cleaned",
   "passed": true,
   "row_counts": {
-    "candidates": 5237,
-    "committees": 8104,
-    "contributions": 1103126,
-    "expenditures": 455160,
-    "loans_debts": 9847
+    "candidates": 4567,
+    "committees": 5677,
+    "contributions": 116936,
+    "expenditures": 15364
   },
   "tier1_failures": [],
   "tier2_warnings": [
     {
       "table": "contributions",
-      "warning": "10816 rows have negative amount \u2014 may indicate refunds/reversals"
+      "warning": "4441 rows have negative amount \u2014 may indicate refunds/reversals"
     },
     {
       "table": "expenditures",
-      "warning": "8362 rows have negative amount \u2014 may indicate refunds/reversals"
+      "warning": "535 rows have negative amount \u2014 may indicate refunds/reversals"
     }
   ],
   "tier2_enrichment": {
     "candidates": {
-      "total": 5237,
-      "with_office": 83.3,
-      "with_party": 68.0,
-      "with_district": 20.7
+      "total": 4567,
+      "with_office": 0.0,
+      "with_party": 0.0,
+      "with_district": 0.0
     },
     "committees": {
-      "total": 8104,
-      "with_treasurer": 18.9,
-      "pct_active": 31.0,
-      "pct_dissolved": 38.2
+      "total": 5677,
+      "with_treasurer": 6.9,
+      "pct_active": 5.6,
+      "pct_dissolved": 2.6
     }
   },
-  "drift_warnings": []
+  "drift_warnings": [
+    {
+      "table": "candidates",
+      "previous": 5237,
+      "current": 4567,
+      "drop_pct": 12.8
+    },
+    {
+      "table": "committees",
+      "previous": 8104,
+      "current": 5677,
+      "drop_pct": 29.9
+    },
+    {
+      "table": "contributions",
+      "previous": 1103126,
+      "current": 116936,
+      "drop_pct": 89.4
+    },
+    {
+      "table": "expenditures",
+      "previous": 455160,
+      "current": 15364,
+      "drop_pct": 96.6
+    }
+  ]
 }

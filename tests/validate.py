@@ -3,7 +3,7 @@ tests/validate.py — Validate a state's cleaned CSVs before loading into the da
 
 Usage:
     python tests/validate.py alabama
-    python tests/validate.py alaska
+    python tests/validate.py Alaska
 
 Output:
     - Terminal: pass/fail/warn summary
@@ -23,7 +23,7 @@ from pathlib import Path
 
 # ── State name → abbreviation map ─────────────────────────────────────────────
 STATE_ABBR = {
-    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "alabama": "AL", "Alaska": "AK", "arizona": "AZ", "arkansas": "AR",
     "California": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
     "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
     "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",

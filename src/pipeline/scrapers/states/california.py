@@ -27,7 +27,7 @@ from pathlib import Path
 import requests
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 RAW_DIR      = PROJECT_ROOT / "data" / "California" / "raw"
 MANIFEST     = PROJECT_ROOT / "data" / "California" / "manifest.csv"
 
@@ -40,12 +40,17 @@ MANIFEST_COLS = ["filename", "server_last_modified", "downloaded_at", "row_count
 TARGET_TABLES = {
     "CalAccess/DATA/RCPT_CD.TSV":                    "RCPT_CD.tsv",
     "CalAccess/DATA/EXPN_CD.TSV":                    "EXPN_CD.tsv",
+    "CalAccess/DATA/DEBT_CD.TSV":                    "DEBT_CD.tsv",
+    "CalAccess/DATA/LOAN_CD.TSV":                    "LOAN_CD.tsv",
     "CalAccess/DATA/FILERNAME_CD.TSV":               "FILERNAME_CD.tsv",
     "CalAccess/DATA/CVR_CAMPAIGN_DISCLOSURE_CD.TSV": "CVR_CAMPAIGN_DISCLOSURE_CD.tsv",
     "CalAccess/DATA/FILER_TO_FILER_TYPE_CD.TSV":     "FILER_TO_FILER_TYPE_CD.tsv",
 }
 
-TRANSACTION_TABLES = {"RCPT_CD.tsv", "EXPN_CD.tsv"}
+# Transactions change daily; entity/registry files change less often.
+# --update-transactions pulls RCPT, EXPN, DEBT, LOAN.
+# --update-entities pulls FILERNAME, CVR, FILER_TO_FILER_TYPE.
+TRANSACTION_TABLES = {"RCPT_CD.tsv", "EXPN_CD.tsv", "DEBT_CD.tsv", "LOAN_CD.tsv"}
 ENTITY_TABLES      = {"FILERNAME_CD.tsv", "CVR_CAMPAIGN_DISCLOSURE_CD.tsv",
                       "FILER_TO_FILER_TYPE_CD.tsv"}
 

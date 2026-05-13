@@ -5,8 +5,8 @@ from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-RAW_DIR      = PROJECT_ROOT / "data" / "alaska" / "raw"
-MANIFEST     = PROJECT_ROOT / "data" / "alaska" / "manifest.csv"
+RAW_DIR      = PROJECT_ROOT / "data" / "Alaska" / "raw"
+MANIFEST     = PROJECT_ROOT / "data" / "Alaska" / "manifest.csv"
 
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -295,7 +295,7 @@ def run(force: bool = False, update_transactions: bool = False,
 
                 key           = (relation_type, year)
                 expected_file = RAW_DIR / f"{STEMS[relation_type]}_{year}.csv"
-                already_done  = key in done or expected_file.exists()
+                already_done  = key in done or (expected_file.exists() and expected_file.stat().st_size > 0)
 
                 if already_done and year != current_year and not force:
                     print(f"  {year}: already on disk — skipping")

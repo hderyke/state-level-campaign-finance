@@ -6,13 +6,15 @@ from pathlib import Path
 import requests
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 RAW_DIR      = PROJECT_ROOT / "data" / "arkansas" / "raw"
 MANIFEST     = PROJECT_ROOT / "data" / "arkansas" / "manifest.csv"
 
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-API_URL       = "https://api-ethics-disclosures.sos.arkansas.gov/api/ExportData/GetExportPublicDownloadData"
+TRANSACTION_API = "https://api-ethics-disclosures.sos.arkansas.gov/api/ExportData/GetExportPublicDownloadData"
+ENTITY_API      = "https://api-ethics-disclosures.sos.arkansas.gov/api/PublicFilerDetails/GetCandidateCommitteDetails"
+
 MANIFEST_COLS = ["transaction_type", "year", "filename", "downloaded_at", "row_count"]
 
 # ── Data types ─────────────────────────────────────────────────────────────────
@@ -24,6 +26,10 @@ TRANSACTION_TYPES = {
 
 # Years available on the downloads page (2022–present)
 YEARS = ["2022", "2023", "2024", "2025", "2026"]
+
+# Entity filer type codes — exclude SFIFILER (financial disclosure, not campaign finance)
+CANDIDATE_CODES  = {"CAN"}
+COMMITTEE_CODES  = {"PAC", "CPAC", "IEF", "PP", "ECOMM"}
 
 
 # ── Manifest helpers ──────────────────────────────────────────────────────────
@@ -56,7 +62,58 @@ def append_manifest(record: dict):
         writer.writerow(record)
 
 
-# ── Download ──────────────────────────────────────────────────────────────────
+# ── Entity download ───────────────────────────────────────────────────────────
+ENTITY_FIELDS = [
+    "filerEntityID", "filerEntityVersionID", "filerTypeCode", "filerType",
+    "firstName", "lastName", "suffix", "filerName", "committeeName",
+    "office", "officeDistrictName", "jurisdictionName",
+    "politicalParty", "filerStatus", "electionYear", "filingYear",
+    "totalRaised", "totalSpent", "balanceofFunds",
+    "filingTypeCode", "isPaperFiler", "guid",
+]
+
+
+def download_entities(session: requests.Session) -> tuple[int, int] | None:
+    """
+    Fetch all campaign finance filers from the public registry API.
+    Splits into candidates.csv and committees.csv.
+    Returns (candidate_count, committee_count) or None on failure.
+    """
+    print("  Arkansas entities...", end=" ", flush=True)
+
+    payload = {
+        "filerTypeCode": "", "accountStatus": "", "filerName": "",
+        "OfficeSought": "", "election": "", "politicalPartyCode": "",
+        "jurisdictionType": "", "jurisdiction": "",
+        "totalRaisedMin": None, "totalRaisedMax": None,
+        "totalSpentMin": None, "totalSpentMax": None,
+        "balanceFundsMin": None, "balanceFundsMax": None,
+        "transactionSourceTypeCode": None,
+        "pageNumber": 1, "pageSize": 25000,
+    }
+
+    try:
+        resp = session.post(ENTITY_API, json=payload, timeout=60)
+        resp.raise_for_status()
+        items = resp.json()["data"]["items"]
+    except Exception as e:
+        print(f"failed: {e}")
+        return None
+
+    candidates  = [r for r in items if r.get("filerTypeCode") in CANDIDATE_CODES]
+    committees  = [r for r in items if r.get("filerTypeCode") in COMMITTEE_CODES]
+
+    for filename, rows in [("candidates.csv", candidates), ("committees.csv", committees)]:
+        out_path = RAW_DIR / filename
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=ENTITY_FIELDS, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+
+    return len(candidates), len(committees)
+
+
+# ── Transaction download ──────────────────────────────────────────────────────
 def download(transaction_type: str, year: str,
              session: requests.Session) -> tuple[str, int] | None:
     """
@@ -74,7 +131,7 @@ def download(transaction_type: str, year: str,
     }
 
     try:
-        resp = session.post(API_URL, json=payload, timeout=120)
+        resp = session.post(TRANSACTION_API, json=payload, timeout=120)
         resp.raise_for_status()
     except requests.RequestException as e:
         print(f"failed: {e}")
@@ -114,11 +171,6 @@ def run(force: bool = False, update_transactions: bool = False,
     else:
         done = load_manifest()
 
-    # Arkansas has no entity data source yet — update_entities is a no-op
-    if update_entities:
-        print("Arkansas: no entity data source configured.")
-        return
-
     session = requests.Session()
     session.headers.update({
         "User-Agent":   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -129,6 +181,31 @@ def run(force: bool = False, update_transactions: bool = False,
         "Origin":       "https://ethics-disclosures.sos.arkansas.gov",
     })
 
+    # ── Entities ──────────────────────────────────────────────────────────────
+    if update_entities or force:
+        result = download_entities(session)
+        if result:
+            cand_count, comm_count = result
+            print(f"→ candidates.csv ({cand_count:,} rows), "
+                  f"committees.csv ({comm_count:,} rows)")
+            today = datetime.today().strftime("%Y-%m-%d")
+            # Update manifest entries for entities (remove old, write new)
+            strip_manifest(lambda r: r["transaction_type"] != "entities")
+            append_manifest({"transaction_type": "entities", "year": "candidates",
+                             "filename": "candidates.csv", "downloaded_at": today,
+                             "row_count": cand_count})
+            append_manifest({"transaction_type": "entities", "year": "committees",
+                             "filename": "committees.csv", "downloaded_at": today,
+                             "row_count": comm_count})
+        else:
+            print("failed — will retry next run")
+
+    # If only updating entities, stop here
+    if update_entities and not force:
+        print("Arkansas: done.")
+        return
+
+    # ── Transactions ──────────────────────────────────────────────────────────
     for transaction_type, label in TRANSACTION_TYPES.items():
         for year in YEARS:
             if update_transactions and year != current_year:

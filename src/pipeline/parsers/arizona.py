@@ -161,7 +161,9 @@ def lookup_filer(filer_name: str, filer_type: str,
     if not filer_name:
         return None
     if filer_type == "Candidate":
-        return by_lastname.get(filer_name)
+        # FilerName in transaction files is "Last, First" — extract last name for index lookup
+        last = filer_name.split(",")[0].strip() if "," in filer_name else filer_name
+        return by_lastname.get(last)
     return by_cmte_name.get(filer_name) or by_lastname.get(filer_name)
 
 
@@ -372,18 +374,23 @@ def run():
 # ── Name helpers ───────────────────────────────────────────────────────────────
 def _format_name(last_first: str, first: str) -> str:
     """
-    Convert 'Last, First' to 'First Last'. If already formatted or no comma, return as-is.
-    If 'first' is provided and last_first has no comma, join them.
+    Build a canonical 'First Last' name from registry fields.
+      'Gallego, Ruben', ''   → 'Ruben Gallego'   (FilerName in transaction files)
+      'Gallego',        'Ruben' → 'Ruben Gallego' (entity_last/first from registry)
     """
     last_first = (last_first or "").strip()
     first      = (first or "").strip()
     if not last_first:
         return first
     if "," in last_first:
+        # "Last, First" combined string — split it
         parts = [p.strip() for p in last_first.split(",", 1)]
         if len(parts) == 2 and parts[1]:
             return f"{parts[1]} {parts[0]}"
         return parts[0]
+    # Separate last + first fields from registry
+    if first:
+        return f"{first} {last_first}"
     return last_first
 
 

@@ -1,31 +1,31 @@
 {
   "state": "AZ",
-  "run_at": "2026-05-12T19:40:47.865287",
-  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/arizona/cleaned",
+  "run_at": "2026-05-13T00:18:07.339053",
+  "clean_dir": "/sessions/relaxed-brave-faraday/mnt/state-level campaign finance/data/arizona/cleaned",
   "passed": true,
   "row_counts": {
     "candidates": 15718,
     "committees": 43837,
-    "contributions": 10166625,
-    "expenditures": 886948
+    "contributions": 278582,
+    "expenditures": 509882
   },
   "tier1_failures": [],
   "tier2_warnings": [
     {
       "table": "contributions",
-      "warning": "7,802,010 rows (76.7%) have empty state_filer_id"
+      "warning": "134,858 rows (48.4%) have empty state_filer_id"
     },
     {
       "table": "contributions",
-      "warning": "28432 rows have negative amount \u2014 may indicate refunds/reversals"
+      "warning": "1509 rows have negative amount \u2014 may indicate refunds/reversals"
     },
     {
       "table": "expenditures",
-      "warning": "511,882 rows (57.7%) have empty state_filer_id"
+      "warning": "340,837 rows (66.8%) have empty state_filer_id"
     },
     {
       "table": "expenditures",
-      "warning": "9315 rows have negative amount \u2014 may indicate refunds/reversals"
+      "warning": "7199 rows have negative amount \u2014 may indicate refunds/reversals"
     }
   ],
   "tier2_enrichment": {
@@ -42,5 +42,18 @@
       "pct_dissolved": 0.0
     }
   },
-  "drift_warnings": []
+  "drift_warnings": [
+    {
+      "table": "contributions",
+      "previous": 10166625,
+      "current": 278582,
+      "drop_pct": 97.3
+    },
+    {
+      "table": "expenditures",
+      "previous": 886948,
+      "current": 509882,
+      "drop_pct": 42.5
+    }
+  ]
 }
