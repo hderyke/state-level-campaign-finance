@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RAW_DIR      = PROJECT_ROOT / "data" / "Alaska" / "raw"
 MANIFEST     = PROJECT_ROOT / "data" / "Alaska" / "manifest.csv"
 

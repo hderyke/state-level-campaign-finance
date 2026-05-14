@@ -13,7 +13,7 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RAW_DIR      = PROJECT_ROOT / "data" / "Alabama" / "raw"
 MANIFEST     = PROJECT_ROOT / "data" / "Alabama" / "manifest.csv"
 

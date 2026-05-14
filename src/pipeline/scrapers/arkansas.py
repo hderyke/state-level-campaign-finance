@@ -6,7 +6,7 @@ from pathlib import Path
 import requests
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RAW_DIR      = PROJECT_ROOT / "data" / "arkansas" / "raw"
 MANIFEST     = PROJECT_ROOT / "data" / "arkansas" / "manifest.csv"
 
