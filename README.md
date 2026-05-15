@@ -14,7 +14,7 @@ Collect and normalize campaign finance data from all 50 states into a single, un
 
 ---
 
-## Running the Pipeline
+## Section 1: Running the Pipeline
 
 ### Prerequisites
 - Python 3.8+
