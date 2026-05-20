@@ -93,35 +93,48 @@ def run(state: str):
         print(f"  {trunc(r[0],c1):<{c1}}  {r[1]:>{c2},}  {fmt_money(r[2]):>{c3}}  {trunc(r[3] or '—',c4):<{c4}}  {fmt_money(r[4]):>{c5}}")
 
     # ── 2. Top 20 recipient candidates ───────────────────────────────────────
+    # Join via candidate_name (contributions no longer carries state_filer_id).
     section("TOP 20 RECIPIENT CANDIDATES — total contributions received", state)
     rows = con.execute("""
-        WITH cand_totals AS (
-            SELECT ca.candidate_name, ca.state,
-                   COUNT(TRY_CAST(co.amount AS DOUBLE))          AS n,
-                   ROUND(SUM(TRY_CAST(co.amount AS DOUBLE)), 0)  AS total
-            FROM candidates ca
-            JOIN contributions co
-                ON LOWER(TRIM(ca.candidate_name)) = LOWER(TRIM(co.candidate_name))
-            WHERE TRY_CAST(co.amount AS DOUBLE) IS NOT NULL
-            GROUP BY ca.candidate_name, ca.state
+        WITH dedup_candidates AS (
+            -- One row per (state, person_id): some parsers emit multiple
+            -- candidate rows for the same person (e.g. one per election-cycle
+            -- re-registration).  Without dedup the join fans out and inflates
+            -- totals N-fold.
+            SELECT DISTINCT ON (state, person_id)
+                person_id, candidate_name, state, office, party
+            FROM candidates
         ),
-        primary_office AS (
-            SELECT ca.candidate_name, ca.state, ca.office, ca.party,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY ca.candidate_name
-                       ORDER BY COUNT(TRY_CAST(co.amount AS DOUBLE)) DESC
-                   ) AS rn
-            FROM candidates ca
+        matched AS (
+            SELECT ca.person_id, ca.candidate_name, ca.state, ca.office, ca.party,
+                   TRY_CAST(co.amount AS DOUBLE) AS amt
+            FROM dedup_candidates ca
             JOIN contributions co
-                ON LOWER(TRIM(ca.candidate_name)) = LOWER(TRIM(co.candidate_name))
+                ON ca.state = co.state
+               AND co.candidate_name IS NOT NULL AND co.candidate_name != ''
+               AND LOWER(TRIM(ca.candidate_name)) = LOWER(TRIM(co.candidate_name))
             WHERE TRY_CAST(co.amount AS DOUBLE) IS NOT NULL
-            GROUP BY ca.candidate_name, ca.state, ca.office, ca.party
+        ),
+        by_person AS (
+            SELECT person_id, state,
+                   COUNT(*) AS n,
+                   ROUND(SUM(amt), 0) AS total
+            FROM matched
+            GROUP BY person_id, state
+        ),
+        primary_row AS (
+            SELECT person_id, candidate_name, office, party,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY person_id
+                       ORDER BY COUNT(*) DESC
+                   ) AS rn
+            FROM matched
+            GROUP BY person_id, candidate_name, office, party
         )
-        SELECT ct.candidate_name, ct.state, po.office, po.party, ct.n, ct.total
-        FROM cand_totals ct
-        JOIN primary_office po
-            ON ct.candidate_name = po.candidate_name AND po.rn = 1
-        ORDER BY ct.total DESC LIMIT 20
+        SELECT pr.candidate_name, bp.state, pr.office, pr.party, bp.n, bp.total
+        FROM by_person bp
+        JOIN primary_row pr ON bp.person_id = pr.person_id AND pr.rn = 1
+        ORDER BY bp.total DESC LIMIT 20
     """).fetchall()
 
     W_ST = 4
@@ -132,19 +145,30 @@ def run(state: str):
         print(f"  {trunc(r[0],c1):<{c1}}  {trunc(r[1] or '',c2):<{c2}}  {trunc(r[2] or '',c3):<{c3}}  {trunc(r[3] or '',c4):<{c4}}  {r[4]:>{c5},}  {fmt_money(r[5]):>{c6}}")
 
     # ── 3. Top 20 non-candidate committees ───────────────────────────────────
+    # Excludes committees whose name matches a known candidate_name.
     section("TOP 20 NON-CANDIDATE COMMITTEES — total contributions received", state)
     rows = con.execute("""
-        SELECT co.state, co.committee_name, cm.committee_type, COUNT(*) AS n, ROUND(SUM(TRY_CAST(co.amount AS DOUBLE)), 0) AS total
+        WITH cmte_types AS (
+            -- One row per committee_name: prefer a non-blank type, take MAX alphabetically
+            SELECT LOWER(TRIM(committee_name)) AS name_key,
+                   MAX(CASE WHEN committee_type IS NOT NULL AND committee_type != ''
+                            THEN committee_type END) AS committee_type
+            FROM committees
+            GROUP BY LOWER(TRIM(committee_name))
+        )
+        SELECT co.state, co.committee_name, ct.committee_type,
+               COUNT(*) AS n,
+               ROUND(SUM(TRY_CAST(co.amount AS DOUBLE)), 0) AS total
         FROM contributions co
-        LEFT JOIN committees cm ON LOWER(TRIM(co.committee_name)) = LOWER(TRIM(cm.committee_name))
+        LEFT JOIN cmte_types ct ON LOWER(TRIM(co.committee_name)) = ct.name_key
         WHERE TRY_CAST(co.amount AS DOUBLE) IS NOT NULL
           AND co.committee_name IS NOT NULL AND co.committee_name != ''
-          AND (cm.committee_type IS NULL OR cm.committee_type NOT ILIKE 'Candidate%')
+          AND (ct.committee_type IS NULL OR ct.committee_type NOT ILIKE 'Candidate%')
           AND NOT EXISTS (
               SELECT 1 FROM candidates ca
               WHERE LOWER(TRIM(ca.candidate_name)) = LOWER(TRIM(co.committee_name))
           )
-        GROUP BY co.state, co.committee_name, cm.committee_type
+        GROUP BY co.state, co.committee_name, ct.committee_type
         ORDER BY total DESC LIMIT 20
     """).fetchall()
 

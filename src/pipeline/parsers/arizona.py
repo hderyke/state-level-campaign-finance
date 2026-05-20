@@ -21,7 +21,7 @@ Schema notes
 
   Registry join: entity_last_name  (Candidate files)
                + committee_name    (Officeholder + PAC/Party fallback)
-               → entity_id used as state_filer_id
+               → entity_id used as state_filer_id on committees/candidates
 
   az_committees_all.csv covers all filer types (Candidate, PAC, Party,
   Officeholder, BallotMeasure, Other) — 43K+ entities. Columns differ
@@ -35,6 +35,7 @@ Schema notes
 """
 
 import csv
+import gzip
 import re
 import sys
 from datetime import datetime, date
@@ -42,6 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import columns as C
+import utils
 
 csv.field_size_limit(sys.maxsize)
 
@@ -164,15 +166,22 @@ def lookup_filer(filer_name: str, filer_type: str,
         # FilerName in transaction files is "Last, First" — extract last name for index lookup
         last = filer_name.split(",")[0].strip() if "," in filer_name else filer_name
         return by_lastname.get(last)
-    return by_cmte_name.get(filer_name) or by_lastname.get(filer_name)
+    # Try exact committee name first (PAC, Party, Officeholder full-name entries)
+    reg = by_cmte_name.get(filer_name)
+    if reg:
+        return reg
+    # Officeholder FilerNames also arrive as "Last, First" — apply same last-name fallback
+    if "," in filer_name:
+        last = filer_name.split(",")[0].strip()
+        return by_lastname.get(last)
+    return None
 
 
 # ── Writers ────────────────────────────────────────────────────────────────────
 def open_writer(filename: str, fieldnames: list):
-    path = CLEAN_DIR / filename
-    fh   = open(path, "w", newline="", encoding="utf-8")
-    w    = csv.DictWriter(fh, fieldnames=fieldnames,
-                          extrasaction="ignore", restval="")
+    fh = gzip.open(CLEAN_DIR / filename, "wt", encoding="utf-8", newline="")
+    w  = csv.DictWriter(fh, fieldnames=fieldnames,
+                        extrasaction="ignore", restval="")
     w.writeheader()
     return fh, w
 
@@ -181,11 +190,11 @@ def open_writer(filename: str, fieldnames: list):
 def run():
     by_lastname, by_cmte_name = load_registry()
 
-    cand_fh, cand_w = open_writer("candidates.csv",    C.CANDIDATES)
-    cmte_fh, cmte_w = open_writer("committees.csv",    C.COMMITTEES)
-    cont_fh, cont_w = open_writer("contributions.csv", C.CONTRIBUTIONS)
-    expn_fh, expn_w = open_writer("expenditures.csv",  C.EXPENDITURES)
-    loan_fh, loan_w = open_writer("loans_debts.csv",   C.LOANS_DEBTS)  # empty
+    cand_fh, cand_w = open_writer("candidates.csv.gz",    C.CANDIDATES)
+    cmte_fh, cmte_w = open_writer("committees.csv.gz",    C.COMMITTEES)
+    cont_fh, cont_w = open_writer("contributions.csv.gz", C.CONTRIBUTIONS)
+    expn_fh, expn_w = open_writer("expenditures.csv.gz",  C.EXPENDITURES)
+    loan_fh, loan_w = open_writer("loans_debts.csv.gz",   C.LOANS_DEBTS)  # empty
 
     # ── Committees: write from registry (all filer types) ─────────────────────
     reg_path = RAW_DIR / "az_committees_all.csv"
@@ -239,6 +248,7 @@ def run():
 
                 cand_w.writerow({
                     "state":           STATE,
+                    "state_filer_id":  clean(row.get("entity_id", "")),
                     "candidate_name":  cand_name,
                     "candidate_first": cand_first or first,
                     "candidate_last":  cand_last,
@@ -270,23 +280,15 @@ def run():
 
                 # Look up filer in registry
                 reg = lookup_filer(filer_name, filer_type, by_lastname, by_cmte_name)
-
-                # state_filer_id: prefer entity_id, fallback to filer_name
-                if reg:
-                    state_filer_id = clean(reg["entity_id"])
-                    committee_name = clean(reg["committee_name"])
-                else:
-                    state_filer_id = filer_name
-                    committee_name = ""
+                committee_name = clean(reg["committee_name"]) if reg else ""
 
                 # Skip rows with no usable filer AND no amount
-                if not state_filer_id and not amount:
+                if not filer_name and not amount:
                     skipped += 1
                     continue
 
                 cont_w.writerow({
                     "state":             STATE,
-                    "state_filer_id":    state_filer_id,
                     "committee_name":    committee_name,
                     "contributor_name":  clean(row.get("TransactionName", "")),
                     "amount":            amount,
@@ -324,21 +326,14 @@ def run():
                 amount     = parse_amount(amount_raw)
 
                 reg = lookup_filer(filer_name, filer_type, by_lastname, by_cmte_name)
+                committee_name = clean(reg["committee_name"]) if reg else ""
 
-                if reg:
-                    state_filer_id = clean(reg["entity_id"])
-                    committee_name = clean(reg["committee_name"])
-                else:
-                    state_filer_id = filer_name
-                    committee_name = ""
-
-                if not state_filer_id and not amount:
+                if not filer_name and not amount:
                     skipped += 1
                     continue
 
                 expn_w.writerow({
                     "state":          STATE,
-                    "state_filer_id": state_filer_id,
                     "committee_name": committee_name,
                     "payee_name":     clean(row.get("TransactionName", "")),
                     "amount":         amount,
@@ -364,6 +359,8 @@ def run():
     # ── Close all ──────────────────────────────────────────────────────────────
     for fh in (cand_fh, cmte_fh, cont_fh, expn_fh, loan_fh):
         fh.close()
+
+    utils.assign_person_ids(CLEAN_DIR / "candidates.csv.gz", id_model="committee")
 
     # ── Summary ────────────────────────────────────────────────────────────────
     print(f"\nArizona: done.")

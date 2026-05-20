@@ -1,0 +1,7 @@
+{"ts": "2026-05-20T07:28:37+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_started", "force": false, "update_transactions": false, "update_entities": false}
+{"ts": "2026-05-20T07:28:38+00:00", "state": "alabama", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "2026_InKindContributionsExtract1.csv", "bytes": 77527, "rows": 2190, "duration_s": 0.24, "zip_id": 53}
+{"ts": "2026-05-20T07:28:40+00:00", "state": "alabama", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "2026_CashContributionsExtract1.csv", "bytes": 1769746, "rows": 75948, "duration_s": 2.06, "zip_id": 54}
+{"ts": "2026-05-20T07:28:41+00:00", "state": "alabama", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "2026_ExpendituresExtract1.csv", "bytes": 908785, "rows": 24312, "duration_s": 0.4, "zip_id": 55}
+{"ts": "2026-05-20T07:28:42+00:00", "state": "alabama", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "2026_OtherReceiptsExtract1.csv", "bytes": 59044, "rows": 1469, "duration_s": 0.19, "zip_id": 56}
+{"ts": "2026-05-20T07:28:43+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pac", "page_id": "467", "duration_s": 0.13}
+{"ts": "2026-05-20T07:28:51+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_completed", "status": "completed", "duration_s": 13.5, "files_ok": 4, "files_err": 0, "pages_ok": 1, "pages_err": 0}

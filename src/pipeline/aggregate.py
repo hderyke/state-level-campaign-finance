@@ -10,7 +10,11 @@ Usage:
 """
 
 import sys
+import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from src.logger import get_logger
 
 import duckdb
 
@@ -34,66 +38,138 @@ def find_state_dbs() -> list[tuple[str, Path]]:
 
 
 def run():
+    log = get_logger(None, "aggregate")
+    t0  = time.perf_counter()
+
     state_dbs = find_state_dbs()
     if not state_dbs:
         print("[!] No state .db files found. Run tabulate.py for at least one state first.")
+        log._emit("aggregate_completed", status="error",
+                  duration_s=0.0, error="no state db files found")
         sys.exit(1)
+
+    state_names = [name for name, _ in state_dbs]
+    log._emit("aggregate_started", states=state_names, states_count=len(state_dbs))
 
     print(f"Found {len(state_dbs)} state db(s):")
     for name, path in state_dbs:
         print(f"  {name:<15} {path}")
 
-    # Remove old aggregate db so we start clean
-    if OUT_DB.exists():
-        OUT_DB.unlink()
+    con = None
+    tables_ok  = 0
+    tables_err = 0
+    totals     = {}
 
-    con = duckdb.connect(str(OUT_DB))
-
-    # Create tables with all-VARCHAR schema using canonical column definitions
-    # (avoids type inference from a single state's data casting other states out)
-    sys.path.insert(0, str(Path(__file__).resolve().parents[0]))
-    import columns as C
-
-    col_map = {
-        "contributions": C.CONTRIBUTIONS,
-        "expenditures":  C.EXPENDITURES,
-        "committees":    C.COMMITTEES,
-        "candidates":    C.CANDIDATES,
-    }
-    print("\nCreating tables with VARCHAR schema...")
-    for table, cols in col_map.items():
-        col_defs = ", ".join(f'"{c}" VARCHAR' for c in cols)
-        con.execute(f"CREATE TABLE {table} ({col_defs})")
-
-    # Insert from each state db
-    totals = {t: 0 for t in TABLES}
-    for state_name, db_path in state_dbs:
-        print(f"\n  {state_name}:")
-        con.execute(f"ATTACH '{db_path}' AS _src (READ_ONLY)")
-        for table in TABLES:
+    try:
+        # Remove or retire the old aggregate DB.
+        if OUT_DB.exists():
             try:
-                cols      = col_map[table]
-                cast_cols = ", ".join(f'CAST("{c}" AS VARCHAR) AS "{c}"' for c in cols)
-                before    = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                con.execute(f"INSERT INTO {table} SELECT {cast_cols} FROM _src.{table}")
-                after     = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                n = after - before
-            except Exception as e:
-                print(f"    {table:<15} skipped ({e})")
-                n = 0
-            totals[table] += n
-            print(f"    {table:<15} {n:>10,} rows")
-        con.execute("DETACH _src")
+                OUT_DB.unlink()
+            except PermissionError:
+                OUT_DB.rename(str(OUT_DB) + f".{int(time.time())}.old")
 
-    print(f"\n{'='*50}")
-    print(f"  Totals in {OUT_DB.name}:")
-    for table in TABLES:
-        print(f"    {table:<15} {totals[table]:>10,} rows")
-    print(f"{'='*50}")
-    print(f"\nDone → {OUT_DB}")
+        wal = Path(str(OUT_DB) + ".wal")
+        if wal.exists():
+            wal.rename(str(wal) + f".{int(time.time())}.old")
 
-    con.close()
+        sys.path.insert(0, str(Path(__file__).resolve().parents[0]))
+        import columns as C
+
+        col_map = {
+            "contributions": C.CONTRIBUTIONS,
+            "expenditures":  C.EXPENDITURES,
+            "committees":    C.COMMITTEES,
+            "candidates":    C.CANDIDATES,
+        }
+
+        def _retire_wal():
+            w = Path(str(OUT_DB) + ".wal")
+            if w.exists():
+                w.rename(str(w) + f".{int(time.time())}.old")
+
+        _retire_wal()
+        con = duckdb.connect(str(OUT_DB))
+
+        aliases = []
+        for i, (state_name, db_path) in enumerate(state_dbs):
+            alias = f"s{i}"
+            con.execute(f"ATTACH '{db_path}' AS {alias} (READ_ONLY)")
+            aliases.append((alias, state_name))
+            print(f"  attached: {state_name}")
+
+        for table, cols in col_map.items():
+            ft    = time.perf_counter()
+            parts = []
+            for alias, state_name in aliases:
+                existing = {
+                    row[0]
+                    for row in con.execute(
+                        f"SELECT column_name FROM information_schema.columns "
+                        f"WHERE table_catalog='{alias}' AND table_name='{table}'"
+                    ).fetchall()
+                }
+                select_cols = ", ".join(
+                    f'CAST(t."{c}" AS VARCHAR) AS "{c}"' if c in existing
+                    else f'NULL AS "{c}"'
+                    for c in cols
+                )
+                parts.append(f"SELECT {select_cols} FROM {alias}.{table} t")
+
+            union_sql = "\nUNION ALL\n".join(parts)
+            print(f"\n  Building {table}...", end=" ", flush=True)
+            con.execute(f"CREATE OR REPLACE TABLE {table} AS {union_sql}")
+            n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            duration = round(time.perf_counter() - ft, 2)
+            totals[table] = n
+            print(f"{n:,} rows")
+            log._emit("table_built", table=table, rows=n, duration_s=duration)
+            tables_ok += 1
+
+        con.close()
+        _retire_wal()
+
+        print(f"\n{'='*50}")
+        print(f"  Totals in {OUT_DB.name}:")
+        for table in TABLES:
+            print(f"    {table:<15} {totals.get(table, 0):>10,} rows")
+        print(f"{'='*50}")
+        print(f"\nDone → {OUT_DB}")
+
+        duration = round(time.perf_counter() - t0, 1)
+        log.info(f"Done in {duration}s")
+        log._emit("aggregate_completed", status="completed", duration_s=duration,
+                  states_count=len(state_dbs), tables_ok=tables_ok,
+                  tables_err=tables_err, totals=totals)
+
+    except KeyboardInterrupt:
+        if con:
+            con.close()
+        log._emit("aggregate_completed", status="interrupted",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  states_count=len(state_dbs), tables_ok=tables_ok,
+                  tables_err=tables_err)
+        raise
+    except Exception as e:
+        if con:
+            con.close()
+        # DuckDB converts SIGINT to RuntimeError("Query interrupted")
+        if isinstance(e, RuntimeError) and "interrupted" in str(e).lower():
+            log._emit("aggregate_completed", status="interrupted",
+                      duration_s=round(time.perf_counter() - t0, 1),
+                      states_count=len(state_dbs), tables_ok=tables_ok,
+                      tables_err=tables_err)
+            raise KeyboardInterrupt() from e
+        log._emit("aggregate_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  states_count=len(state_dbs), tables_ok=tables_ok,
+                  tables_err=tables_err, error_type=type(e).__name__, error=str(e))
+        raise
 
 
 if __name__ == "__main__":
-    run()
+    try:
+        run()
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception:
+        sys.exit(1)

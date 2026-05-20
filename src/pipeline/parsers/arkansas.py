@@ -24,6 +24,7 @@ Notes
 """
 
 import csv
+import gzip
 import re
 import sys
 from datetime import datetime, date
@@ -31,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import columns as C
+import utils
 
 csv.field_size_limit(sys.maxsize)
 
@@ -137,7 +139,7 @@ def raw_files(pattern: str) -> list[Path]:
 
 
 def open_writer(filename: str, fieldnames: list):
-    fh = open(CLEAN_DIR / filename, "w", newline="", encoding="utf-8")
+    fh = gzip.open(CLEAN_DIR / filename, "wt", encoding="utf-8", newline="")
     w  = csv.DictWriter(fh, fieldnames=fieldnames,
                         extrasaction="ignore", restval="")
     w.writeheader()
@@ -146,11 +148,11 @@ def open_writer(filename: str, fieldnames: list):
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def run():
-    cand_fh, cand_w = open_writer("candidates.csv",    C.CANDIDATES)
-    cmte_fh, cmte_w = open_writer("committees.csv",    C.COMMITTEES)
-    cont_fh, cont_w = open_writer("contributions.csv", C.CONTRIBUTIONS)
-    expn_fh, expn_w = open_writer("expenditures.csv",  C.EXPENDITURES)
-    loan_fh, loan_w = open_writer("loans_debts.csv",   C.LOANS_DEBTS)
+    cand_fh, cand_w = open_writer("candidates.csv.gz",    C.CANDIDATES)
+    cmte_fh, cmte_w = open_writer("committees.csv.gz",    C.COMMITTEES)
+    cont_fh, cont_w = open_writer("contributions.csv.gz", C.CONTRIBUTIONS)
+    expn_fh, expn_w = open_writer("expenditures.csv.gz",  C.EXPENDITURES)
+    loan_fh, loan_w = open_writer("loans_debts.csv.gz",   C.LOANS_DEBTS)
 
     # ── Load candidate registry ───────────────────────────────────────────────
     # Keyed by filerEntityID (string) for transaction join
@@ -193,6 +195,8 @@ def run():
 
                 cand_w.writerow({
                     "state":           STATE,
+                    "person_id":       fid,   # for Arkansas, person_id = state_filer_id directly
+                    "state_filer_id":  fid,
                     "candidate_name":  cand_name,
                     "candidate_first": entry["candidate_first"],
                     "candidate_last":  entry["candidate_last"],
@@ -304,7 +308,6 @@ def run():
 
                 cont_w.writerow({
                     "state":             STATE,
-                    "state_filer_id":    fid,
                     "committee_name":    cmte_name,
                     "contributor_name":  clean(row.get("Source Name", "")),
                     "amount":            amount,
@@ -365,7 +368,6 @@ def run():
 
                 expn_w.writerow({
                     "state":            STATE,
-                    "state_filer_id":   fid,
                     "committee_name":   cmte_name,
                     "payee_name":       clean(row.get("Payee Name", "")),
                     "amount":           amount,
@@ -390,6 +392,8 @@ def run():
 
     for fh in (cand_fh, cmte_fh, cont_fh, expn_fh, loan_fh):
         fh.close()
+
+    utils.assign_person_ids(CLEAN_DIR / "candidates.csv.gz", id_model="committee")
 
     print(f"\nArkansas: done.")
     print(f"  {cand_count:,} candidates  {cmte_count + extra:,} committees")

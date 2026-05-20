@@ -24,7 +24,7 @@ Collect and normalize campaign finance data from all 50 states into a single, un
 
 ### Quick Start
 
-**Download raw data for a specific state:**
+**Step 1: Download raw data for a specific state:**
 ```bash
 python src/pipeline/scrapers/alabama.py
 python src/pipeline/scrapers/alaska.py
@@ -44,25 +44,25 @@ python src/pipeline/scrapers/alaska.py --update-transactions # Transactions only
 python src/pipeline/scrapers/arizona.py --update-entities    # Entities only
 ```
 
-**Parse a single state's data:**
+**Step 2: Parse raw data**
 ```bash
 python src/pipeline/parsers/alabama.py
 ```
 Outputs standardized CSVs: `contributions.csv`, `expenditures.csv`, `candidates.csv`, `committees.csv`. Each state's parser is designed specifically for it's raw data format.
 
-**Validate parsed data:**
+**Step 3: Validate and evaluate cleaned data:**
 ```bash
 python tests/validate.py alabama
 ```
 Generates a validation report in `tests/reports/alabama_latest.json` with warnings and errors.
 
-**Build state-level database:**
+**Step 4: Build state-level database:**
 ```bash
 python src/pipeline/tabulate.py alabama
 ```
 Creates `data/alabama/cleaned/alabama.db` with normalized tables.
 
-**Aggregate into master database:**
+**Step 5: Aggregate into master database:**
 ```bash
 python src/pipeline/aggregate.py
 ```

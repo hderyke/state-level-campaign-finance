@@ -20,10 +20,14 @@ COMMITTEES = [
     "city",
     "zip",
     "active",
+    "raw_file",
+    "row_num",
 ]
 
 CANDIDATES = [
     "state",
+    "person_id",        # cross-cycle person key — see utils.assign_person_ids()
+    "state_filer_id",   # committee/filer ID from the state system (joins to transactions)
     "candidate_name",
     "candidate_first",
     "candidate_last",
@@ -40,7 +44,6 @@ CANDIDATES = [
 
 CONTRIBUTIONS = [
     "state",
-    "state_filer_id",
     "committee_name",
     "contributor_name",
     "amount",
@@ -63,7 +66,6 @@ CONTRIBUTIONS = [
 
 EXPENDITURES = [
     "state",
-    "state_filer_id",
     "committee_name",
     "payee_name",
     "amount",
@@ -85,7 +87,6 @@ EXPENDITURES = [
 
 LOANS_DEBTS = [
     "state",
-    "state_filer_id",
     "committee_name",
     "record_type",
     "counterparty_name",

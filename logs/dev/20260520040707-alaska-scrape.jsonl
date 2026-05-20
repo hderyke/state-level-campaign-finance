@@ -1,0 +1,5 @@
+{"ts": "2026-05-20T08:07:07+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_started", "force": false, "entities": false, "transactions": false}
+{"ts": "2026-05-20T08:08:11+00:00", "state": "alaska", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "CDIncome_2026.csv", "bytes": 9547585, "rows": 34946, "duration_s": 60.31}
+{"ts": "2026-05-20T08:08:33+00:00", "state": "alaska", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "CDExpense_2026.csv", "bytes": 1780163, "rows": 6585, "duration_s": 19.88}
+{"ts": "2026-05-20T08:08:40+00:00", "state": "alaska", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "GRForms_2026.csv", "bytes": 50540, "rows": 185, "duration_s": 3.81}
+{"ts": "2026-05-20T08:08:52+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_completed", "status": "interrupted", "duration_s": 105.6, "files_ok": 3, "files_err": 0, "pages_ok": 0, "pages_err": 0}

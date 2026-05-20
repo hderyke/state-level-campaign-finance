@@ -1,0 +1,4 @@
+{"ts": "2026-05-20T17:24:29+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_started", "force": false, "entities": true, "transactions": false}
+{"ts": "2026-05-20T17:24:31+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "filename": "pac_committees.csv", "bytes": 334368, "rows": 841, "duration_s": 0.46, "ok": 3, "err": 0}
+{"ts": "2026-05-20T17:24:41+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "filename": "pcc_committees.csv", "bytes": 1557922, "rows": 6223, "duration_s": 10.59, "ok": 0, "err": 0}
+{"ts": "2026-05-20T17:24:41+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_completed", "status": "completed", "duration_s": 12.6, "files_ok": 0, "files_err": 0, "pages_ok": 3, "pages_err": 0}

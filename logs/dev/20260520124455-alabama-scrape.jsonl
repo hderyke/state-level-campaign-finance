@@ -1,0 +1,3 @@
+{"ts": "2026-05-20T16:44:55+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_started", "force": true, "entities": true, "transactions": false}
+{"ts": "2026-05-20T16:44:56+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pac", "page_id": "1376", "duration_s": 0.1}
+{"ts": "2026-05-20T16:44:56+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_completed", "status": "interrupted", "duration_s": 1.0, "files_ok": 0, "files_err": 0, "pages_ok": 0, "pages_err": 0}

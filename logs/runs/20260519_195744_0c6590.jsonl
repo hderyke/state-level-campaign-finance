@@ -1,0 +1,9 @@
+{"ts": "2026-05-19T23:57:44+00:00", "state": null, "operation": "orc", "type": "run_started", "run_id": "20260519_195744_0c6590", "command": "rescrape", "states": ["AK"]}
+{"ts": "2026-05-19T23:57:44+00:00", "state": "alaska", "operation": "orc", "type": "state_started"}
+{"ts": "2026-05-19T23:57:44+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_started", "force": true, "update_transactions": false, "update_entities": false}
+{"ts": "2026-05-20T00:20:26+00:00", "state": "alaska", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "gr_details.csv", "bytes": 201, "rows": 0, "duration_s": 0.0}
+{"ts": "2026-05-20T00:20:35+00:00", "state": "alaska", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "CDIncome_2008.csv", "bytes": 0, "rows": -1, "duration_s": 3.41}
+{"ts": "2026-05-20T00:20:39+00:00", "state": "alaska", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "CDIncome_2009.csv", "bytes": 0, "rows": -1, "duration_s": 3.25}
+{"ts": "2026-05-20T00:20:43+00:00", "state": "alaska", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "CDIncome_2010.csv", "bytes": 0, "rows": -1, "duration_s": 3.16}
+{"ts": "2026-05-20T00:20:43+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_completed", "status": "interrupted", "duration_s": 1379.0, "files_ok": 3, "files_err": 0, "pages_ok": 0, "pages_err": 0}
+{"ts": "2026-05-20T00:20:43+00:00", "state": null, "operation": "orc", "type": "run_completed", "run_id": "20260519_195744_0c6590", "status": "interrupted", "duration_s": 1379.3}

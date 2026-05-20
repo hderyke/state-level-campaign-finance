@@ -1,0 +1,2 @@
+{"ts": "2026-05-20T07:55:17+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_started", "force": false, "entities": true, "transactions": false}
+{"ts": "2026-05-20T07:55:19+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_completed", "status": "interrupted", "duration_s": 2.8, "files_ok": 0, "files_err": 0, "pages_ok": 0, "pages_err": 0}

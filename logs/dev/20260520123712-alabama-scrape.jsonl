@@ -1,0 +1,5 @@
+{"ts": "2026-05-20T16:37:12+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_started", "force": false, "entities": true, "transactions": false}
+{"ts": "2026-05-20T16:37:24+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "2560", "duration_s": 0.14}
+{"ts": "2026-05-20T16:37:24+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "7081", "duration_s": 0.1}
+{"ts": "2026-05-20T16:37:24+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "4987", "duration_s": 0.1}
+{"ts": "2026-05-20T16:37:25+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_completed", "status": "completed", "duration_s": 12.6, "files_ok": 0, "files_err": 0, "pages_ok": 3, "pages_err": 0}

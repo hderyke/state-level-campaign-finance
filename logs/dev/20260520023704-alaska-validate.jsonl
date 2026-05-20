@@ -1,0 +1,2 @@
+{"ts": "2026-05-20T06:37:04+00:00", "state": "alaska", "operation": "validate", "type": "validate_started"}
+{"ts": "2026-05-20T06:37:16+00:00", "state": "alaska", "operation": "validate", "type": "validate_completed", "status": "passed", "duration_s": 11.9, "tier1_failures": 0, "tier2_warnings": 4, "drift_warnings": 0}

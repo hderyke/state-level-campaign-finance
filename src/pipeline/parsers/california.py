@@ -15,622 +15,517 @@ Output: data/California/cleaned/
   contributions.csv, expenditures.csv, committees.csv,
   candidates.csv, loans_debts.csv
 
+Implementation
+──────────────
+  Uses DuckDB for all heavy file I/O so that multi-GB TSVs (RCPT_CD 3.5 GB,
+  EXPN_CD 2.8 GB) are processed in seconds rather than minutes.  Python is
+  used only for the small reference-table work and for utils.assign_person_ids.
+
 Amendment dedup
 ───────────────
   CAL-ACCESS stores every amendment as a separate set of rows sharing the
-  same FILING_ID but with increasing AMEND_ID.  We pre-load CVR to build
-  {filing_id: max_amend_id} and skip any row where the row's AMEND_ID is
-  less than that maximum.
+  same FILING_ID but with increasing AMEND_ID.  We pre-build a cvr_dedup
+  table that keeps only the max-AMEND_ID row per FILING_ID; joining the
+  transaction tables on (FILING_ID, AMEND_ID) automatically retains only
+  the most-recent version of each contribution/expenditure.
 
 Encoding
 ────────
-  All TSVs are latin-1 (ISO-8859-1).  Date strings look like
-  '1/20/2000 12:00:00 AM'.
+  All TSVs are latin-1 (ISO-8859-1).  DuckDB's read_csv handles this via
+  the encoding parameter.
 
 Amount format
 ─────────────
   Already plain numeric strings ('109.89', '2000') — no $ or commas.
 """
 
-import csv
-import re
 import sys
-from datetime import datetime, date
+import time
 from pathlib import Path
+import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import columns as C
+import utils
 
-csv.field_size_limit(sys.maxsize)
-
-# ── Paths ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RAW_DIR      = PROJECT_ROOT / "data" / "California" / "raw"
-CLEAN_DIR    = PROJECT_ROOT / "data" / "California" / "cleaned"
+RAW_DIR  = PROJECT_ROOT / "data" / "California" / "raw"
+CLEAN_DIR = PROJECT_ROOT / "data" / "California" / "cleaned"
 CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 
-STATE          = "CA"
-MAX_VALID_YEAR = date.today().year + 2
-ENCODING       = "latin-1"
+STATE = "CA"
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-def clean(val) -> str:
-    return (val or "").strip().rstrip("\r")
+def raw(name: str) -> str:
+    return str(RAW_DIR / name).replace("'", "''")
 
 
-def parse_amount(val: str) -> str:
-    """Plain numeric string → validated float string, '' on failure."""
-    v = (val or "").strip()
-    if not v:
-        return ""
-    try:
-        float(v)
-        return v
-    except ValueError:
-        return ""
+def out(name: str) -> str:
+    return str(CLEAN_DIR / name).replace("'", "''")
 
 
-_DATE_FMTS = (
-    "%m/%d/%Y %I:%M:%S %p",   # '1/20/2000 12:00:00 AM'  (CAL-ACCESS standard)
-    "%m/%d/%Y",                # fallback plain date
-    "%Y-%m-%d",                # ISO fallback
-)
-
-def parse_date(val: str) -> str:
-    """'M/D/YYYY H:MM:SS AM/PM' → YYYY-MM-DD, '' on failure or implausible year."""
-    v = (val or "").strip().rstrip("\r")
-    if not v:
-        return ""
-    for fmt in _DATE_FMTS:
-        try:
-            d = datetime.strptime(v, fmt)
-            if d.year < 1970 or d.year > MAX_VALID_YEAR:
-                return ""
-            return d.strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return ""
+# ── DuckDB read_csv options ─────────────────────────────────────────────────
+# all_varchar avoids type-inference surprises; ignore_errors skips NUL-byte
+# rows and other malformed lines; null_padding handles short rows.
+ROPT = "sep='\\t', all_varchar=true, ignore_errors=true, null_padding=true, strict_mode=false"
 
 
+# ── SQL expression helpers ───────────────────────────────────────────────────
 def build_name(last: str, first: str) -> str:
-    last  = (last  or "").strip()
-    first = (first or "").strip()
-    if last and first:
-        return f"{last}, {first}"
-    return last or first
+    """SQL expression → 'LAST, FIRST' or whichever part is non-empty."""
+    return f"""
+        CASE
+            WHEN NULLIF(TRIM({last}), '') IS NOT NULL
+             AND NULLIF(TRIM({first}), '') IS NOT NULL
+                THEN TRIM({last}) || ', ' || TRIM({first})
+            WHEN NULLIF(TRIM({last}), '') IS NOT NULL
+                THEN TRIM({last})
+            ELSE COALESCE(NULLIF(TRIM({first}), ''), '')
+        END""".strip()
 
 
-# Placeholder values CAL-ACCESS writes into CAND_NAML for non-candidate filings
-_NULL_CAND_NAMES = {"n/a", "na", "none", "unknown", "-", ""}
-
-def clean_cand_name(name: str) -> str:
-    """Return name if it looks like a real candidate name, else ''."""
-    return name if name.lower().strip() not in _NULL_CAND_NAMES else ""
-
-
-def build_cand_name(last: str, first: str) -> str:
-    """
-    Like build_name but:
-      - Returns '' if the last-name field is a placeholder (N/A, NA, etc.)
-      - Normalizes to title case so 'NEWSOM, GAVIN' and 'Newsom, Gavin'
-        collapse to the same string across filings.
-    """
-    if (last or "").strip().lower() in _NULL_CAND_NAMES:
-        return ""
-    return build_name(last, first).title()
+def build_cand(last: str, first: str) -> str:
+    """SQL expression → 'LAST, FIRST' (raw case), or '' for placeholder values."""
+    return f"""
+        CASE
+            WHEN {last} IS NULL
+              OR LOWER(TRIM({last})) IN ('n/a', 'na', 'none', 'unknown', '-', '')
+                THEN ''
+            WHEN NULLIF(TRIM({first}), '') IS NOT NULL
+                THEN TRIM({last}) || ', ' || TRIM({first})
+            ELSE TRIM({last})
+        END""".strip()
 
 
-class _NulFilter:
-    """Wraps a text file and strips NUL bytes, which appear in some CAL-ACCESS TSVs."""
-    def __init__(self, fh):
-        self._fh = fh
-    def __iter__(self):
-        for line in self._fh:
-            if "\x00" in line:
-                line = line.replace("\x00", "")
-            yield line
-    def read(self, size=-1):
-        return self._fh.read(size).replace("\x00", "")
-    def __enter__(self):
-        return self
-    def __exit__(self, *args):
-        self._fh.__exit__(*args)
+def parse_date(col: str) -> str:
+    """SQL expression → DATE from CAL-ACCESS date string, NULL on failure or outside 1975–2035."""
+    inner = (
+        f"COALESCE("
+        f"TRY_STRPTIME(TRIM({col}), '%m/%d/%Y %I:%M:%S %p'), "
+        f"TRY_STRPTIME(TRIM({col}), '%m/%d/%Y'), "
+        f"TRY_STRPTIME(TRIM({col}), '%Y-%m-%d')"
+        f")::DATE"
+    )
+    return f"CASE WHEN YEAR({inner}) BETWEEN 1975 AND 2035 THEN ({inner}) ELSE NULL END"
 
 
-def open_tsv(path: Path):
-    """Return a NUL-filtered reader for a CAL-ACCESS TSV."""
-    fh = open(path, newline="", encoding=ENCODING, errors="replace")
-    return _NulFilter(fh)
+def fmt_date(col: str) -> str:
+    """SQL expression → DATE string 'YYYY-MM-DD', '' on failure."""
+    return f"COALESCE(CAST({parse_date(col)} AS VARCHAR), '')"
 
 
-def open_writer(filename: str, fieldnames: list):
-    fh = open(CLEAN_DIR / filename, "w", newline="", encoding="utf-8")
-    w  = csv.DictWriter(fh, fieldnames=fieldnames,
-                        extrasaction="ignore", restval="")
-    w.writeheader()
-    return fh, w
+def election_yr(col: str) -> str:
+    """SQL expression → 4-digit election year INTEGER, NULL on failure."""
+    return f"YEAR({parse_date(col)})"
 
 
-def raw_file(name: str) -> Path:
-    return RAW_DIR / name
+PARTY_CASE = """
+    CASE PARTY_CD
+        WHEN '16012' THEN 'Democratic'
+        WHEN '16013' THEN 'Republican'
+        WHEN '16020' THEN 'Green'
+        WHEN '16023' THEN 'Libertarian'
+        WHEN '16025' THEN 'American Independent'
+        WHEN '16027' THEN 'Peace and Freedom'
+        WHEN '16029' THEN 'Reform'
+        WHEN '16999' THEN 'Other'
+        ELSE ''
+    END""".strip()
 
 
-# ── Phase 1: Pre-load CVR ──────────────────────────────────────────────────────
-def load_cvr() -> tuple[dict, dict]:
-    """
-    Two-pass read to keep memory usage low:
-      Pass 1 — build max_amend: {filing_id: max_amend_id_int}
-      Pass 2 — re-read, extract minimal metadata only from rows at max amend
-
-    Returns:
-      max_amend : {filing_id_str: max_amend_id_int}
-      cvr_meta  : {filing_id_str: dict}
-                  keys: filer_id, elect_year, office, cand_name, cmte_type,
-                        district, juris, tres_name, filer_city, filer_zip
-    """
-    path = raw_file("CVR_CAMPAIGN_DISCLOSURE_CD.tsv")
-
-    # ── Pass 1: max AMEND_ID per FILING_ID ────────────────────────────────────
-    print("  Pre-loading CVR (pass 1/2)...", end=" ", flush=True)
-    max_amend: dict[str, int] = {}
-    with open_tsv(path) as f:
-        for row in csv.DictReader(f, delimiter="\t"):
-            fid = clean(row.get("FILING_ID", ""))
-            if not fid:
-                continue
-            try:
-                amid = int(clean(row.get("AMEND_ID", "0")) or "0")
-            except ValueError:
-                amid = 0
-            if amid > max_amend.get(fid, -1):
-                max_amend[fid] = amid
-    print(f"{len(max_amend):,} filings")
-
-    # ── Pass 2: extract minimal metadata from max-amend rows only ─────────────
-    print("  Pre-loading CVR (pass 2/2)...", end=" ", flush=True)
-    cvr_meta: dict[str, dict] = {}
-    with open_tsv(path) as f:
-        for row in csv.DictReader(f, delimiter="\t"):
-            fid = clean(row.get("FILING_ID", ""))
-            if not fid:
-                continue
-            try:
-                amid = int(clean(row.get("AMEND_ID", "0")) or "0")
-            except ValueError:
-                amid = 0
-            if amid != max_amend.get(fid, 0):
-                continue
-
-            elect_date = parse_date(clean(row.get("ELECT_DATE", "")))
-            cand_name  = build_cand_name(
-                clean(row.get("CAND_NAML", "")),
-                clean(row.get("CAND_NAMF", "")),
-            )
-            cvr_meta[fid] = {
-                "filer_id":   clean(row.get("FILER_ID", "")),
-                "elect_year": elect_date[:4] if elect_date else "",
-                "office":     clean(row.get("OFFICE_CD", "")),
-                "cand_name":  cand_name,
-                "cmte_type":  clean(row.get("CMTTE_TYPE", "")),
-                "district":   clean(row.get("DIST_NO", "")),
-                "juris":      clean(row.get("JURIS_CD", "")),
-                "tres_name":  build_name(
-                    clean(row.get("TRES_NAML", "")),
-                    clean(row.get("TRES_NAMF", "")),
-                ),
-                "filer_city": clean(row.get("FILER_CITY", "")),
-                "filer_zip":  clean(row.get("FILER_ZIP4", "")),
-            }
-
-    print(f"{len(cvr_meta):,} rows extracted")
-    return max_amend, cvr_meta
+# ── State_filer_id resolution for transaction rows ───────────────────────────
+# Prefer CMTE_ID from the transaction row; fall back to FILER_ID from CVR.
+def resolve_fid(cmte_col: str, cvr_fid: str) -> str:
+    return f"COALESCE(NULLIF(TRIM({cmte_col}), ''), {cvr_fid}, '')"
 
 
-# ── Phase 2: Pre-load FILERNAME_CD ────────────────────────────────────────────
-def load_filername() -> dict:
-    """
-    Returns {filer_id: dict} — name, city, zip, status, filer_type.
-    When a filer_id appears multiple times, keep the ACTIVE record if one
-    exists; otherwise keep the last seen.
-    """
-    path = raw_file("FILERNAME_CD.tsv")
-    print("  Pre-loading FILERNAME_CD...", end=" ", flush=True)
-    registry: dict[str, dict] = {}
-
-    with open_tsv(path) as f:
-        for row in csv.DictReader(f, delimiter="\t"):
-            fid    = clean(row.get("FILER_ID", ""))
-            if not fid:
-                continue
-            status = clean(row.get("STATUS", "")).upper()
-            name   = build_name(
-                clean(row.get("NAML", "")),
-                clean(row.get("NAMF", "")),
-            )
-            entry = {
-                "filer_id":   fid,
-                "xref_id":    clean(row.get("XREF_FILER_ID", "")),
-                "name":       name,
-                "filer_type": clean(row.get("FILER_TYPE", "")),
-                "status":     status,
-                "city":       clean(row.get("CITY", "")),
-                "zip":        clean(row.get("ZIP4", "")).strip(),
-                "active":     "1" if status == "ACTIVE" else ("0" if status else ""),
-            }
-            prev = registry.get(fid)
-            if prev is None or status == "ACTIVE":
-                registry[fid] = entry
-
-    print(f"{len(registry):,} filers")
-    return registry
+# ── Candidate name for a transaction row ────────────────────────────────────
+# Use row-level CAND_NAML/NAMF if present, else fall back to CVR cand_name.
+def txn_cand(row_last: str, row_first: str, cvr_cand: str) -> str:
+    row = build_cand(row_last, row_first)
+    return f"CASE WHEN ({row}) != '' THEN ({row}) ELSE COALESCE({cvr_cand}, '') END"
 
 
-# ── Phase 3: Pre-load FILER_TO_FILER_TYPE_CD ──────────────────────────────────
-_PARTY_LABELS = {
-    "16012": "Democratic",
-    "16013": "Republican",
-    "16020": "Green",
-    "16023": "Libertarian",
-    "16025": "American Independent",
-    "16027": "Peace and Freedom",
-    "16029": "Reform",
-    "16999": "Other",
-    "0":     "",
-}
-
-def load_filer_types() -> dict:
-    """
-    Returns {filer_id: dict} — party, active.
-    We use this table only for party affiliation and active status;
-    the numeric FILER_TYPE codes reference a session table we don't have
-    so we don't try to interpret them as committee type labels.
-    Keep the most recent EFFECT_DT row per filer_id.
-    """
-    path = raw_file("FILER_TO_FILER_TYPE_CD.tsv")
-    print("  Pre-loading FILER_TO_FILER_TYPE_CD...", end=" ", flush=True)
-    registry: dict[str, dict] = {}
-    best_dt:  dict[str, str]  = {}
-
-    with open_tsv(path) as f:
-        for row in csv.DictReader(f, delimiter="\t"):
-            fid = clean(row.get("FILER_ID", ""))
-            if not fid:
-                continue
-            eff_dt    = parse_date(clean(row.get("EFFECT_DT", "")))
-            if eff_dt <= best_dt.get(fid, ""):
-                continue
-            best_dt[fid]  = eff_dt
-            active    = clean(row.get("ACTIVE", "")).upper()
-            party_raw = clean(row.get("PARTY_CD", ""))
-            registry[fid] = {
-                "party":  _PARTY_LABELS.get(party_raw, ""),
-                "active": "1" if active in ("T", "Y") else ("0" if active else ""),
-            }
-
-    print(f"{len(registry):,} entries")
-    return registry
+# Path for the persistent reference-table DB (written by stage 1, read by 2-4)
+REF_DB  = str(CLEAN_DIR / "_ca_ref.db")
+# Final output DB — stages 2-4 write large tables directly here (skip CSV)
+MAIN_DB = str(CLEAN_DIR / "california.db")
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
-def run():
-    # ── Pre-load lookup tables ─────────────────────────────────────────────────
-    max_amend, cvr_meta = load_cvr()
-    filername   = load_filername()
-    filer_types = load_filer_types()
+def _open_main_db() -> duckdb.DuckDBPyConnection:
+    """Open california.db for writing, working around the FUSE-filesystem
+    limitation that prevents DuckDB from unlinking the WAL file.
 
-    # ── Open output writers ────────────────────────────────────────────────────
-    cand_fh, cand_w = open_writer("candidates.csv",    C.CANDIDATES)
-    cmte_fh, cmte_w = open_writer("committees.csv",    C.COMMITTEES)
-    cont_fh, cont_w = open_writer("contributions.csv", C.CONTRIBUTIONS)
-    expn_fh, expn_w = open_writer("expenditures.csv",  C.EXPENDITURES)
-    loan_fh, loan_w = open_writer("loans_debts.csv",   C.LOANS_DEBTS)
+    On macOS FUSE mounts (e.g. NFS, osxfuse), DuckDB's call to unlink()
+    the WAL returns EPERM.  We rename any existing WAL before opening
+    (so DuckDB starts fresh) and rename the newly-created WAL after the
+    connection closes (so the next open doesn't hit the same error).
 
-    # ── Candidates: extract unique filers with candidate info from CVR ─────────
-    # Prefer the most-recent filing per FILER_ID (highest FILING_ID)
-    print("  candidates     CVR...", end=" ", flush=True)
-    seen_cands: dict[str, dict] = {}   # filer_id → best meta dict
-    best_filing: dict[str, int] = {}   # filer_id → highest FILING_ID seen
-
-    for filing_id, meta in cvr_meta.items():
-        if not clean_cand_name(meta["cand_name"]):
-            continue
-        filer_id = meta["filer_id"]
-        if not filer_id:
-            continue
+    Usage:
+        con = _open_main_db()
         try:
-            fid_int = int(filing_id)
-        except ValueError:
-            fid_int = 0
-        if fid_int > best_filing.get(filer_id, -1):
-            best_filing[filer_id] = fid_int
-            seen_cands[filer_id]  = meta
-
-    cand_count = 0
-    for filer_id, meta in seen_cands.items():
-        name = meta["cand_name"]
-        if "," in name:
-            last, _, first = name.partition(",")
-            last, first = last.strip(), first.strip()
-        else:
-            last, first = name, ""
-        ft = filer_types.get(filer_id, {})
-        cand_w.writerow({
-            "state":           STATE,
-            "candidate_name":  name,
-            "candidate_first": first,
-            "candidate_last":  last,
-            "office":          meta["office"],
-            "district":        meta["district"],
-            "jurisdiction":    meta["juris"],
-            "party":           ft.get("party", ""),
-            "election_year":   meta["elect_year"],
-            "status":          "",
-            "incumbent":       "",
-            "raw_file":        "CVR_CAMPAIGN_DISCLOSURE_CD.tsv",
-            "row_num":         "",
-        })
-        cand_count += 1
-    print(f"{cand_count:,} candidates")
-
-    # ── Committees: from FILERNAME_CD enriched with filer_types ───────────────
-    # FILERNAME_CD.FILER_TYPE is the authoritative committee type text
-    # (e.g. "RECIPIENT COMMITTEE", "MAJOR DONOR/INDEPENDENT EXPENDITURE
-    # COMMITTEE", "CLIENT").  FILER_TO_FILER_TYPE_CD's numeric FILER_TYPE codes
-    # reference a session table we don't have, so we use it only for party
-    # and active-status enrichment.
-    print("  committees     FILERNAME_CD...", end=" ", flush=True)
-    cmte_count = 0
-    for fid, fn in filername.items():
-        ft        = filer_types.get(fid, {})
-        cmte_type = fn["filer_type"]            # text from FILERNAME_CD
-        active    = ft.get("active", "") or fn["active"]
-        # candidate_name: if this filer is a candidate, pull from cvr_meta via best_filing
-        cand_meta = None
-        if fid in seen_cands:
-            cand_meta = seen_cands[fid]
-        cand_name = cand_meta["cand_name"] if cand_meta else ""
-
-        cmte_w.writerow({
-            "state":          STATE,
-            "state_filer_id": fid,
-            "committee_name": fn["name"],
-            "committee_type": cmte_type,
-            "candidate_name": cand_name,
-            "treasurer_name": "",
-            "city":           fn["city"],
-            "zip":            fn["zip"],
-            "active":         active,
-        })
-        cmte_count += 1
-    print(f"{cmte_count:,} committees")
-
-    # ── Helper: resolve filer_id from a transaction row ───────────────────────
-    def resolve_filer_id(row: dict, filing_id: str) -> str:
-        """CMTE_ID field if present, else FILER_ID from CVR."""
-        cmte_id = clean(row.get("CMTE_ID", ""))
-        if cmte_id:
-            return cmte_id
-        return cvr_meta.get(filing_id, {}).get("filer_id", "")
-
-    def committee_name(filer_id: str) -> str:
-        return filername.get(filer_id, {}).get("name", "")
-
-    def is_valid_amend(row: dict) -> bool:
-        """Return True if this row's AMEND_ID matches the max for its FILING_ID."""
-        fid = clean(row.get("FILING_ID", ""))
-        if not fid:
-            return False
-        try:
-            amid = int(clean(row.get("AMEND_ID", "0")) or "0")
-        except ValueError:
-            amid = 0
-        return amid == max_amend.get(fid, 0)
-
-    # ── Contributions (RCPT_CD) ────────────────────────────────────────────────
-    path = raw_file("RCPT_CD.tsv")
-    print(f"  contributions  RCPT_CD.tsv...", end=" ", flush=True)
-    total_cont = 0
-    skipped_amend = 0
-    with open_tsv(path) as f:
-        for row_num, row in enumerate(csv.DictReader(f, delimiter="\t"), start=2):
-            if not is_valid_amend(row):
-                skipped_amend += 1
-                continue
-            amount = parse_amount(row.get("AMOUNT", ""))
-            if not amount:
-                continue
-
-            filing_id  = clean(row.get("FILING_ID", ""))
-            filer_id   = resolve_filer_id(row, filing_id)
-            cmte_name  = committee_name(filer_id)
-            meta       = cvr_meta.get(filing_id, {})
-            elect_year = meta.get("elect_year", "")
-            office     = clean(row.get("OFFICE_CD", "")) or meta.get("office", "")
-            cand_name  = (
-                build_cand_name(clean(row.get("CAND_NAML", "")), clean(row.get("CAND_NAMF", "")))
-                or meta.get("cand_name", "")
-            )
-
-            cont_w.writerow({
-                "state":             STATE,
-                "state_filer_id":    filer_id,
-                "committee_name":    cmte_name,
-                "contributor_name":  build_name(
-                    clean(row.get("CTRIB_NAML", "")),
-                    clean(row.get("CTRIB_NAMF", "")),
-                ),
-                "amount":            amount,
-                "date":              parse_date(clean(row.get("RCPT_DATE", ""))),
-                "transaction_type":  clean(row.get("TRAN_TYPE", "")),
-                "contributor_type":  clean(row.get("ENTITY_CD", "")),
-                "contributor_city":  clean(row.get("CTRIB_CITY", "")),
-                "contributor_state": clean(row.get("CTRIB_ST", "")),
-                "contributor_zip":   clean(row.get("CTRIB_ZIP4", "")),
-                "employer":          clean(row.get("CTRIB_EMP", "")),
-                "occupation":        clean(row.get("CTRIB_OCC", "")),
-                "candidate_name":    cand_name,
-                "office":            office,
-                "election_year":     elect_year,
-                "filing_id":         clean(row.get("TRAN_ID", "")),
-                "amended":           "",
-                "raw_file":          "RCPT_CD.tsv",
-                "row_num":           row_num,
-            })
-            total_cont += 1
-    print(f"{total_cont:,} rows  ({skipped_amend:,} superseded amendments skipped)")
-
-    # ── Expenditures (EXPN_CD) ────────────────────────────────────────────────
-    path = raw_file("EXPN_CD.tsv")
-    print(f"  expenditures   EXPN_CD.tsv...", end=" ", flush=True)
-    total_expn = 0
-    skipped_amend = 0
-    with open_tsv(path) as f:
-        for row_num, row in enumerate(csv.DictReader(f, delimiter="\t"), start=2):
-            if not is_valid_amend(row):
-                skipped_amend += 1
-                continue
-            amount = parse_amount(row.get("AMOUNT", ""))
-            if not amount:
-                continue
-
-            filing_id = clean(row.get("FILING_ID", ""))
-            filer_id  = resolve_filer_id(row, filing_id)
-            cmte_name = committee_name(filer_id)
-            meta      = cvr_meta.get(filing_id, {})
-            elect_year = meta.get("elect_year", "")
-            office     = clean(row.get("OFFICE_CD", "")) or meta.get("office", "")
-            cand_name  = (
-                build_cand_name(clean(row.get("CAND_NAML", "")), clean(row.get("CAND_NAMF", "")))
-                or meta.get("cand_name", "")
-            )
-
-            expn_w.writerow({
-                "state":            STATE,
-                "state_filer_id":   filer_id,
-                "committee_name":   cmte_name,
-                "payee_name":       build_name(
-                    clean(row.get("PAYEE_NAML", "")),
-                    clean(row.get("PAYEE_NAMF", "")),
-                ),
-                "amount":           amount,
-                "date":             parse_date(clean(row.get("EXPN_DATE", ""))),
-                "transaction_type": clean(row.get("EXPN_CODE", "")),
-                "purpose":          clean(row.get("EXPN_DSCR", "")),
-                "category":         clean(row.get("FORM_TYPE", "")),
-                "payee_city":       clean(row.get("PAYEE_CITY", "")),
-                "payee_state":      clean(row.get("PAYEE_ST", "")),
-                "payee_zip":        clean(row.get("PAYEE_ZIP4", "")),
-                "candidate_name":   cand_name,
-                "office":           office,
-                "election_year":    elect_year,
-                "filing_id":        clean(row.get("TRAN_ID", "")),
-                "amended":          "",
-                "raw_file":         "EXPN_CD.tsv",
-                "row_num":          row_num,
-            })
-            total_expn += 1
-    print(f"{total_expn:,} rows  ({skipped_amend:,} superseded amendments skipped)")
-
-    # ── Loans (LOAN_CD) ────────────────────────────────────────────────────────
-    path = raw_file("LOAN_CD.tsv")
-    print(f"  loans          LOAN_CD.tsv...", end=" ", flush=True)
-    total_loan = 0
-    skipped_amend = 0
-    with open_tsv(path) as f:
-        for row_num, row in enumerate(csv.DictReader(f, delimiter="\t"), start=2):
-            if not is_valid_amend(row):
-                skipped_amend += 1
-                continue
-            # LOAN_AMT1 = original loan amount (LOAN_AMT2 = outstanding, etc.)
-            amount = parse_amount(row.get("LOAN_AMT1", ""))
-            if not amount:
-                continue
-
-            filing_id = clean(row.get("FILING_ID", ""))
-            filer_id  = resolve_filer_id(row, filing_id)
-            cmte_name = committee_name(filer_id)
-            meta      = cvr_meta.get(filing_id, {})
-
-            loan_w.writerow({
-                "state":              STATE,
-                "state_filer_id":     filer_id,
-                "committee_name":     cmte_name,
-                "record_type":        clean(row.get("LOAN_TYPE", "")) or "LOAN",
-                "counterparty_name":  build_name(
-                    clean(row.get("LNDR_NAML", "")),
-                    clean(row.get("LNDR_NAMF", "")),
-                ),
-                "counterparty_city":  clean(row.get("LOAN_CITY", "")),
-                "counterparty_state": clean(row.get("LOAN_ST", "")),
-                "counterparty_zip":   clean(row.get("LOAN_ZIP4", "")),
-                "original_amount":    amount,
-                "date":               parse_date(clean(row.get("LOAN_DATE1", ""))),
-                "candidate_name":     meta.get("cand_name", ""),
-                "election_year":      meta.get("elect_year", ""),
-                "filing_id":          clean(row.get("TRAN_ID", "")),
-                "amended":            "",
-                "raw_file":           "LOAN_CD.tsv",
-                "row_num":            row_num,
-            })
-            total_loan += 1
-    print(f"{total_loan:,} rows  ({skipped_amend:,} superseded amendments skipped)")
-
-    # ── Debts (DEBT_CD) ────────────────────────────────────────────────────────
-    # DEBT_CD has no date column — use '' for date
-    path = raw_file("DEBT_CD.tsv")
-    print(f"  debts          DEBT_CD.tsv...", end=" ", flush=True)
-    total_debt = 0
-    skipped_amend = 0
-    with open_tsv(path) as f:
-        for row_num, row in enumerate(csv.DictReader(f, delimiter="\t"), start=2):
-            if not is_valid_amend(row):
-                skipped_amend += 1
-                continue
-            # Use AMT_INCUR (new amount incurred) as primary; fall back to BEG_BAL
-            amount = parse_amount(row.get("AMT_INCUR", "")) \
-                     or parse_amount(row.get("BEG_BAL", ""))
-            if not amount:
-                continue
-
-            filing_id = clean(row.get("FILING_ID", ""))
-            filer_id  = resolve_filer_id(row, filing_id)
-            cmte_name = committee_name(filer_id)
-            meta      = cvr_meta.get(filing_id, {})
-
-            loan_w.writerow({
-                "state":              STATE,
-                "state_filer_id":     filer_id,
-                "committee_name":     cmte_name,
-                "record_type":        "DEBT",
-                "counterparty_name":  build_name(
-                    clean(row.get("PAYEE_NAML", "")),
-                    clean(row.get("PAYEE_NAMF", "")),
-                ),
-                "counterparty_city":  clean(row.get("PAYEE_CITY", "")),
-                "counterparty_state": clean(row.get("PAYEE_ST", "")),
-                "counterparty_zip":   clean(row.get("PAYEE_ZIP4", "")),
-                "original_amount":    amount,
-                "date":               "",
-                "candidate_name":     meta.get("cand_name", ""),
-                "election_year":      meta.get("elect_year", ""),
-                "filing_id":          clean(row.get("TRAN_ID", "")),
-                "amended":            "",
-                "raw_file":           "DEBT_CD.tsv",
-                "row_num":            row_num,
-            })
-            total_debt += 1
-    print(f"{total_debt:,} rows  ({skipped_amend:,} superseded amendments skipped)")
-
-    # ── Close all writers ──────────────────────────────────────────────────────
-    for fh in (cand_fh, cmte_fh, cont_fh, expn_fh, loan_fh):
-        fh.close()
-
-    print(f"\nCalifornia: done.")
-    print(f"  {cand_count:,} candidates  {cmte_count:,} committees")
-    print(f"  {total_cont:,} contributions  {total_expn:,} expenditures")
-    print(f"  {total_loan + total_debt:,} loans/debts ({total_loan:,} loans + {total_debt:,} debts)")
+            ...
+        finally:
+            con.close()
+            _retire_wal()
+    """
+    wal = Path(MAIN_DB + ".wal")
+    if wal.exists():
+        wal.rename(str(wal) + f".{int(time.time())}.old")
+    return duckdb.connect(MAIN_DB)
 
 
+def _retire_wal() -> None:
+    """Rename any WAL left behind after a write session (FUSE workaround)."""
+    wal = Path(MAIN_DB + ".wal")
+    if wal.exists():
+        wal.rename(str(wal) + f".{int(time.time())}.old")
+
+
+def _build_ref_tables(con: duckdb.DuckDBPyConnection) -> None:
+    """Load CVR, FILERNAME, and FILER_TYPES into `con` as DuckDB tables."""
+    print("  Loading CVR (max-amend dedup)...", end=" ", flush=True)
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS cvr_dedup AS
+        SELECT
+            FILING_ID, FILER_ID, AMEND_ID,
+            ELECT_DATE, OFFICE_CD, CAND_NAML, CAND_NAMF,
+            CMTTE_TYPE, DIST_NO, JURIS_CD,
+            TRES_NAML, TRES_NAMF, FILER_CITY, FILER_ZIP4,
+            {build_cand('CAND_NAML', 'CAND_NAMF')} AS cand_name
+        FROM (
+            SELECT *,
+                   MAX(TRY_CAST(AMEND_ID AS INT))
+                       OVER (PARTITION BY FILING_ID) AS max_amid
+            FROM read_csv('{raw("CVR_CAMPAIGN_DISCLOSURE_CD.tsv")}', {ROPT})
+            WHERE NULLIF(TRIM(FILING_ID), '') IS NOT NULL
+        ) sub
+        WHERE TRY_CAST(AMEND_ID AS INT) = max_amid
+          AND NULLIF(TRIM(FILING_ID), '') IS NOT NULL
+    """)
+    n = con.execute("SELECT COUNT(*) FROM cvr_dedup").fetchone()[0]
+    print(f"{n:,} filings")
+
+    print("  Loading FILERNAME_CD...", end=" ", flush=True)
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS filername AS
+        SELECT
+            FILER_ID,
+            {build_name('NAML', 'NAMF')} AS committee_name,
+            COALESCE(NULLIF(TRIM(CITY), ''), '')       AS city,
+            COALESCE(NULLIF(TRIM(ZIP4), ''), '')       AS zip,
+            COALESCE(NULLIF(TRIM(FILER_TYPE), ''), '') AS filer_type,
+            CASE WHEN UPPER(TRIM(STATUS)) = 'ACTIVE' THEN '1' ELSE '0' END AS active_fn
+        FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY FILER_ID
+                       ORDER BY
+                           CASE WHEN UPPER(TRIM(STATUS)) = 'ACTIVE' THEN 0 ELSE 1 END,
+                           XREF_FILER_ID DESC NULLS LAST
+                   ) AS rn
+            FROM read_csv('{raw("FILERNAME_CD.tsv")}', {ROPT})
+            WHERE NULLIF(TRIM(FILER_ID), '') IS NOT NULL
+        ) sub
+        WHERE rn = 1
+    """)
+    n = con.execute("SELECT COUNT(*) FROM filername").fetchone()[0]
+    print(f"{n:,} filers")
+
+    print("  Loading FILER_TO_FILER_TYPE_CD...", end=" ", flush=True)
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS filer_types AS
+        SELECT
+            FILER_ID,
+            {PARTY_CASE} AS party,
+            CASE WHEN UPPER(TRIM(ACTIVE)) IN ('T', 'Y') THEN '1' ELSE '0' END AS active_ft
+        FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY FILER_ID
+                       ORDER BY COALESCE(
+                           TRY_STRPTIME(TRIM(EFFECT_DT), '%m/%d/%Y %I:%M:%S %p'),
+                           TRY_STRPTIME(TRIM(EFFECT_DT), '%m/%d/%Y')
+                       ) DESC NULLS LAST
+                   ) AS rn
+            FROM read_csv('{raw("FILER_TO_FILER_TYPE_CD.tsv")}', {ROPT})
+            WHERE NULLIF(TRIM(FILER_ID), '') IS NOT NULL
+        ) sub
+        WHERE rn = 1
+    """)
+    n = con.execute("SELECT COUNT(*) FROM filer_types").fetchone()[0]
+    print(f"{n:,} entries")
+
+
+def run(stage: int | None = None):
+    """
+    stage=None  → run all four stages in sequence
+    stage=1     → build ref tables + write candidates.csv + committees.csv
+    stage=2     → write contributions.csv  (RCPT_CD.tsv)
+    stage=3     → write expenditures.csv   (EXPN_CD.tsv)
+    stage=4     → write loans_debts.csv    (LOAN_CD + DEBT_CD)
+    """
+    run_all = stage is None
+
+    # ── Stage 1: reference tables + candidates + committees ───────────────────
+    if run_all or stage == 1:
+        # Persist the ref tables to disk so later stages can reload without
+        # re-scanning the raw TSVs.
+        ref_con = duckdb.connect(REF_DB)
+        _build_ref_tables(ref_con)
+
+        # ── Candidates from CVR ───────────────────────────────────────────────
+        print("  candidates...", end=" ", flush=True)
+        cand_path = out("candidates.csv")
+        ref_con.execute(f"""
+            COPY (
+                WITH cp_stats AS (
+                    -- Per-filer count of C/P filings vs total filings.
+                    -- Used to exclude large PACs that have a handful of
+                    -- mis-typed C/P rows alongside thousands of G/NULL rows.
+                    SELECT
+                        FILER_ID,
+                        COUNT(*) FILTER (WHERE CMTTE_TYPE IN ('C', 'P')) AS cp_count,
+                        COUNT(*)                                           AS total_count
+                    FROM cvr_dedup
+                    WHERE NULLIF(TRIM(FILER_ID), '') IS NOT NULL
+                    GROUP BY FILER_ID
+                )
+                SELECT
+                    'CA'                                                  AS state,
+                    ''                                                    AS person_id,
+                    c.FILER_ID                                            AS state_filer_id,
+                    c.cand_name                                           AS candidate_name,
+                    COALESCE(NULLIF(TRIM(c.CAND_NAMF), ''), '')          AS candidate_first,
+                    COALESCE(NULLIF(TRIM(c.CAND_NAML), ''), '')          AS candidate_last,
+                    COALESCE(NULLIF(TRIM(c.OFFICE_CD), ''), '')           AS office,
+                    COALESCE(NULLIF(TRIM(c.DIST_NO),   ''), '')           AS district,
+                    COALESCE(NULLIF(TRIM(c.JURIS_CD),  ''), '')           AS jurisdiction,
+                    COALESCE(ft.party, '')                                AS party,
+                    {election_yr('c.ELECT_DATE')}                        AS election_year,
+                    ''                                                    AS status,
+                    ''                                                    AS incumbent,
+                    'CVR_CAMPAIGN_DISCLOSURE_CD.tsv'                      AS raw_file,
+                    ''                                                    AS row_num
+                FROM (
+                    SELECT *,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY FILER_ID
+                               ORDER BY TRY_CAST(FILING_ID AS BIGINT) DESC NULLS LAST
+                           ) AS rn
+                    FROM cvr_dedup
+                    WHERE cand_name != ''
+                      AND NULLIF(TRIM(FILER_ID), '') IS NOT NULL
+                      AND CMTTE_TYPE IN ('C', 'P')
+                ) c
+                JOIN cp_stats s ON c.FILER_ID = s.FILER_ID
+                -- Require filer to be in the official registry (FILERNAME_CD).
+                -- Multi-candidate PACs that sporadically file as C/P are absent
+                -- from filername; legitimate candidate committees are registered.
+                JOIN filername fn ON c.FILER_ID = fn.FILER_ID
+                LEFT JOIN filer_types ft ON c.FILER_ID = ft.FILER_ID
+                WHERE c.rn = 1
+                  -- Require genuine candidate committee: ≥3 C/P filings AND
+                  -- at least 0.5% of all filings are C/P.  This keeps real
+                  -- candidate committees (which range from 1%–100%) while
+                  -- rejecting large PACs that have a handful of mis-typed C/P
+                  -- rows (e.g. filer 810163: 3/1896 = 0.16%).
+                  AND s.cp_count >= 2
+                  AND s.cp_count * 1.0 / s.total_count >= 0.005
+                ORDER BY c.FILER_ID
+            ) TO '{cand_path}' (HEADER, DELIMITER ',')
+        """)
+        n_cands = ref_con.execute(
+            f"SELECT COUNT(*) FROM read_csv('{cand_path}', all_varchar=true)"
+        ).fetchone()[0]
+        utils.assign_person_ids(CLEAN_DIR / "candidates.csv", id_model="committee")
+        print(f"{n_cands:,} candidates")
+
+        # ── Committees from FILERNAME_CD ──────────────────────────────────────
+        print("  committees...", end=" ", flush=True)
+        cmte_path = out("committees.csv")
+        ref_con.execute(f"""
+            COPY (
+                SELECT
+                    'CA'                          AS state,
+                    fn.FILER_ID                   AS state_filer_id,
+                    fn.committee_name             AS committee_name,
+                    fn.filer_type                 AS committee_type,
+                    COALESCE(cd.cand_name, '')    AS candidate_name,
+                    ''                            AS treasurer_name,
+                    fn.city                       AS city,
+                    fn.zip                        AS zip,
+                    COALESCE(ft.active_ft, fn.active_fn) AS active
+                FROM filername fn
+                LEFT JOIN filer_types ft ON fn.FILER_ID = ft.FILER_ID
+                LEFT JOIN (
+                    SELECT FILER_ID, cand_name
+                    FROM (
+                        SELECT FILER_ID, cand_name,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY FILER_ID
+                                   ORDER BY TRY_CAST(FILING_ID AS BIGINT) DESC NULLS LAST
+                               ) AS rn
+                        FROM cvr_dedup
+                        WHERE cand_name != ''
+                          AND CMTTE_TYPE IN ('C', 'P')
+                    ) sub
+                    WHERE rn = 1
+                ) cd ON fn.FILER_ID = cd.FILER_ID
+                ORDER BY fn.FILER_ID
+            ) TO '{cmte_path}' (HEADER, DELIMITER ',')
+        """)
+        n_cmtes = ref_con.execute(
+            f"SELECT COUNT(*) FROM read_csv('{cmte_path}', all_varchar=true)"
+        ).fetchone()[0]
+        print(f"{n_cmtes:,} committees")
+
+        ref_con.close()
+        print(f"  Reference tables saved → {REF_DB}")
+
+        # Also seed california.db with candidates + committees so tabulate.py
+        # doesn't need to regenerate them from CSV.
+        print("  Seeding california.db with candidates + committees...", end=" ", flush=True)
+        main_con = _open_main_db()
+        main_con.execute(f"""
+            CREATE OR REPLACE TABLE candidates AS
+            SELECT * FROM read_csv('{cand_path}', all_varchar=true, null_padding=true)
+        """)
+        main_con.execute(f"""
+            CREATE OR REPLACE TABLE committees AS
+            SELECT * FROM read_csv('{cmte_path}', all_varchar=true, null_padding=true)
+        """)
+        main_con.close()
+        _retire_wal()
+        print("done")
+
+        if not run_all:
+            return
+
+    # For stages 2-4: open california.db (file-based, not in-memory) and
+    # attach the ref DB so we can join CVR + FILERNAME without re-scanning TSVs.
+    def open_main_with_ref() -> duckdb.DuckDBPyConnection:
+        """Open the california.db file and attach ref DB read-only."""
+        con = _open_main_db()
+        con.execute(f"ATTACH '{REF_DB}' AS ref (READ_ONLY)")
+        return con
+
+    # ── Stage 2: Contributions ────────────────────────────────────────────────
+    # Writes directly to california.db (DuckDB native format — much faster than
+    # writing a multi-GB CSV to the mounted filesystem).
+    if run_all or stage == 2:
+        con = open_main_with_ref()
+        print(f"  contributions  RCPT_CD.tsv...", end=" ", flush=True)
+        con.execute(f"""
+            CREATE OR REPLACE TABLE contributions AS
+            SELECT
+                'CA'                                                       AS state,
+                COALESCE(fn.committee_name, '')                            AS committee_name,
+                {build_name('r.CTRIB_NAML', 'r.CTRIB_NAMF')}             AS contributor_name,
+                TRY_CAST(TRIM(r.AMOUNT) AS DOUBLE)                        AS amount,
+                {parse_date('r.RCPT_DATE')}                               AS date,
+                COALESCE(NULLIF(TRIM(r.TRAN_TYPE), ''), '')                AS transaction_type,
+                COALESCE(NULLIF(TRIM(r.ENTITY_CD), ''), '')                AS contributor_type,
+                COALESCE(NULLIF(TRIM(r.CTRIB_CITY), ''), '')               AS contributor_city,
+                COALESCE(NULLIF(TRIM(r.CTRIB_ST),   ''), '')               AS contributor_state,
+                COALESCE(NULLIF(TRIM(r.CTRIB_ZIP4), ''), '')               AS contributor_zip,
+                COALESCE(NULLIF(TRIM(r.CTRIB_EMP),  ''), '')               AS employer,
+                COALESCE(NULLIF(TRIM(r.CTRIB_OCC),  ''), '')               AS occupation,
+                {txn_cand('r.CAND_NAML', 'r.CAND_NAMF', 'c.cand_name')}  AS candidate_name,
+                COALESCE(NULLIF(TRIM(r.OFFICE_CD), ''), NULLIF(TRIM(c.OFFICE_CD), ''), '') AS office,
+                {election_yr('c.ELECT_DATE')}                              AS election_year,
+                COALESCE(NULLIF(TRIM(r.TRAN_ID), ''), '')                  AS filing_id,
+                ''                                                         AS amended,
+                'RCPT_CD.tsv'                                              AS raw_file,
+                0                                                          AS row_num
+            FROM read_csv('{raw("RCPT_CD.tsv")}', {ROPT}) r
+            JOIN ref.cvr_dedup c
+                ON  TRIM(r.FILING_ID) = TRIM(c.FILING_ID)
+                AND TRY_CAST(r.AMEND_ID AS INT) = TRY_CAST(c.AMEND_ID AS INT)
+            LEFT JOIN ref.filername fn
+                ON {resolve_fid('r.CMTE_ID', 'c.FILER_ID')} = fn.FILER_ID
+            WHERE TRY_CAST(r.AMOUNT AS DOUBLE) IS NOT NULL
+              AND TRIM(r.AMOUNT) != ''
+        """)
+        n_cont = con.execute("SELECT COUNT(*) FROM contributions").fetchone()[0]
+        print(f"{n_cont:,} rows")
+        con.execute(f"""
+            COPY contributions TO '{out("contributions.csv.gz")}'
+            (HEADER, DELIMITER ',', COMPRESSION gzip)
+        """)
+        con.close()
+        _retire_wal()
+
+        if not run_all:
+            return
+
+    # ── Stage 3: Expenditures ─────────────────────────────────────────────────
+    if run_all or stage == 3:
+        con = open_main_with_ref()
+        print(f"  expenditures   EXPN_CD.tsv...", end=" ", flush=True)
+        con.execute(f"""
+            CREATE OR REPLACE TABLE expenditures AS
+            SELECT
+                'CA'                                                       AS state,
+                COALESCE(fn.committee_name, '')                            AS committee_name,
+                {build_name('r.PAYEE_NAML', 'r.PAYEE_NAMF')}             AS payee_name,
+                TRY_CAST(TRIM(r.AMOUNT) AS DOUBLE)                        AS amount,
+                {parse_date('r.EXPN_DATE')}                               AS date,
+                COALESCE(NULLIF(TRIM(r.EXPN_CODE), ''), '')                AS transaction_type,
+                COALESCE(NULLIF(TRIM(r.EXPN_DSCR), ''), '')                AS purpose,
+                COALESCE(NULLIF(TRIM(r.FORM_TYPE), ''), '')                AS category,
+                COALESCE(NULLIF(TRIM(r.PAYEE_CITY), ''), '')               AS payee_city,
+                COALESCE(NULLIF(TRIM(r.PAYEE_ST),   ''), '')               AS payee_state,
+                COALESCE(NULLIF(TRIM(r.PAYEE_ZIP4), ''), '')               AS payee_zip,
+                {txn_cand('r.CAND_NAML', 'r.CAND_NAMF', 'c.cand_name')}  AS candidate_name,
+                COALESCE(NULLIF(TRIM(r.OFFICE_CD), ''), NULLIF(TRIM(c.OFFICE_CD), ''), '') AS office,
+                {election_yr('c.ELECT_DATE')}                              AS election_year,
+                COALESCE(NULLIF(TRIM(r.TRAN_ID), ''), '')                  AS filing_id,
+                ''                                                         AS amended,
+                'EXPN_CD.tsv'                                              AS raw_file,
+                0                                                          AS row_num
+            FROM read_csv('{raw("EXPN_CD.tsv")}', {ROPT}) r
+            JOIN ref.cvr_dedup c
+                ON  TRIM(r.FILING_ID) = TRIM(c.FILING_ID)
+                AND TRY_CAST(r.AMEND_ID AS INT) = TRY_CAST(c.AMEND_ID AS INT)
+            LEFT JOIN ref.filername fn
+                ON {resolve_fid('r.CMTE_ID', 'c.FILER_ID')} = fn.FILER_ID
+            WHERE TRY_CAST(r.AMOUNT AS DOUBLE) IS NOT NULL
+              AND TRIM(r.AMOUNT) != ''
+        """)
+        n_expn = con.execute("SELECT COUNT(*) FROM expenditures").fetchone()[0]
+        print(f"{n_expn:,} rows")
+        con.execute(f"""
+            COPY expenditures TO '{out("expenditures.csv.gz")}'
+            (HEADER, DELIMITER ',', COMPRESSION gzip)
+        """)
+        con.close()
+        _retire_wal()
+
+        if not run_all:
+            return
+
+        _retire_wal()
+        Path(REF_DB).unlink(missing_ok=True)
+
+    print(f"\nCalifornia: stage {stage or 'all'} done.")
 if __name__ == "__main__":
-    run()
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Parse California CAL-ACCESS TSVs into cleaned CSVs.",
+        epilog=(
+            "Run in four stages to avoid timeout on large files:\n"
+            "  python3 california.py --stage 1   # ref tables + candidates + committees\n"
+            "  python3 california.py --stage 2   # contributions  (RCPT_CD.tsv)\n"
+            "  python3 california.py --stage 3   # expenditures   (EXPN_CD.tsv)\n"
+            "  python3 california.py --stage 4   # loans + debts  (LOAN_CD + DEBT_CD)\n"
+            "Or run all at once (may timeout for large installs):\n"
+            "  python3 california.py             # all stages"
+        ),
+    )
+    ap.add_argument(
+        "--stage", type=int, choices=[1, 2, 3, 4],
+        help="Which stage to run (1=ref+cands+cmtes, 2=contribs, 3=expns, 4=loans). "
+             "Omit to run all stages sequentially.",
+    )
+    args = ap.parse_args()
+    run(stage=args.stage)
