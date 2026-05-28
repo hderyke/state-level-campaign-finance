@@ -22,7 +22,7 @@ from pathlib import Path
 from datetime import datetime, date
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from src.logger import get_logger
+from src.reporting.logger import get_logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import columns as C
@@ -30,7 +30,7 @@ import utils
 
 csv.field_size_limit(sys.maxsize)
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# =============================== Paths ================================
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RAW_DIR      = PROJECT_ROOT / "data" / "Alaska" / "raw"
 CLEAN_DIR    = PROJECT_ROOT / "data" / "Alaska" / "cleaned"
@@ -40,12 +40,14 @@ STATE          = "AK"
 MAX_VALID_YEAR = date.today().year + 2
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ============================== Helpers ===============================
 def clean(val) -> str:
+    """Strip whitespace and coerce None to empty string."""
     return (val or "").strip()
 
 
 def committee_key(name: str) -> str:
+    """Normalize a committee name to a lowercase, punctuation-free key for dedup/matching."""
     name = clean(name).lower()
 
     # normalize punctuation/spacing
@@ -56,6 +58,7 @@ def committee_key(name: str) -> str:
 
 
 def parse_amount(val: str) -> str:
+    """Parse a dollar amount string to a plain numeric string; parentheses become negative. Returns '' on failure."""
     v = (val or "").strip().replace("$", "").replace(",", "")
     if not v:
         return ""
@@ -69,6 +72,7 @@ def parse_amount(val: str) -> str:
 
 
 def parse_date(val: str) -> str:
+    """MM/DD/YYYY or YYYY-MM-DD → YYYY-MM-DD. Returns '' on failure or out-of-range year."""
     v = (val or "").strip()
     if not v:
         return ""
@@ -84,30 +88,29 @@ def parse_date(val: str) -> str:
 
 
 def build_name(last: str, first: str) -> str:
-    last, first = (last or "").strip(), (first or "").strip()
-    if last and first:
-        return f"{last}, {first}"
-    return last or first
-
-
-def invert_name(name: str) -> str:
-    """'First [M] Last' → 'Last, First'. Drops middle initials."""
-    parts = (name or "").strip().split()
-    if len(parts) <= 1:
-        return name.strip()
-    return f"{parts[-1]}, {parts[0]}"
+    """Combine last/first into 'First Last'. Treats 'N/A' first names as absent (Alaska org placeholder)."""
+    last  = (last  or "").strip()
+    first = (first or "").strip()
+    if first.upper() in ("N/A", "NA", "N.A."):
+        first = ""
+    if first and last:
+        return f"{first} {last}"
+    return first or last
 
 
 def normalize_candidate(val: str) -> str:
+    """Strip whitespace from a raw candidate string."""
     return (val or "").strip()
 
 
 def year_from_filename(path: Path) -> str:
+    """Extract the first 4-digit year from a filename, e.g. CDIncome_2022.csv → '2022'."""
     m = re.search(r"(\d{4})", path.name)
     return m.group(1) if m else ""
 
 
 def raw_files(pattern: str) -> list[Path]:
+    """Return non-empty raw files matching a glob pattern, sorted by name."""
     return sorted(
         (f for f in RAW_DIR.glob(pattern) if f.stat().st_size > 0),
         key=lambda p: p.name,
@@ -115,6 +118,7 @@ def raw_files(pattern: str) -> list[Path]:
 
 
 def open_writer(filename: str, fieldnames: list):
+    """Open a gzipped CSV writer in CLEAN_DIR; extra fields are dropped, missing fields default to ''."""
     fh = gzip.open(CLEAN_DIR / filename, "wt", encoding="utf-8", newline="")
     w  = csv.DictWriter(fh, fieldnames=fieldnames,
                         extrasaction="ignore", restval="")
@@ -122,7 +126,7 @@ def open_writer(filename: str, fieldnames: list):
     return fh, w
 
 
-# ── CR detail registry ────────────────────────────────────────────────────────
+# ========================= CR detail registry =========================
 def load_cr_registry() -> dict[str, dict]:
     """
     Returns dict keyed by committee_key(first + " " + last).
@@ -150,11 +154,14 @@ def load_cr_registry() -> dict[str, dict]:
             pass
 
     with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
+        for row_num, row in enumerate(csv.DictReader(f), start=2):
             first = clean(row.get("candidate_first", ""))
             last  = clean(row.get("candidate_last",  ""))
             if not (first or last):
                 continue
+
+            row["_raw_file"] = "cr_details.csv"
+            row["_row_num"]  = row_num
 
             # Primary key: legal first + last (no middle, matches CDIncome filer names)
             _update(committee_key(first + " " + last), row)
@@ -167,7 +174,7 @@ def load_cr_registry() -> dict[str, dict]:
     return registry
 
 
-# ── GR detail registry ────────────────────────────────────────────────────────
+# ========================= GR detail registry =========================
 def load_gr_registry() -> tuple[dict[str, dict], dict[str, dict]]:
     """
     Returns (name_registry, abbr_registry).
@@ -199,10 +206,14 @@ def load_gr_registry() -> tuple[dict[str, dict], dict[str, dict]]:
             pass
 
     with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
+        for row_num, row in enumerate(csv.DictReader(f), start=2):
             name = clean(row.get("group_name", ""))
             if not name:
                 continue
+
+            row["_raw_file"] = "gr_details.csv"
+            row["_row_num"]  = row_num
+
             _update(name_registry, committee_key(name), row)
 
             abbr = clean(row.get("abbreviation", ""))
@@ -211,7 +222,7 @@ def load_gr_registry() -> tuple[dict[str, dict], dict[str, dict]]:
 
     return name_registry, abbr_registry
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ================================ Main ================================
 def run():
     log = get_logger("alaska", "parse")
     t0  = time.perf_counter()
@@ -227,7 +238,7 @@ def run():
 
     try:
         cand_fh, cand_w = open_writer("candidates.csv.gz",    C.CANDIDATES)
-        cmte_fh, cmte_w = open_writer("committees.csv.gz",    C.COMMITTEES)
+        cmte_fh, cmte_w = open_writer("committees.csv.gz",    [c for c in C.COMMITTEES if c != "active"])
         cont_fh, cont_w = open_writer("contributions.csv.gz", C.CONTRIBUTIONS)
         expn_fh, expn_w = open_writer("expenditures.csv.gz",  C.EXPENDITURES)
         loan_fh, loan_w = open_writer("loans_debts.csv.gz",   C.LOANS_DEBTS)
@@ -249,28 +260,30 @@ def run():
                     "treasurer_name": "",
                     "city":           "",
                     "zip":            "",
-                    "active":         "",
                 }
 
-        # ── GR detail registry (loaded first — highest priority) ──────────────
-        ft = time.perf_counter()
+        # GR detail registry (loaded first — highest priority)
         gr_registry, gr_abbr_registry = load_gr_registry()
         if gr_registry:
+            _gr_path = RAW_DIR / "gr_details.csv"
             log.registry_loaded(
                 "gr_details.csv",
                 entries=len(gr_registry),
                 relation="committees",
+                bytes=_gr_path.stat().st_size if _gr_path.exists() else 0,
             )
 
         cr_registry = load_cr_registry()
         if cr_registry:
+            _cr_path = RAW_DIR / "cr_details.csv"
             log.registry_loaded(
                 "cr_details.csv",
                 entries=len(cr_registry),
                 relation="committees",
+                bytes=_cr_path.stat().st_size if _cr_path.exists() else 0,
             )
 
-        # ── Candidates ────────────────────────────────────────────────────────
+        # Candidates
         cand_path = RAW_DIR / "CDCandidates_all.csv"
         ft = time.perf_counter()
         if cand_path.exists() and cand_path.stat().st_size > 0:
@@ -284,27 +297,30 @@ def run():
                         last, first = last.strip(), first.strip()
                     else:
                         last, first = name, ""
+                    clean_first = utils.clean_name(first)
+                    clean_last  = utils.clean_name(last)
+                    full_name   = f"{clean_first} {clean_last}".strip() if clean_first else clean_last
                     cand_w.writerow({
                         "state":           STATE,
-                        "state_filer_id":  name,
-                        "candidate_name":  name,
-                        "candidate_first": first,
-                        "candidate_last":  last,
-                        "office":          clean(row.get("Office", "")),
+                        "state_filer_id":  full_name,
+                        "candidate_name":  full_name,
+                        "candidate_first": clean_first,
+                        "candidate_last":  clean_last,
+                        "office":          utils.clean_name(row.get("Office", "")),
                         "district":        "",
-                        "jurisdiction":    clean(row.get("Election", "")),
-                        "party":           clean(row.get("Party", "")),
+                        "jurisdiction":    utils.clean_name(row.get("Election", "")),
+                        "party":           utils.clean_name(row.get("Party", "")),
                         "election_year":   clean(row.get("Year", "")),
-                        "status":          clean(row.get("Status", "")),
                         "incumbent":       "",
                         "raw_file":        cand_path.name,
                         "row_num":         row_num,
                     })
                     cand_count += 1
         log.file_parsed("CDCandidates_all.csv", "candidates", cand_count,
-                        duration_s=time.perf_counter() - ft)
+                        duration_s=time.perf_counter() - ft,
+                        bytes=cand_path.stat().st_size if cand_path.exists() else 0)
 
-        # ── Contributions (CDIncome) ───────────────────────────────────────────
+        # Contributions (CDIncome)
         # Dedup per file on (contributor, amount, date, committee), keeping the
         # row with the highest Result number (most recent amendment).
         for path in raw_files("CDIncome_*.csv"):
@@ -331,8 +347,8 @@ def run():
                              int(result) > int(prev["filing_id"]))):
                         seen[key] = {
                             "state":             STATE,
-                            "committee_name":    filer,
-                            "contributor_name":  contributor,
+                            "committee_name":    utils.clean_name(filer),
+                            "contributor_name":  utils.clean_name(contributor),
                             "amount":            amount,
                             "date":              date_val,
                             "transaction_type":  clean(row.get("Transaction Type", "")),
@@ -342,8 +358,8 @@ def run():
                             "contributor_zip":   clean(row.get("Zip", "")),
                             "employer":          clean(row.get("Employer", "")),
                             "occupation":        clean(row.get("Occupation", "")),
-                            "candidate_name":    invert_name(filer) if filer_type == "Candidate" else "",
-                            "office":            clean(row.get("Office", "")),
+                            "candidate_name":    utils.clean_name(filer) if filer_type == "Candidate" else "",
+                            "office":            utils.clean_name(row.get("Office", "")),
                             "election_year":     clean(row.get("Report Year", year_from_filename(path))),
                             "filing_id":         result,
                             "amended":           "",
@@ -354,10 +370,11 @@ def run():
                 cont_w.writerow(out_row)
             count = len(seen)
             log.file_parsed(path.name, "contributions", count,
-                            duration_s=time.perf_counter() - ft)
+                            duration_s=time.perf_counter() - ft,
+                            bytes=path.stat().st_size)
             total_contributions += count
 
-        # ── Expenditures (CDExpense) ───────────────────────────────────────────
+        # Expenditures (CDExpense)
         for path in raw_files("CDExpense_*.csv"):
             ft   = time.perf_counter()
             seen: dict[tuple, dict] = {}
@@ -382,8 +399,8 @@ def run():
                              int(result) > int(prev["filing_id"]))):
                         seen[key] = {
                             "state":            STATE,
-                            "committee_name":   filer,
-                            "payee_name":       payee,
+                            "committee_name":   utils.clean_name(filer),
+                            "payee_name":       utils.clean_name(payee),
                             "amount":           amount,
                             "date":             date_val,
                             "transaction_type": clean(row.get("Transaction Type", "")),
@@ -392,8 +409,8 @@ def run():
                             "payee_city":       clean(row.get("City", "")),
                             "payee_state":      clean(row.get("State", "")),
                             "payee_zip":        clean(row.get("Zip", "")),
-                            "candidate_name":   invert_name(filer) if filer_type == "Candidate" else "",
-                            "office":           clean(row.get("Office", "")),
+                            "candidate_name":   utils.clean_name(filer) if filer_type == "Candidate" else "",
+                            "office":           utils.clean_name(row.get("Office", "")),
                             "election_year":    clean(row.get("Report Year", year_from_filename(path))),
                             "filing_id":        result,
                             "amended":          "",
@@ -404,10 +421,11 @@ def run():
                 expn_w.writerow(out_row)
             count = len(seen)
             log.file_parsed(path.name, "expenditures", count,
-                            duration_s=time.perf_counter() - ft)
+                            duration_s=time.perf_counter() - ft,
+                            bytes=path.stat().st_size)
             total_expenditures += count
 
-        # ── Committees: enrich from GRForms bulk exports ───────────────────────
+        # Committees: enrich from GRForms bulk exports
         # GRForms CSVs are secondary to gr_details; they fill gaps for groups
         # that appear in transactions but weren't hit by the detail scrape.
         for path in raw_files("GRForms_*.csv"):
@@ -420,8 +438,6 @@ def run():
                         continue
 
                     key = committee_key(name)
-                    status = clean(row.get("Status", ""))
-
                     entry = committees.get(key) or {
                         "state": STATE,
                         "state_filer_id": "",
@@ -444,23 +460,23 @@ def run():
                         entry["city"] = clean(row.get("City", ""))
                     if not entry.get("zip"):
                         entry["zip"]  = clean(row.get("Zip", ""))
-                    if not entry.get("active"):
-                        entry["active"] = 1 if status == "Filed" else (0 if status else "")
                     if not entry.get("state_filer_id"):
                         entry["state_filer_id"] = clean(row.get("Abbreviation", ""))
                     committees[key] = entry
                     file_count += 1
-            log.registry_loaded(path.name, entries=file_count, relation="committees")
+            log.registry_loaded(path.name, entries=file_count, relation="committees",
+                               bytes=path.stat().st_size)
 
-        # ── Apply GR detail registry (highest priority enrichment) ────────────
+        # Apply GR detail registry (highest priority enrichment)
         def _apply_gr_detail(entry: dict, detail: dict) -> None:
             """Write gr_detail fields onto an existing committee entry."""
             entry["state_filer_id"] = str(detail.get("gr_id", ""))
             entry["committee_type"] = clean(detail.get("group_type",     "")) or entry.get("committee_type", "")
             entry["treasurer_name"] = clean(detail.get("treasurer_name", "")) or entry.get("treasurer_name", "")
-            entry["city"]           = clean(detail.get("city",           "")) or entry.get("city",           "")
+            entry["city"]           = utils.clean_name(clean(detail.get("city", "")) or entry.get("city", ""))
             entry["zip"]            = clean(detail.get("zip",            "")) or entry.get("zip",            "")
-            entry["active"]         = 1  # has a filed GR record
+            entry["raw_file"]       = detail.get("_raw_file", "")
+            entry["row_num"]        = detail.get("_row_num",  "")
 
         gr_matched = gr_abbr_matched = 0
 
@@ -495,7 +511,7 @@ def run():
                 total_committees=len(committees),
             )
 
-        # ── Apply CR detail registry (candidate/PCC enrichment) ───────────────
+        # Apply CR detail registry (candidate/PCC enrichment)
         # Matches by committee_key(first + last) against the candidate's filer
         # name from CDIncome/CDExpense. Falls back to stripping middle tokens
         # for names like "Pete B Higgins" → tries "pete higgins".
@@ -519,10 +535,11 @@ def run():
             # CR data overwrites blank fields; it won't compete with GR
             entry["state_filer_id"] = str(detail.get("cr_id", "")) or entry.get("state_filer_id", "")
             entry["candidate_name"] = clean(detail.get("candidate_display_name", "")) or entry.get("candidate_name", "")
-            entry["city"]           = clean(detail.get("city",           "")) or entry.get("city",           "")
+            entry["city"]           = utils.clean_name(clean(detail.get("city", "")) or entry.get("city", ""))
             entry["zip"]            = clean(detail.get("zip",            "")) or entry.get("zip",            "")
             entry["treasurer_name"] = clean(detail.get("treasurer_name", "")) or entry.get("treasurer_name", "")
-            entry["active"]         = 1
+            entry["raw_file"]       = detail.get("_raw_file", "")
+            entry["row_num"]        = detail.get("_row_num",  "")
             cr_matched += 1
 
         if cr_registry:
@@ -531,10 +548,13 @@ def run():
                 total_committees=len(committees),
             )
 
-        # ── Flush committees ──────────────────────────────────────────────────
+        # Flush committees
         for row in committees.values():
+            row["committee_name"] = utils.clean_name(row.get("committee_name", ""))
+            row["candidate_name"] = utils.clean_name(row.get("candidate_name", ""))
+            row["treasurer_name"] = utils.clean_name(row.get("treasurer_name", ""))
+            row["city"]           = utils.clean_name(row.get("city", ""))
             cmte_w.writerow(row)
-        log.file_parsed("committees.csv.gz", "committees", len(committees), role="output")
 
         # Close handles before person-ID assignment
         for fh in file_handles:
@@ -542,6 +562,23 @@ def run():
         file_handles = []
 
         utils.assign_person_ids(CLEAN_DIR / "candidates.csv.gz", id_model="name_hash")
+        utils.assign_committee_person_ids(CLEAN_DIR / "committees.csv.gz",
+                                          CLEAN_DIR / "candidates.csv.gz")
+
+        def _out_bytes(name):
+            p = CLEAN_DIR / name
+            return p.stat().st_size if p.exists() else 0
+
+        log.file_parsed("contributions.csv.gz", "contributions", total_contributions, role="output",
+                        bytes=_out_bytes("contributions.csv.gz"))
+        log.file_parsed("expenditures.csv.gz",  "expenditures",  total_expenditures,  role="output",
+                        bytes=_out_bytes("expenditures.csv.gz"))
+        log.file_parsed("loans_debts.csv.gz",   "loans_debts",   0,                   role="output",
+                        bytes=_out_bytes("loans_debts.csv.gz"))
+        log.file_parsed("committees.csv.gz",    "committees",    len(committees),      role="output",
+                        bytes=_out_bytes("committees.csv.gz"))
+        log.file_parsed("candidates.csv.gz",    "candidates",    cand_count,           role="output",
+                        bytes=_out_bytes("candidates.csv.gz"))
 
         duration = round(time.perf_counter() - t0, 1)
         log.info(f"Done in {duration}s")
@@ -571,7 +608,7 @@ def run():
             except Exception:
                 pass
 
-
+# ====== CLI ==================================
 if __name__ == "__main__":
     try:
         run()

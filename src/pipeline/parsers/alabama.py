@@ -1,26 +1,9 @@
 """
 parsers/alabama.py — Transform Alabama raw CSVs into the 5 normalized relations.
 
-Input:  data/alabama/raw/{year}_{FileType}Extract1.csv  (2013–present)
-Output: data/alabama/cleaned/{relation}.csv
-
-File types
-──────────
-  CashContributions    → contributions  (transaction_type: Cash/In-Kind)
-  InKindContributions  → contributions  (transaction_type: In-Kind)
-  Expenditures         → expenditures
-  OtherReceipts        → loans_debts   (ReceiptType == 'Loan')
-                       → contributions  (everything else — refunds, interest, etc.)
-
-Notes
-─────
-  • Alabama is a flat-file state: CandidateName and CommitteeName appear on
-    every transaction row. Committees and candidates are synthesized here.
-  • PCC registry (pcc_committees.csv) enriches both tables: committee gets
-    treasurer/address/active; candidate gets office/district/party/jurisdiction.
-  • Contributor/payee name is split across LastName, FirstName, MI, Suffix.
-  • Dates arrive as MM/DD/YYYY and are normalized to YYYY-MM-DD.
-  • Amended is Y/N → 1/0.
+Alabama is a flat-file state: committee and candidate info appears on every
+transaction row and is synthesized here. OtherReceipts splits into loans_debts
+(ReceiptType == 'Loan') and contributions (everything else).
 """
 
 import csv
@@ -31,26 +14,24 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # project root
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # src/pipeline
-
-from src.logger import get_logger
+# Make project root and src/pipeline importable before importing local modules
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "pipeline"))
+from src.reporting.logger import get_logger
 import columns as C
 import utils
 
-csv.field_size_limit(sys.maxsize)
+csv.field_size_limit(sys.maxsize)  # Alabama CSVs can have very long fields
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RAW_DIR      = PROJECT_ROOT / "data" / "alabama" / "raw"
-CLEAN_DIR    = PROJECT_ROOT / "data" / "alabama" / "cleaned"
+# paths and file prep
 
+RAW_DIR   = PROJECT_ROOT / "data" / "alabama" / "raw"
+CLEAN_DIR = PROJECT_ROOT / "data" / "alabama" / "cleaned"
 CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 
-STATE = "AL"
 
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ============================== helpers ===============================
 def parse_date(val) -> str:
     """MM/DD/YYYY → YYYY-MM-DD. Returns '' on failure."""
     val = (val or "").strip()
@@ -87,15 +68,17 @@ def build_name(last, first, mi, suffix) -> str:
 
 
 def yn_to_int(val) -> int:
+    """Convert Y/N string to 1/0."""
     return 1 if (val or "").strip().upper() == "Y" else 0
 
 
 def clean(val) -> str:
+    """Strips whitespace and converts None to an empty string"""
     return (val or "").strip()
 
 
 def is_numeric(val) -> bool:
-    """Return True if val can be cast to float (allows negatives)."""
+    """ Return True if val can be cast to float (allows negatives)."""
     try:
         float((val or "").strip())
         return True
@@ -114,8 +97,10 @@ def raw_files(pattern: str) -> list[Path]:
     return sorted(RAW_DIR.glob(pattern), key=lambda p: p.name)
 
 
-# ── Writers ────────────────────────────────────────────────────────────────────
+# ============================== writers ===============================
 def open_writer(filename: str, fieldnames: list[str]):
+    """Open a gzipped CSV writer in CLEAN_DIR. Extra fields are silently dropped,
+        missing fields default to empty string."""
     path = CLEAN_DIR / filename
     fh   = gzip.open(path, "wt", encoding="utf-8", newline="")
     writer = csv.DictWriter(fh, fieldnames=fieldnames,
@@ -124,39 +109,35 @@ def open_writer(filename: str, fieldnames: list[str]):
     return fh, writer
 
 
-# ── Column definitions (canonical — shared across all states) ──────────────────
-COMMITTEE_COLS    = C.COMMITTEES
-CANDIDATE_COLS    = C.CANDIDATES
-CONTRIBUTION_COLS = C.CONTRIBUTIONS
-EXPENDITURE_COLS  = C.EXPENDITURES
-LOAN_COLS         = C.LOANS_DEBTS
+# =============================== parse ================================
 
-
-# ── Parse ──────────────────────────────────────────────────────────────────────
 def run():
     log = get_logger("alabama", "parse")
     t0  = time.perf_counter()
     log.info("Starting Alabama parser")
     log._emit("parse_started")
 
-    try:
-        # Accumulate unique committees and candidates across all files
-        committees: dict[str, dict] = {}   # state_filer_id → row
-        candidates: set[str] = set()
-        total_contributions = 0
-        total_expenditures  = 0
+    # Accumulate unique committees and candidates across all files
+    committees: dict[str, dict] = {}   # state_filer_id → row
+    candidates: set[str] = set()
+    total_contributions = 0
+    total_expenditures  = 0
+    total_loans         = 0
+    file_handles: list = []
 
+    try:
         # Open all output writers upfront
-        cmte_fh,   cmte_w   = open_writer("committees.csv.gz",    COMMITTEE_COLS)
-        cand_fh,   cand_w   = open_writer("candidates.csv.gz",    CANDIDATE_COLS)
-        cont_fh,   cont_w   = open_writer("contributions.csv.gz", CONTRIBUTION_COLS)
-        expn_fh,   expn_w   = open_writer("expenditures.csv.gz",  EXPENDITURE_COLS)
-        loan_fh,   loan_w   = open_writer("loans_debts.csv.gz",   LOAN_COLS)
+        cmte_fh,   cmte_w   = open_writer("committees.csv.gz",    C.COMMITTEES)
+        cand_fh,   cand_w   = open_writer("candidates.csv.gz",    C.CANDIDATES)
+        cont_fh,   cont_w   = open_writer("contributions.csv.gz", C.CONTRIBUTIONS)
+        expn_fh,   expn_w   = open_writer("expenditures.csv.gz",  C.EXPENDITURES)
+        loan_fh,   loan_w   = open_writer("loans_debts.csv.gz",   C.LOANS_DEBTS)
+        file_handles = [cmte_fh, cand_fh, cont_fh, expn_fh, loan_fh]
 
         def register_committee(filer_id: str, name: str, ctype: str, cand_name: str = ""):
             if filer_id and filer_id not in committees:
                 committees[filer_id] = {
-                    "state":          STATE,
+                    "state":          "AL",
                     "state_filer_id": filer_id,
                     "committee_name": name,
                     "committee_type": ctype,
@@ -168,7 +149,7 @@ def run():
             if name and name not in candidates:
                 candidates.add(name)
 
-        # ── Cash + InKind Contributions ───────────────────────────────────────
+        # cash + inkind contributions
         for pattern in ("*_CashContributionsExtract1.csv",
                         "*_InKindContributionsExtract1.csv"):
             for path in raw_files(pattern):
@@ -187,13 +168,13 @@ def run():
                                 skipped += 1
                                 continue
 
-                            if not filer_id or not is_numeric(amount_raw):
+                            if not filer_id or not filer_id.isdigit() or not is_numeric(amount_raw):
                                 skipped += 1
                                 continue
 
-                            cmte_name  = clean(row.get("CommitteeName", ""))
+                            cmte_name  = utils.clean_name(row.get("CommitteeName", ""))
                             cmte_type  = clean(row.get("CommitteeType", ""))
-                            cand_name  = clean(row.get("CandidateName", ""))
+                            cand_name  = utils.clean_name(row.get("CandidateName", ""))
 
                             register_committee(filer_id, cmte_name, cmte_type, cand_name)
                             register_candidate(cand_name)
@@ -203,21 +184,21 @@ def run():
                                              or cand_name)
 
                             cont_w.writerow({
-                                "state":             STATE,
+                                "state":             "AL",
                                 "committee_name":    resolved_cmte,
-                                "contributor_name":  build_name(
+                                "contributor_name":  utils.clean_name(build_name(
                                                          row.get("LastName", ""),
                                                          row.get("FirstName", ""),
                                                          row.get("MI", ""),
                                                          row.get("Suffix", ""),
-                                                     ),
+                                                     )),
                                 "amount":            amount_raw,
                                 "date":              parse_date(row.get("ContributionDate", "")),
                                 "transaction_type":  clean(row.get("ContributionType", "")),
                                 "contributor_type":  clean(row.get("ContributorType", "")),
-                                "contributor_city":  clean(row.get("City", "")),
+                                "contributor_city":  utils.clean_name(row.get("City", "")),
                                 "contributor_state": clean(row.get("State", "")),
-                                "contributor_zip":   clean(row.get("Zip", "")),
+                                "contributor_zip":   utils.clean_zip(row.get("Zip", "")),
                                 "candidate_name":    cand_name,
                                 "election_year":     year,
                                 "filing_id":         clean(row.get("ContributionID",
@@ -228,12 +209,13 @@ def run():
                             })
                             count += 1
                     log.file_parsed(path.name, "contributions", count, skipped,
-                                    duration_s=time.perf_counter() - ft)
+                                    duration_s=time.perf_counter() - ft,
+                                    bytes=path.stat().st_size)
                     total_contributions += count
                 except Exception as e:
                     log.file_parse_error(path.name, str(e))
 
-        # ── Other Receipts ────────────────────────────────────────────────────
+        # other receipts (loans + misc contributions)
         for path in raw_files("*_OtherReceiptsExtract1.csv"):
             year = year_from_filename(path)
             log.info(f"  Parsing {path.name}...")
@@ -245,35 +227,35 @@ def run():
                         filer_id    = clean(row.get("CommitteeId", ""))
                         amount_raw  = clean(row.get("ReceiptAmount", ""))
 
-                        if not filer_id or not is_numeric(amount_raw):
+                        if not filer_id or not filer_id.isdigit() or not is_numeric(amount_raw):
                             skipped += 1
                             continue
 
-                        cmte_name    = clean(row.get("CommitteeName", ""))
+                        cmte_name    = utils.clean_name(row.get("CommitteeName", ""))
                         cmte_type    = clean(row.get("CommitteeType", ""))
-                        cand_name    = clean(row.get("CandidateName", ""))
+                        cand_name    = utils.clean_name(row.get("CandidateName", ""))
                         receipt_type = clean(row.get("ReceiptType", ""))
 
                         register_committee(filer_id, cmte_name, cmte_type, cand_name)
                         register_candidate(cand_name)
 
-                        name = build_name(
+                        name = utils.clean_name(build_name(
                             row.get("LastName", ""), row.get("FirstName", ""),
                             row.get("MI", ""),       row.get("Suffix", ""),
-                        )
+                        ))
                         resolved_cmte = (cmte_name
                                          or committees.get(filer_id, {}).get("committee_name", "")
                                          or cand_name)
 
                         if receipt_type == "Loan":
                             loan_w.writerow({
-                                "state":              STATE,
+                                "state":              "AL",
                                 "committee_name":     resolved_cmte,
                                 "record_type":        "loan",
                                 "counterparty_name":  name,
-                                "counterparty_city":  clean(row.get("City", "")),
+                                "counterparty_city":  utils.clean_name(row.get("City", "")),
                                 "counterparty_state": clean(row.get("State", "")),
-                                "counterparty_zip":   clean(row.get("Zip", "")),
+                                "counterparty_zip":   utils.clean_zip(row.get("Zip", "")),
                                 "original_amount":    clean(row.get("ReceiptAmount", "")),
                                 "date":               parse_date(row.get("ReceiptDate", "")),
                                 "candidate_name":     cand_name,
@@ -286,16 +268,16 @@ def run():
                             loans += 1
                         else:
                             cont_w.writerow({
-                                "state":             STATE,
+                                "state":             "AL",
                                 "committee_name":    resolved_cmte,
                                 "contributor_name":  name,
                                 "amount":            clean(row.get("ReceiptAmount", "")),
                                 "date":              parse_date(row.get("ReceiptDate", "")),
                                 "transaction_type":  receipt_type,
                                 "contributor_type":  clean(row.get("ReceiptSourceType", "")),
-                                "contributor_city":  clean(row.get("City", "")),
+                                "contributor_city":  utils.clean_name(row.get("City", "")),
                                 "contributor_state": clean(row.get("State", "")),
-                                "contributor_zip":   clean(row.get("Zip", "")),
+                                "contributor_zip":   utils.clean_zip(row.get("Zip", "")),
                                 "candidate_name":    cand_name,
                                 "election_year":     year,
                                 "filing_id":         clean(row.get("ReceiptID", "")),
@@ -315,10 +297,11 @@ def run():
                           relation="contributions", role="source", rows=contribs, skipped=skipped,
                           duration_s=duration)
                 total_contributions += contribs
+                total_loans         += loans
             except Exception as e:
                 log.file_parse_error(path.name, str(e))
 
-        # ── Expenditures ──────────────────────────────────────────────────────
+        # expenditures
         for path in raw_files("*_ExpendituresExtract1.csv"):
             year = year_from_filename(path)
             log.info(f"  Parsing {path.name}...")
@@ -330,13 +313,17 @@ def run():
                         filer_id   = clean(row.get("CommitteeId", ""))
                         amount_raw = clean(row.get("ExpenditureAmount", ""))
 
-                        if not filer_id or not is_numeric(amount_raw):
+                        # CommitteeId must be a plain integer — rows where it
+                        # contains free text (e.g. "Campaign Signs", "Check #110")
+                        # are column-shifted malformed rows from Alabama's export
+                        # and should be skipped entirely.
+                        if not filer_id or not filer_id.isdigit() or not is_numeric(amount_raw):
                             skipped += 1
                             continue
 
-                        cmte_name = clean(row.get("CommitteeName", ""))
+                        cmte_name = utils.clean_name(row.get("CommitteeName", ""))
                         cmte_type = clean(row.get("CommitteeType", ""))
-                        cand_name = clean(row.get("CandidateName", ""))
+                        cand_name = utils.clean_name(row.get("CandidateName", ""))
 
                         register_committee(filer_id, cmte_name, cmte_type, cand_name)
                         register_candidate(cand_name)
@@ -346,22 +333,22 @@ def run():
                                          or cand_name)
 
                         expn_w.writerow({
-                            "state":            STATE,
+                            "state":            "AL",
                             "committee_name":   resolved_cmte,
-                            "payee_name":       build_name(
+                            "payee_name":       utils.clean_name(build_name(
                                                     row.get("LastName", ""),
                                                     row.get("FirstName", ""),
                                                     row.get("MI", ""),
                                                     row.get("Suffix", ""),
-                                                ),
+                                                )),
                             "amount":           amount_raw,
                             "date":             parse_date(row.get("ExpenditureDate", "")),
                             "transaction_type": clean(row.get("ExpenditureType", "")),
                             "purpose":          clean(row.get("Purpose", "")),
                             "category":         clean(row.get("Explanation", "")),
-                            "payee_city":       clean(row.get("City", "")),
+                            "payee_city":       utils.clean_name(row.get("City", "")),
                             "payee_state":      clean(row.get("State", "")),
-                            "payee_zip":        clean(row.get("Zip", "")),
+                            "payee_zip":        utils.clean_zip(row.get("Zip", "")),
                             "candidate_name":   cand_name,
                             "election_year":    year,
                             "filing_id":        clean(row.get("ExpenditureID", "")),
@@ -371,12 +358,13 @@ def run():
                         })
                         count += 1
                 log.file_parsed(path.name, "expenditures", count, skipped,
-                                duration_s=time.perf_counter() - ft)
+                                duration_s=time.perf_counter() - ft,
+                                bytes=path.stat().st_size)
                 total_expenditures += count
             except Exception as e:
                 log.file_parse_error(path.name, str(e))
 
-        # ── Load PAC + PCC registries ─────────────────────────────────────────
+        # load pac + pcc registries and flush committees
         log.info("  Loading registries...")
         registry: dict[str, dict] = {}
         for reg_filename in ("pac_committees.csv", "pcc_committees.csv"):
@@ -390,12 +378,14 @@ def run():
                             reg["_raw_file"] = reg_filename
                             reg["_row_num"]  = reg_row_num
                             registry[cid] = reg
-                log.registry_loaded(reg_filename, len(registry) - before)
+                log.registry_loaded(reg_filename, len(registry) - before,
+                                    relation="committees",
+                                    bytes=reg_path.stat().st_size)
             else:
                 log.warning(f"  {reg_filename} not found — skipping enrichment")
         log.info(f"  Registry total: {len(registry):,} committees")
 
-        # ── Flush committees (enriched with registry) ─────────────────────────
+        # Flush committees (enriched with registry)
         candidate_info: dict[str, dict] = {}
         enriched = 0
         for filer_id, row in committees.items():
@@ -403,9 +393,9 @@ def run():
             if reg:
                 t_first = reg.get("treasurer_first", "").strip()
                 t_last  = reg.get("treasurer_last",  "").strip()
-                row["treasurer_name"] = f"{t_first} {t_last}".strip()
-                row["city"]           = reg.get("city", "").strip()
-                row["zip"]            = reg.get("zip_code", "").strip()
+                row["treasurer_name"] = utils.clean_name(f"{t_first} {t_last}")
+                row["city"]           = utils.clean_name(reg.get("city", ""))
+                row["zip"]            = utils.clean_zip(reg.get("zip_code", ""))
                 status                = reg.get("committee_status", "").strip()
                 row["active"]         = 1 if status == "Active" else (0 if status == "Dissolved" else "")
                 row["raw_file"]       = reg.get("_raw_file", "")
@@ -415,15 +405,19 @@ def run():
                 cand_name = row.get("candidate_name", "").strip()
                 if cand_name and reg.get("committee_type", "") == "Principal Campaign Committee":
                     candidate_info[cand_name] = {
-                        "candidate_first": reg.get("candidate_first", "").strip(),
-                        "candidate_last":  reg.get("candidate_last",  "").strip(),
-                        "office":          reg.get("office",          "").strip(),
-                        "district":        reg.get("district",        "").strip(),
-                        "jurisdiction":    reg.get("jurisdiction",    "").strip(),
-                        "party":           reg.get("party",           "").strip(),
+                        "candidate_first": utils.clean_name(reg.get("candidate_first", "")),
+                        "candidate_last":  utils.clean_name(reg.get("candidate_last",  "")),
+                        "office":          utils.clean_name(reg.get("office",          "")),
+                        "district":        utils.clean_name(reg.get("district",        "")),
+                        "jurisdiction":    utils.clean_name(reg.get("jurisdiction",    "")),
+                        "party":           utils.clean_name(reg.get("party",           "")),
                         "raw_file":        reg.get("_raw_file",       ""),
                         "row_num":         reg.get("_row_num",        ""),
                     }
+
+            # PCCs have no separate committee name in the source — fill from candidate
+            if not row.get("committee_name") and row.get("candidate_name"):
+                row["committee_name"] = row["candidate_name"]
 
             cmte_w.writerow(row)
 
@@ -434,7 +428,13 @@ def run():
             candidates_enriched=len(candidate_info),
         )
 
-        # ── Flush candidates ──────────────────────────────────────────────────
+        pcc_path = RAW_DIR / "pcc_committees.csv"
+        log._emit("file_parsed", status="ok", filename="pcc_committees.csv",
+                  relation="candidates", role="registry", rows=len(candidate_info),
+                  skipped=0, duration_s=0.0,
+                  bytes=pcc_path.stat().st_size if pcc_path.exists() else 0)
+
+        # flush candidates
         cand_to_filer: dict[str, str] = {}
         for fid, cmte in committees.items():
             cname = cmte.get("candidate_name", "").strip()
@@ -444,7 +444,7 @@ def run():
         for name in sorted(candidates):
             info = candidate_info.get(name, {})
             cand_w.writerow({
-                "state":           STATE,
+                "state":           "AL",
                 "state_filer_id":  cand_to_filer.get(name, ""),
                 "candidate_name":  name,
                 "candidate_first": info.get("candidate_first", ""),
@@ -457,13 +457,28 @@ def run():
                 "row_num":         info.get("row_num",         ""),
             })
 
-        log.file_parsed("committees.csv.gz", "committees", len(committees), role="output")
-        log.file_parsed("candidates.csv.gz", "candidates", len(candidates), role="output")
-
-        for fh in (cmte_fh, cand_fh, cont_fh, expn_fh, loan_fh):
+        for fh in file_handles:
             fh.close()
+        file_handles = []  # prevent double-close in finally
 
         utils.assign_person_ids(CLEAN_DIR / "candidates.csv.gz", id_model="committee")
+        utils.assign_committee_person_ids(CLEAN_DIR / "committees.csv.gz",
+                                          CLEAN_DIR / "candidates.csv.gz")
+
+        def _out_bytes(name):
+            p = CLEAN_DIR / name
+            return p.stat().st_size if p.exists() else 0
+
+        log.file_parsed("contributions.csv.gz", "contributions", total_contributions, role="output",
+                        bytes=_out_bytes("contributions.csv.gz"))
+        log.file_parsed("expenditures.csv.gz",  "expenditures",  total_expenditures,  role="output",
+                        bytes=_out_bytes("expenditures.csv.gz"))
+        log.file_parsed("loans_debts.csv.gz",   "loans_debts",   total_loans,         role="output",
+                        bytes=_out_bytes("loans_debts.csv.gz"))
+        log.file_parsed("committees.csv.gz",    "committees",    len(committees),      role="output",
+                        bytes=_out_bytes("committees.csv.gz"))
+        log.file_parsed("candidates.csv.gz",    "candidates",    len(candidates),      role="output",
+                        bytes=_out_bytes("candidates.csv.gz"))
 
         duration = round(time.perf_counter() - t0, 1)
         log.info(f"Done in {duration}s")
@@ -471,7 +486,7 @@ def run():
                   contributions=total_contributions, expenditures=total_expenditures,
                   committees=len(committees), candidates=len(candidates))
 
-    except KeyboardInterrupt:
+    except KeyboardInterrupt: # cc user interrupt
         log.warning("Interrupted")
         log._emit("parse_completed", status="interrupted",
                   duration_s=round(time.perf_counter() - t0, 1),
@@ -479,8 +494,27 @@ def run():
                   committees=len(committees), candidates=len(candidates))
         raise
 
+    except Exception as e:
+        log._emit("parse_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  contributions=total_contributions, expenditures=total_expenditures,
+                  committees=len(committees), candidates=len(candidates),
+                  error_type=type(e).__name__, error=str(e))
+        raise
 
+    finally:
+        for fh in file_handles:
+            try:
+                fh.close()
+            except Exception:
+                pass
+
+# ====== CLI ==================================
 if __name__ == "__main__":
+    import argparse
+    argparse.ArgumentParser(
+        description="Parse Alabama raw data files into 5 normalized relations."
+    ).parse_args()
     try:
         run()
     except KeyboardInterrupt:

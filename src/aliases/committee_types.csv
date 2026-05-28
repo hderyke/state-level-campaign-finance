@@ -1,0 +1,84 @@
+state,raw,canonical
+# == Alabama ===================================================================
+AL,Principal Campaign Committee,Candidate Committee
+AL,Political Action Committee,PAC
+AL,None,Other
+# == Alaska ====================================================================
+AK,Candidate,Candidate Committee
+AK,Controlled,Candidate Committee
+AK,PAC,PAC
+AK,Special Interest,PAC
+AK,Political Party,Party
+AK,Independent Expenditure,Independent Expenditure
+AK,Ballot Proposition,Ballot Measure
+AK,Initiative Proposal,Ballot Measure
+AK,Entity,Other
+AK,Group,Other
+# == Arizona ===================================================================
+AZ,Candidate (not participating in Clean Elections),Candidate Committee
+AZ,Candidate (participating in Clean Elections),Candidate Committee
+AZ,Candidate (Exploratory),Candidate Committee
+AZ,$500 Threshold (Candidate),Candidate Committee
+AZ,Political Action Committee,PAC
+AZ,Political Action Committee (Standing),PAC
+AZ,Political Action Committee (Legacy),PAC
+AZ,Political Action Committee (Mega),PAC
+AZ,Political Action Committee (Mega Standing),PAC
+AZ,Segregated Fund,PAC
+AZ,Segregated Fund (Standing),PAC
+AZ,Segregated Fund (Multicandidate PAC),PAC
+AZ,Political Party,Party
+AZ,Political Party (Standing),Party
+AZ,New Party,Party
+AZ,Independent Expenditures,Independent Expenditure
+AZ,Independent Expenditures (Individual),Independent Expenditure
+AZ,Independent Expenditures (Corp/LLC/Labor Org),Independent Expenditure
+AZ,Independent Expenditures (Standing),Independent Expenditure
+AZ,Independent Exp. (Standing) (Multicandidate PAC),Independent Expenditure
+AZ,Support/Oppose (Candidate),Independent Expenditure
+AZ,Support/Oppose (Ballot Measure),Ballot Measure
+AZ,Support/Oppose (Special Election Ballot Measure),Ballot Measure
+AZ,Recall,Ballot Measure
+AZ,Political Organization,Other
+AZ,Officeholder Expenses,Other
+AZ,$500 Threshold (Non-Candidate),Other
+AZ,None,Other
+# == Arkansas ==================================================================
+AR,Candidate,Candidate Committee
+AR,Exploratory Committee,Candidate Committee
+AR,Political Action Committee,PAC
+AR,County Political Party Committee,Party
+AR,Political Party,Party
+AR,Independent Expenditure Filer (Committee),Independent Expenditure
+AR,Independent Expenditure Filer (Individual),Independent Expenditure
+AR,Independent Expenditure Filer (Other Entity),Independent Expenditure
+# == California ================================================================
+# CA committee_type describes filing roles, not committee categories.
+# RECIPIENT COMMITTEE is the primary filer type; others are support roles.
+CA,CANDIDATE/OFFICEHOLDER,Candidate Committee
+CA,RECIPIENT COMMITTEE,PAC
+CA,MAJOR DONOR/INDEPENDENT EXPENDITURE COMMITTEE,Independent Expenditure
+CA,INITIATIVE,Ballot Measure
+CA,PROPOSITION,Ballot Measure
+CA,PROPONENT,Ballot Measure
+CA,SLATE MAILER ORGANIZATIONS,Other
+CA,TREASURER/RESPONSIBLE OFFICER,Other
+CA,CLIENT,Other
+CA,LOBBYIST,Other
+CA,FIRM,Other
+CA,EMPLOYER,Other
+CA,PAYMENT TO INFLUENCE,Other
+CA,PREPAID ACCOUNT,Other
+CA,NOT DEFINED,Other
+CA,INDIVIDUAL,Other
+# == Colorado ==================================================================
+CO,Candidate,Candidate Committee
+CO,Candidate Committee,Candidate Committee
+CO,Political Committee,PAC
+CO,Small Donor Committee,PAC
+CO,Federal PAC,PAC
+CO,Political Party Committee,Party
+CO,Independent Expenditure Committee,Independent Expenditure
+CO,Issue Committee,Ballot Measure
+CO,Small Scale Issue Committee,Ballot Measure
+CO,527 Political Organization,Other

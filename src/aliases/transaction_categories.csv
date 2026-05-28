@@ -1,0 +1,71 @@
+state,raw,canonical
+# == Alabama ===================================================================
+AL,Cash (Itemized),Monetary
+AL,Cash (Non-Itemized),Monetary
+AL,Non-Itemized Employee Payroll Contribution,Monetary
+AL,In-Kind (Itemized),In-Kind
+AL,In-Kind (Non-Itemized),In-Kind
+AL,Interest,Other
+AL,Other (Itemized),Other
+AL,Other (Non-Itemized),Other
+AL,Return Contribution / Check,Refund
+AL,Refund,Refund
+# == Alaska ====================================================================
+AK,Income,Monetary
+# == Arkansas ==================================================================
+AR,Itemized Monetary,Monetary
+AR,Non-Itemized Monetary,Monetary
+AR,Itemized Nonmoney,In-Kind
+AR,Non - Itemized Nonmoney,In-Kind
+# == Arizona ===================================================================
+AZ,Contribution from Individuals,Monetary
+AZ,CCEC $5 Qualifying Contribution,Monetary
+AZ,In-State Contributions $100 or Less,Monetary
+AZ,Contribution from Committee,Monetary
+AZ,Contribution from Candidate or Family,Monetary
+AZ,Contribution from Business,Monetary
+AZ,Contributions from Corps and LLCs,Monetary
+AZ,Receive CCEC Funding,Monetary
+AZ,Contributions from Candidate Committees,Monetary
+AZ,Contributions from PACs,Monetary
+AZ,Contributions from Parties,Monetary
+AZ,Contributions from Labor Organizations,Monetary
+AZ,Individual In-Kind Contribution,In-Kind
+AZ,In-Kind Cont. from Individual,In-Kind
+AZ,Candidate/Family In-Kind Cont.,In-Kind
+AZ,Business In-Kind Contribution,In-Kind
+AZ,Non-Contribution In-Kind Income,In-Kind
+AZ,In-Kind Contribution from Committee,In-Kind
+AZ,In-Kind Cont. Candidate or Family,In-Kind
+AZ,Corp and LLC In-Kind Contribution,In-Kind
+AZ,Party In-Kind Contribution,In-Kind
+AZ,Refund Contribution from Individual,Refund
+AZ,Refund Contribution from Committee,Refund
+AZ,Refund CCEC $5 Qualifying Contribution,Refund
+AZ,Refund CCEC Funding,Refund
+AZ,Refund Candidate or Family Contribution,Refund
+AZ,Refund Contribution Less than $50,Refund
+AZ,Refund Other Income,Refund
+AZ,Refund Business In-Kind Contribution,Refund
+AZ,Receive Loan from Candidate or Family Member,Loan
+AZ,Receive Loan from Individual,Loan
+AZ,Receive Loan from a Committee,Loan
+AZ,Payment on Candidate/Family Loan,Loan
+AZ,Payment on Individual Loan,Loan
+AZ,Payment on Committee Loan,Loan
+AZ,Transfer in Surplus from Prev Committee,Transfer
+AZ,Transfer In Primary to General,Transfer
+AZ,Transfer Out Remaining Debt,Transfer
+AZ,Submit $5 Qualifying Contributions to SOS,Transfer
+AZ,Receive Shared Expense Payment from Committee,Transfer
+AZ,Other Income,Other
+AZ,Non-Contribution Income,Other
+# == California ================================================================
+CA,I,Monetary
+CA,X,In-Kind
+CA,N,In-Kind
+CA,R,Refund
+CA,T,Transfer
+CA,F,Other
+CA,M,Other
+CA,0,

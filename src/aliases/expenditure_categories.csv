@@ -1,0 +1,131 @@
+state,raw,canonical
+# == Alabama ===================================================================
+# AL transaction_type describes itemization level only — no expense categories.
+# Everything maps to Monetary; None is dirty/blank.
+AL,Itemized,Monetary
+AL,Non-Itemized,Monetary
+AL,Itemized Line of Credit Expenditure,Monetary
+AL,Non-Itemized Line of Credit Expenditure,Monetary
+AL,None,
+# == Alaska ====================================================================
+# AK has a single type for all expenditures.
+AK,Expenditure,Monetary
+# == Arkansas ==================================================================
+AR,Itemized Monetary,Monetary
+AR,Non-Itemized Monetary,Monetary
+AR,Itemized Administrative Expenses,Monetary
+AR,Non-Itemized Administrative Expenses,Monetary
+AR,Itemized Monetary Contributions to Candidates and Committees,Contribution
+AR,Non-Itemized Monetary Contributions to Candidates and Committees,Contribution
+AR,Itemized Nonmoney Contributions made to Candidates and Committees,In-Kind
+AR,None,
+# == Arizona ===================================================================
+AZ,Operating Expense - Pay Cash/Check,Monetary
+AZ,Operating Expense - Purchase on Terms/Credit,Monetary
+AZ,Other Expenses - Pay Cash/Check,Monetary
+AZ,Other Expenses - Purchase on Terms/Credit,Monetary
+AZ,Small Expenses (Paid Cash),Monetary
+AZ,Small Expenses (Paid Credit),Monetary
+AZ,Pay Another Committee for Shared Expense,Monetary
+AZ,Contribute to another Committee,Contribution
+AZ,Contribute to a Candidate Committee,Contribution
+AZ,Contribute to a PAC,Contribution
+AZ,Contribute to a Party,Contribution
+AZ,Give money to a Partnership,Contribution
+AZ,Give money to a Corporation/LLC,Contribution
+AZ,Give money to a Labor Organization,Contribution
+AZ,Expend Individual In-Kind Contribution,In-Kind
+AZ,Expend Business In-Kind Contribution,In-Kind
+AZ,Expend Personal In-Kind Contribution,In-Kind
+AZ,Expend In-Kind Contribution from Committee,In-Kind
+AZ,Expend Candidate/Family In-Kind Contribution,In-Kind
+AZ,Expend Labor Org In-Kind Contribution,In-Kind
+AZ,Expend Corp and LLC In-Kind Contribution,In-Kind
+AZ,Expend PAC In-Kind Contribution,In-Kind
+AZ,Expend Party In-Kind Contribution,In-Kind
+AZ,Expend Candidate Committee In-Kind Contrib,In-Kind
+AZ,Expend Non-Contribution In-Kind Income,In-Kind
+AZ,In-Kind Contribution to PACs,In-Kind
+AZ,In-Kind Contribution to Corps and LLCs,In-Kind
+AZ,In-Kind Contribution to Cand Comms,In-Kind
+AZ,In-Kind Contribution to Partnerships,In-Kind
+AZ,In-Kind Contribution to Parties,In-Kind
+AZ,Independent Expenditure - Pay Cash/Check,Independent Expenditure
+AZ,Independent Expenditure - Purchase on Terms/Credit,Independent Expenditure
+AZ,Ind. Expend. (Non-Recall) - cash,Independent Expenditure
+AZ,Recall Ind. Expend. - Pay Cash/Check,Independent Expenditure
+AZ,Ballot Measure Expend. - Pay Cash/Check,Independent Expenditure
+AZ,Rebate or Refund from Operating Expense,Refund
+AZ,Rebate or Refund From Other Expenses,Refund
+AZ,Rebate or Refund from Independent Expenditure,Refund
+AZ,Refund From Contribution to Committee,Refund
+AZ,Refund from Contrib to a Cand Committee,Refund
+AZ,Refund from Contribution to a PAC,Refund
+AZ,Refund from Contribution to a Party,Refund
+AZ,Refund of Small Cash Expense,Refund
+AZ,Lend to Committee,Loan
+AZ,Loan to an Individual,Loan
+AZ,Loan to a Corporation/LLC,Loan
+AZ,Receive Loan Payment,Loan
+AZ,Receive Payment-Loan to Individual,Loan
+AZ,Receive Payment-Loan to Corp/LLC,Loan
+AZ,Dispose of Remaining Surplus,Transfer
+AZ,Transfer In Previous Committee Debt,Transfer
+AZ,Transfer Out General to Primary,Transfer
+AZ,Transfer Out Primary to General,Transfer
+AZ,Receive Credit - Operating Expense Bill,
+AZ,Receive Credit - Other Expenses Bill,
+AZ,Receive Credit - Independent Expenditure Bill,
+AZ,None,
+# == California ================================================================
+# FPPC Schedule E/D/F codes. Clean 3-letter codes only — all other values → NULL.
+CA,MON,Monetary
+CA,OFC,Monetary
+CA,PRO,Monetary
+CA,CNS,Monetary
+CA,FND,Monetary
+CA,SAL,Monetary
+CA,MTG,Monetary
+CA,LIT,Monetary
+CA,TRS,Monetary
+CA,TRC,Monetary
+CA,POS,Monetary
+CA,TEL,Monetary
+CA,WEB,Monetary
+CA,CVC,Monetary
+CA,VOT,Monetary
+CA,CMP,Monetary
+CA,RAD,Monetary
+CA,PRT,Monetary
+CA,MBR,Monetary
+CA,POL,Monetary
+CA,PHO,Monetary
+CA,FIL,Monetary
+CA,PET,Monetary
+CA,LEG,Monetary
+CA,CTB,Contribution
+CA,IKD,In-Kind
+CA,IND,Independent Expenditure
+CA,RFD,Refund
+CA,TSF,Transfer
+CA,LON,Loan
+# == Colorado ==================================================================
+# CO has the best human-readable categories. Unknown/Other/Misc → NULL (can't classify).
+CO,Advertising,Monetary
+CO,Bank Fees,Monetary
+CO,Consultant & Professional Services,Monetary
+CO,Employee Services,Monetary
+CO,Entertainment,Monetary
+CO,Food, Beverages and Meals,Monetary
+CO,Fundraising Expenses,Monetary
+CO,Gifts,Monetary
+CO,Office Equipment & Supplies,Monetary
+CO,Rent & Utilities,Monetary
+CO,Telephone,Monetary
+CO,Travel & Lodging,Monetary
+CO,Miscellaneous,
+CO,Other,
+CO,Unknown,
+CO,Contributions,Contribution
+CO,Returned Expenditure,Refund
+CO,Donation for Independent Expenditures,Independent Expenditure

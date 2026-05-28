@@ -1,204 +1,190 @@
 # State-Level Campaign Finance Pipeline
 
+## Contents
+
+1. [Introduction](#introduction)
+2. [Quick Start](#quick-start)
+3. [Individual Components](#individual-components)
+4. [Contributing](#contributing)
+5. [Progress](#progress)
+
+---
+
 ## Introduction
 
-This project aims to build a unified database of campaign finance disclosures across U.S. states. The pipeline downloads raw data from each state's disclosure website, standardizes it to a common schema, and loads it into both state-level databases and a combined master database—all queryable via SQL and R.
+This project aims to build a unified database of campaign finance disclosures across U.S. states. The pipeline extracts raw data from each state's specific disclosure website, standardizes it to a common schema, and loads it into both state-level databases and a combined master database- all queryable via SQL and R.
 
 ### Goal
 Collect and normalize campaign finance data from all 50 states into a single, unified interface for analyzing state-level money in politics.
 
 ### Output
-- **State-level databases**: Individual SQLite databases for each state with standardized tables
+- **State-level databases**: Individual SQLite/DuckDB databases for each state with standardized tables
 - **State-level CSVs**: Canonical CSV exports of contributions, expenditures, candidates, and committees for each state
-- **Combined master database**: A unified SQLite database merging all states' normalized data
+- **Combined master database**: A unified SQLite/DuckDB database merging all states' normalized data
 
 ---
 
-## Section 1: Running the Pipeline
+## Quick Start
 
-### Prerequisites
-- Python 3.8+
-- Required packages: `playwright`, `requests`, `pandas`, `sqlite3`
-- Install: `pip install -r requirements.txt`
-- Playwright setup: `playwright install`
+### Setup
 
-### Quick Start
-
-**Step 1: Download raw data for a specific state:**
+**Clone the repository:**
 ```bash
-python src/pipeline/scrapers/alabama.py
-python src/pipeline/scrapers/alaska.py
-python src/pipeline/scrapers/arizona.py
-```
-Each downloader writes to `data/{state}/raw/` and updates `data/{state}/manifest.csv` to track progress. Resume interrupted downloads by running the same command again—already-downloaded files are skipped.
-
-**Scraper flags:**
-- `--force` — Clear manifest and re-download everything from scratch
-- `--update-transactions` — Download only transaction data (contributions/expenditures); skip committee/candidate registry
-- `--update-entities` — Download only entity data (committees/candidates); skip transaction data
-
-Example:
-```bash
-python src/pipeline/scrapers/alabama.py --force              # Full re-download
-python src/pipeline/scrapers/alaska.py --update-transactions # Transactions only
-python src/pipeline/scrapers/arizona.py --update-entities    # Entities only
+git clone https://github.com/hderyke/state-level-campaign-finance.git
+cd state-level-campaign-finance
 ```
 
-**Step 2: Parse raw data**
+**Install dependencies:**
 ```bash
-python src/pipeline/parsers/alabama.py
+pip install -r requirements.txt
+playwright install
 ```
-Outputs standardized CSVs: `contributions.csv`, `expenditures.csv`, `candidates.csv`, `committees.csv`. Each state's parser is designed specifically for it's raw data format.
 
-**Step 3: Validate and evaluate cleaned data:**
-```bash
-python tests/validate.py alabama
-```
-Generates a validation report in `tests/reports/alabama_latest.json` with warnings and errors.
+### Running the Pipeline
 
-**Step 4: Build state-level database:**
-```bash
-python src/pipeline/tabulate.py alabama
-```
-Creates `data/alabama/cleaned/alabama.db` with normalized tables.
+Run the full pipeline (scrape → parse → validate → tabulate → aggregate) for one or more states using two-letter abbreviations:
 
-**Step 5: Aggregate into master database:**
 ```bash
-python src/pipeline/aggregate.py
+python3 src/main.py update AL AK AZ
 ```
-Creates `state-level-cf.db` with all states' data in a unified schema.
+
+Or run all implemented states at once:
+
+```bash
+python3 src/main.py update all
+```
+
+**Pipeline commands:**
+- `update <states>` — full pipeline run, skipping already-downloaded files from previous years
+- `rescrape <states>` — full pipeline run, re-downloading everything from scratch
+- `update-transactions <states>` — update transaction data only (contributions/expenditures)
+- `update-entities <states>` — update entity data only (committees/candidates)
+- `rescrape-transactions <states>` — force re-download of transaction data
+- `rescrape-entities <states>` — force re-download of entity data
+
+> **Note:** The exact behavior of pipeline commands varies by state depending on how each source structures its data, but all commands are implemented as faithfully as possible to their described function.
+
+**Flags:**
+- `--daemon` — silent mode for scheduled/cron runs
+- `--no-report` — skip HTML report generation after run
+
+### Cloudflare Data Sync
+
+Sync data to and from Cloudflare R2 without running the pipeline. To grab or upload just the master database:
+
+```bash
+python3 src/main.py pull db
+python3 src/main.py push db
+```
+
+Or pull data for specific states, or push your own:
+
+- `pull <states|all|db>` — download state data or master DB from Cloudflare R2
+- `push <states|all|db>` — upload state data or master DB to Cloudflare R2
+
+> **Note:** Cloudflare credentials are required. See [docs/pipeline.md](docs/pipeline.md) for setup details.
+
+### Output
+
+After a pipeline run, data is written to the following locations:
+
+- `data/{State}/raw/` — raw downloaded files
+- `data/{State}/cleaned/` — normalized CSVs (contributions, expenditures, candidates, committees, loans_debts)
+- `data/{State}/{state}.db` — state-level database
+- `data/state-level-cf.db` — master database combining all states
+
+Each run also generates a log and HTML report under `logs/prod/{run_id}/`:
+
+- `log.jsonl` — structured event log for the run
+- `report.html` — human-readable summary of the run
+- `{state}_validate.json` — validation report for each state processed
 
 ---
 
-## Source Code Overview
+## Individual Components
 
-### Scrapers (`src/pipeline/scrapers/`)
+> **Note:** Running components directly operates in dev mode. Logs are written to `logs/dev/{timestamp}-{state}-{operation}.jsonl` (no HTML report generated). Console output is more verbose than a full pipeline run via `main.py`.
 
-Each state has a dedicated downloader that handles that state's unique disclosure website. No manual downloads required. Scrapers respect manifest files to enable resumable downloads—already-downloaded data is skipped.
+### Scrapers
 
-States currently implemented: Alabama, Alaska, Arizona, Arkansas, California. See individual state documentation for scraper details.
+Downloads raw campaign finance data from a state's disclosure website. Each state has a dedicated scraper that handles its unique source format. Downloaded files are written to `data/{State}/raw/` and tracked in `data/{State}/manifest.csv` to allow resumable downloads.
 
-### Parsers (`src/pipeline/parsers/`)
-
-Parsers normalize each state's raw data into a canonical five-table schema:
-- `contributions` (income transactions)
-- `expenditures` (spending transactions)
-- `candidates` (candidate registry)
-- `committees` (committee/PAC registry)
-- `loans_debts` (outstanding debt)
-
-States currently implemented: Alabama, Alaska, Arizona, Arkansas, California. See individual state documentation for parser details and limitations.
-
-### Shared Infrastructure
-
-#### `src/pipeline/columns.py`
-Canonical column definitions for all tables across all states. Ensures consistent schema across the entire pipeline.
-
-```python
-CONTRIBUTIONS = [
-    'date', 'amount', 'contributor_name', 'contributor_type',
-    'committee_name', 'candidate_name', 'state_filer_id', ...
-]
+```bash
+python3 src/pipeline/scrapers/alabama.py
 ```
 
-#### `tests/validate.py`
-Multi-tiered validator that checks:
-- **Hard failures**: Missing required columns, invalid data types
-- **Warnings**: Implausible dates, missing IDs
-- **Drift detection**: Schema changes between parsing runs
+**Flags:**
+- *(no flags)* — incremental update, skipping already-downloaded files
+- `--force` — re-download everything, ignoring the manifest
+- `--transactions` — transactions only
+- `--entities` — entities only (committees/candidates)
 
-Reports are saved to `tests/reports/{state}_latest.json`
+Flags can be combined, e.g. `--force --transactions` to force-refresh transactions only.
 
-**⚠️ Known issue**: OOM-kills on files >~100 MB (e.g., Arizona's 303 MB contributions.csv). Solution: rewrite to stream rows instead of loading all into memory.
+### Parsers
 
-### Tabulater (`src/pipeline/tabulater.py`)
+Reads a state's raw files from `data/{State}/raw/` and normalizes them into five canonical CSVs written to `data/{State}/cleaned/`: `contributions.csv`, `expenditures.csv`, `candidates.csv`, `committees.csv`, and (if availiable)`loans_debts.csv`. Each parser is written specifically for its state's raw data format.
 
-_In progress_
+```bash
+python3 src/pipeline/parsers/alabama.py
+```
 
-Converts parsed CSVs into state-level SQLite databases with proper schemas and indexes.
 
-### Aggregater (`src/pipeline/aggregater.py`)
+### Validate
 
-_In progress_
+Runs a tiered validation check on a state's cleaned CSVs, checking for hard failures (missing columns, bad types), warnings (implausible dates, missing IDs), and schema drift between runs. Writes a report to `tests/reports/{state}_latest.json`.
 
-Merges all state databases into a single master database with a unified schema, deduplicating and aligning identifiers across states.
+```bash
+python3 tests/validate.py alabama
+```
 
-### Main & Control Functions
 
-_In progress_
+### Test Queries
 
-Top-level orchestrator script that ties all components together:
-- Decides which states to process
-- Manages pipeline execution order
-- Handles error recovery and resumption
-- Logs progress and generates reports
+Runs queries against a state's database to evaluate data quality after tabulation.
+
+```bash
+python3 tests/test_queries.py alabama
+```
+
+
+### Aggregate
+
+Merges all tabulated state databases into the master `data/state-level-cf.db`. Operates on all states present in `data/`.
+
+```bash
+python3 src/pipeline/aggregate.py
+```
+
+
+For more detailed source code documentation, see [docs/pipeline.md](docs/pipeline.md).
 
 ---
 
-## Directory Structure
+## Contributing
 
-```
-state-level campaign finance/
-├── README.md                          # This file
-├── requirements.txt                   # Python dependencies
-├── src/
-│   ├── main.py                        # Main orchestrator (in progress)
-│   ├── states/                        # Per-state downloaders
-│   │   ├── alabama.py
-│   │   ├── alaska.py
-│   │   ├── arizona.py
-│   │   ├── arkansas.py
-│   │   ├── california.py
-│   │   └── ...
-│   └── pipeline/
-│       ├── parsers/                   # Per-state parsers
-│       │   ├── alabama.py
-│       │   ├── alaska.py
-│       │   ├── arizona.py
-│       │   ├── arkansas.py
-│       │   ├── california.py
-│       │   └── ...
-│       ├── columns.py                 # Canonical schema definitions
-│       ├── tabulater.py               # CSV → SQLite (in progress)
-│       ├── aggregater.py              # Master database builder (in progress)
-│       └── loader.py                  # Load parser output to state DB
-├── data/
-│   ├── alabama/
-│   │   ├── raw/                       # Downloaded raw files
-│   │   ├── manifest.csv               # Download tracking
-│   │   └── state.db                   # State-level SQLite database
-│   ├── alaska/
-│   │   └── ...
-│   ├── master.db                      # Combined master database
-│   └── ...
-├── tests/
-│   ├── validate.py                    # Data validator
-│   └── reports/
-│       ├── alabama_latest.json
-│       ├── alaska_latest.json
-│       └── ...
-```
-
-
-
----
-
-
-## Development Notes
+For full details on adding a new state, see [docs/contributing.md](docs/contributing.md).
 
 ### Adding a New State
 
-1. **Create scraper**: `src/states/{state}.py`
-   - Download raw data from the state's disclosure site
-   - Populate `data/{state}/raw/` with files
-   - Maintain `data/{state}/manifest.csv` for resumable downloads
-
+1. **Create scraper**: `src/pipeline/scrapers/{state}.py`
 2. **Create parser**: `src/pipeline/parsers/{state}.py`
-   - Read raw files, normalize to five canonical tables
-   - Output: `{contributions, expenditures, candidates, committees, loans_debts}.csv`
+3. **Test & validate**: `python3 tests/validate.py {state}`
+4. **Register**: Add state to the main orchestrator
+5. **Upload**: Push to master db and repo
 
-3. **Test & validate**: Run `tests/validate.py {state}`
-   - Check for hard failures, warnings, schema drift
+---
 
-4. **Register**: Add state to main orchestrator for pipeline inclusion
+## Progress
+
+| State | Scraper | Parser | Contributor(s) | Notes |
+|-------|---------|--------|----------------|-------|
+| Alabama (AL) | ✅ | ✅ | @hderyke       | |
+| Alaska (AK) | ✅ | ✅ | @hderyke       | |
+| Arizona (AZ) | ⚠️ | ⚠️ | @hderyke       | |
+| Arkansas (AR) | ⚠️ | ⚠️ | @hderyke       | |
+| California (CA) | ⚠️ | ⚠️ | @hderyke       | |
+| Colorado (CO) | ⚠️ | ⚠️ | @hderyke       | |
+
+**Key:** ✅ Done &nbsp; ⚠️ Partial / known issues &nbsp; 🔲 Not yet run &nbsp; ❌ Broken
 

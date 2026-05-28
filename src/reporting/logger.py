@@ -1,5 +1,5 @@
 """
-src/logger.py — Shared logger for all pipeline components.
+src/reporting/logger.py — Shared logger for all pipeline components.
 
 Three modes, detected automatically from environment variables:
 
@@ -8,12 +8,12 @@ Three modes, detected automatically from environment variables:
                   logs/dev/{ts}-{operation}.jsonl          (state-less, e.g. aggregate)
 
   Orc mode    — CF_RUN_ID set. Console at INFO, JSONL to:
-                  logs/runs/{run_id}.jsonl                 (one file for the entire run)
+                  logs/prod/{YYYYMMDD_HHMMSS_command_states}.jsonl
 
   Daemon mode — CF_RUN_ID + CF_DAEMON set. Silent console, same JSONL as orc.
 
 Usage:
-    from src.logger import get_logger
+    from src.reporting.logger import get_logger
 
     log = get_logger("alabama", "scrape")   # state run
     log = get_logger(None, "aggregate")     # state-less run
@@ -21,9 +21,8 @@ Usage:
     log.info("Starting run")
     log.file_download_ok(filename="foo.csv", bytes=12345, rows=4321, duration_s=1.2)
     log.page_scrape_error(entity="pac", page_id=99, error="timeout")
-    log.run_summary(duration_s=180.4, files_ok=55, files_err=1)
 
-Operations: scrape | parse | validate | tabulate | aggregate
+Operations: scrape | parse | validate | tabulate | aggregate | orc | push | pull
 """
 
 import json
@@ -33,16 +32,18 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOGS_DIR     = PROJECT_ROOT / "logs"
-(LOGS_DIR / "runs").mkdir(parents=True, exist_ok=True)
+(LOGS_DIR / "prod").mkdir(parents=True, exist_ok=True)
 (LOGS_DIR / "dev").mkdir(parents=True, exist_ok=True)
 
 
 def _resolve_jsonl(state: str | None, operation: str) -> Path:
     run_id = os.environ.get("CF_RUN_ID")
     if run_id:
-        return LOGS_DIR / "runs" / f"{run_id}.jsonl"
+        run_dir = LOGS_DIR / "prod" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir / "log.jsonl"
     ts   = datetime.now().strftime("%Y%m%d%H%M%S")
     name = f"{ts}-{state}-{operation}" if state else f"{ts}-{operation}"
     return LOGS_DIR / "dev" / f"{name}.jsonl"
@@ -71,14 +72,14 @@ class StateLogger:
 
         self._log = log
 
-    # ── Standard passthrough ──────────────────────────────────────────────────
+    # ====================== Standard passthrough ======================
 
     def debug(self, msg: str):   self._log.debug(msg)
     def info(self, msg: str):    self._log.info(msg)
     def warning(self, msg: str): self._log.warning(msg)
     def error(self, msg: str):   self._log.error(msg)
 
-    # ── JSONL writer ──────────────────────────────────────────────────────────
+    # =========================== JSONL writer ===========================
 
     def _emit(self, type: str, **kwargs):
         event = {
@@ -91,7 +92,7 @@ class StateLogger:
         with open(self._jsonl, "a", encoding="utf-8") as f:
             f.write(json.dumps(event) + "\n")
 
-    # ── file_download events ──────────────────────────────────────────────────
+    # ====================== file_download events ======================
 
     def file_download_start(self, filename: str, **kwargs):
         """Console only — fires before the request so long fetches are visible."""
@@ -114,7 +115,7 @@ class StateLogger:
         """Debug only — skips are noise at INFO level."""
         self.debug(f"  – {filename}: already downloaded, skipping")
 
-    # ── page_scrape events ────────────────────────────────────────────────────
+    # ====================== page_scrape events ========================
 
     def page_scrape_ok(self, entity: str, page_id: str | int,
                        duration_s: float, **kwargs):
@@ -138,7 +139,7 @@ class StateLogger:
         self._emit("page_scrape", status="error", entity=entity,
                    page_id=str(page_id), error=error, **kwargs)
 
-    # ── file_parsed events ────────────────────────────────────────────────────
+    # ======================= file_parsed events =======================
     # Single event type for all file activity in a parser run.
     # Distinguish via role:
     #   "source"   — raw input file being transformed into a relation
@@ -161,7 +162,7 @@ class StateLogger:
         self._emit("file_parsed", status="error", filename=filename,
                    error=error, **kwargs)
 
-    # ── enrichment events ─────────────────────────────────────────────────────
+    # ======================= enrichment events ========================
     # Use for: loading registry/lookup tables and joining them into output rows.
 
     def registry_loaded(self, filename: str, entries: int, relation: str = "", **kwargs):
@@ -181,7 +182,6 @@ class StateLogger:
                           for k, v in kwargs.items())
         self.info(f"  Enriched: {parts}")
         self._emit("enrichment_summary", **kwargs)
-
 
 
 def get_logger(state: str | None, operation: str) -> StateLogger:

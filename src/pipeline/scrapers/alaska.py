@@ -1,3 +1,12 @@
+"""
+scrapers/alaska.py — Download Alaska APOC campaign finance data.
+
+Requires a live browser session via Playwright — Alaska's WAF blocks datacenter
+IPs, so this must be run from a local machine. Exports are triggered by clicking
+Search then Export, mirroring normal user interaction. GR and CR detail pages
+are scraped individually by numeric ID with a consecutive-blank cutoff.
+"""
+
 import csv
 import html as html_mod
 import re
@@ -6,15 +15,15 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import requests
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from src.logger import get_logger
-
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# Make project root and src/pipeline importable before importing local modules
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT))
+from src.reporting.logger import get_logger
+
+# =============================== paths ================================
 RAW_DIR      = PROJECT_ROOT / "data" / "Alaska" / "raw"
 MANIFEST     = PROJECT_ROOT / "data" / "Alaska" / "manifest.csv"
 
@@ -22,7 +31,10 @@ RAW_DIR.mkdir(parents=True, exist_ok=True)
 
 MANIFEST_COLS = ["relation_type", "year", "filename", "row_count"]
 
-# ── Pages ─────────────────────────────────────────────────────────────────────
+
+
+# =============================== pages ================================
+
 # Alaska requires a live browser session — Playwright handles this by clicking
 # Search then Export just like a user would. Must be run from a local machine;
 # datacenter IPs are blocked by Alaska's WAF.
@@ -43,12 +55,11 @@ STEMS = {
     "groups":       "GRForms",
 }
 
-# ── GR detail scrape ──────────────────────────────────────────────────────────
+# ========================== GR detail scrape ==========================
 GR_DETAIL_URL        = "https://aws.state.ak.us/apocreports/Common/View.aspx?ID={id}&ViewType=GR"
 GR_DETAILS_PATH      = RAW_DIR / "gr_details.csv"
 MIN_GR_ID            = 0
-MAX_GR_ID            = 7500   # ~7k known, buffer for new filings
-MAX_CONSECUTIVE_BLANK = 2500   # stop if this many consecutive IDs return blank
+MAX_CONSECUTIVE_BLANK = 2000   # stop if this many consecutive IDs return blank
 
 GR_DETAILS_COLS = [
     "gr_id", "group_name", "abbreviation", "group_type", "purpose",
@@ -58,11 +69,10 @@ GR_DETAILS_COLS = [
     "election_year", "submission_date", "previously_registered",
 ]
 
-# ── CR detail scrape ──────────────────────────────────────────────────────────
+# ========================== CR detail scrape ==========================
 CR_DETAIL_URL        = "https://aws.state.ak.us/apocreports/Common/View.aspx?ID={id}&ViewType=CR"
 CR_DETAILS_PATH      = RAW_DIR / "cr_details.csv"
 MIN_CR_ID            = 0
-MAX_CR_ID            = 9000   # IDs seen up to ~8003 for 2026 filings
 MAX_CONSECUTIVE_CR_BLANK = 2500
 
 CR_DETAILS_COLS = [
@@ -73,7 +83,7 @@ CR_DETAILS_COLS = [
     "submission_date", "previously_registered",
 ]
 
-# ── Shared field-label pattern (GR + CR) used by _get() as a lookahead stop ──
+# ======================== Field label pattern =========================
 FIELD_LABELS = [
     # GR fields
     "Group Name",
@@ -132,8 +142,9 @@ def _get(text: str, label: str) -> str:
     return " ".join(m.group(1).split()) if m else ""
 
 
-# ── Manifest helpers ──────────────────────────────────────────────────────────
+# ========================== Manifest helpers ==========================
 def load_manifest() -> tuple[set[tuple[str, str]], set[str]]:
+    """Return (done, has_data) sets from the manifest; empty sets if it doesn't exist."""
     done: set[tuple[str, str]] = set()
     has_data: set[str] = set()
     if not MANIFEST.exists():
@@ -145,7 +156,8 @@ def load_manifest() -> tuple[set[tuple[str, str]], set[str]]:
     return done, has_data
 
 
-def strip_manifest(keep_fn):
+def strip_manifest(keep_fn: callable) -> None:
+    """Rewrite the manifest keeping only rows where keep_fn(row) is True."""
     if not MANIFEST.exists():
         return
     with open(MANIFEST, newline="") as f:
@@ -156,7 +168,7 @@ def strip_manifest(keep_fn):
         writer.writerows(r for r in rows if keep_fn(r))
 
 
-def upsert_manifest(record: dict):
+def upsert_manifest(record: dict) -> None:
     """Add or overwrite the manifest entry matching (relation_type, year)."""
     existing = []
     if MANIFEST.exists():
@@ -172,6 +184,9 @@ def upsert_manifest(record: dict):
         writer.writerows(existing)
         writer.writerow(record)
 
+
+
+# ========================== Field extractors ==========================
 def extract_name(section: str) -> str:
     m = re.match(r"^(.*?)(?=\s+Address\s*:|\s+Phone\s*:|\Z)", section)
     return " ".join(m.group(1).split()) if m else ""
@@ -198,7 +213,7 @@ def parse_city_state_zip(text: str) -> tuple[str, str]:
     return city, zip_code
 
 
-# ── GR detail helpers ─────────────────────────────────────────────────────────
+# ========================= GR detail helpers ==========================
 def _strip_html(raw: str) -> str:
     raw = re.sub(
         r"<script.*?</script>",
@@ -327,14 +342,8 @@ def download_gr_details(page, log, force: bool = False) -> tuple[int, int]:
         done_ids, min_cy = load_done_gr_ids()
         floor = _gr_sweep_floor(done_ids, min_cy)
 
-    to_fetch = [i for i in range(floor, MAX_GR_ID + 1) if i not in done_ids]
-
-    if not to_fetch:
-        log.info("GR details: nothing new to fetch.")
-        return 0, 0
-
-    log.info(f"GR details: sweeping IDs {floor}–{MAX_GR_ID} "
-             f"({len(to_fetch)} to check, {len(done_ids)} already done)")
+    log.info(f"GR details: probing from ID {floor} "
+             f"({len(done_ids)} already done, stops after {MAX_CONSECUTIVE_BLANK} consecutive blanks)")
 
     if force and GR_DETAILS_PATH.exists():
         GR_DETAILS_PATH.unlink()
@@ -355,76 +364,78 @@ def download_gr_details(page, log, force: bool = False) -> tuple[int, int]:
             writer.writeheader()
 
         with logging_redirect_tqdm(loggers=[log._log]):
-            bar = tqdm(
-                to_fetch,
-                desc="  GR details",
-                unit="id",
-                dynamic_ncols=True,
-                colour="green",
-            )
+            with tqdm(desc="  GR details", unit="id", dynamic_ncols=True, colour="green") as bar:
+                gr_id = floor
+                while True:
+                    if gr_id in done_ids:
+                        gr_id += 1
+                        continue
 
-            for gr_id in bar:
-                url = GR_DETAIL_URL.format(id=gr_id)
+                    url = GR_DETAIL_URL.format(id=gr_id)
 
-                try:
-                    t0 = time.perf_counter()
-
-                    page.goto(url, timeout=30_000)
-                    page.wait_for_load_state("load")
-
-                    html = page.content()
-                    text = page.locator("body").inner_text()
-
-                    duration = time.perf_counter() - t0
-
-                    # Detect WAF block
-                    if "Request Rejected" in text:
-                        log.warning(
-                            f"WAF rejection at GR ID {gr_id}; sleeping and retrying"
-                        )
-                        time.sleep(5)
-
+                    try:
                         page.goto(url, timeout=30_000)
                         page.wait_for_load_state("load")
 
                         html = page.content()
                         text = page.locator("body").inner_text()
 
+                        # Detect WAF block
                         if "Request Rejected" in text:
-                            err += 1
+                            log.warning(
+                                f"WAF rejection at GR ID {gr_id}; sleeping and retrying"
+                            )
+                            time.sleep(5)
+
+                            page.goto(url, timeout=30_000)
+                            page.wait_for_load_state("load")
+
+                            html = page.content()
+                            text = page.locator("body").inner_text()
+
+                            if "Request Rejected" in text:
+                                err += 1
+                                gr_id += 1
+                                bar.update(1)
+                                continue
+
+                        parsed = parse_gr_page(html)
+
+                        if parsed is None:
+                            consecutive_blank += 1
+
+                            if consecutive_blank >= MAX_CONSECUTIVE_BLANK:
+                                log.info(
+                                    f"{MAX_CONSECUTIVE_BLANK} consecutive blanks — stopping at {gr_id}"
+                                )
+                                bar.update(1)
+                                break
+
+                            time.sleep(0.1)
+                            gr_id += 1
+                            bar.update(1)
                             continue
 
-                    parsed = parse_gr_page(html)
+                        consecutive_blank = 0
 
-                    if parsed is None:
-                        consecutive_blank += 1
+                        parsed["gr_id"] = gr_id
+                        writer.writerow(parsed)
 
-                        if consecutive_blank >= MAX_CONSECUTIVE_BLANK:
-                            log.info(
-                                f"{MAX_CONSECUTIVE_BLANK} consecutive blanks — stopping at {gr_id}"
-                            )
-                            break
+                        bar.set_postfix_str(
+                            parsed["group_name"][:45].ljust(45),
+                            refresh=False,
+                        )
 
-                        time.sleep(0.1)
-                        continue
+                        ok += 1
+                        time.sleep(0.2)
 
-                    consecutive_blank = 0
+                    except Exception as e:
+                        log.page_scrape_error(entity="group", page_id=gr_id, error=str(e))
+                        err += 1
+                        time.sleep(2)
 
-                    parsed["gr_id"] = gr_id
-                    writer.writerow(parsed)
-
-                    bar.set_postfix_str(
-                        parsed["group_name"][:45].ljust(45),
-                        refresh=False,
-                    )
-
-                    ok += 1
-                    time.sleep(0.2)
-
-                except Exception as e:
-                    log.page_scrape_error(entity="group", page_id=gr_id, error=str(e))
-                    err += 1
-                    time.sleep(2)
+                    gr_id += 1
+                    bar.update(1)
 
     total_rows = sum(1 for _ in open(GR_DETAILS_PATH, encoding="utf-8")) - 1 if GR_DETAILS_PATH.exists() else 0
     log.page_scrape_complete(filename=str(GR_DETAILS_PATH), rows=total_rows,
@@ -432,7 +443,7 @@ def download_gr_details(page, log, force: bool = False) -> tuple[int, int]:
     return ok, err
 
 
-# ── CR page parsing ───────────────────────────────────────────────────────────
+# ========================== CR page parsing ===========================
 def _clean_na(val: str) -> str:
     """Return '' for APOC's n/a / 'Did Not Report' sentinel values."""
     v = " ".join(val.split())
@@ -470,7 +481,7 @@ def parse_cr_page(raw_html: str) -> dict | None:
         m = re.search(pattern, text, re.IGNORECASE | re.VERBOSE | re.DOTALL)
         return " ".join(m.group(1).split()) if m else ""
 
-    # Treasurer section (Chair is often n/a for candidates)
+    # Treasurer section
     treas_m = re.search(
         r"Treasurer\s+Name\s*:\s*(.+?)(?=\bDeputy\b|\bBank\b|\bName\s+of\s+Bank\b|\Z)",
         text, re.IGNORECASE | re.DOTALL,
@@ -551,14 +562,8 @@ def download_cr_details(page, log, force: bool = False) -> tuple[int, int]:
         done_ids, min_cy = load_done_cr_ids()
         floor = _cr_sweep_floor(done_ids, min_cy)
 
-    to_fetch = [i for i in range(floor, MAX_CR_ID + 1) if i not in done_ids]
-
-    if not to_fetch:
-        log.info("CR details: nothing new to fetch.")
-        return 0, 0
-
-    log.info(f"CR details: sweeping IDs {floor}–{MAX_CR_ID} "
-             f"({len(to_fetch)} to check, {len(done_ids)} already done)")
+    log.info(f"CR details: probing from ID {floor} "
+             f"({len(done_ids)} already done, stops after {MAX_CONSECUTIVE_CR_BLANK} consecutive blanks)")
 
     if force and CR_DETAILS_PATH.exists():
         CR_DETAILS_PATH.unlink()
@@ -573,60 +578,64 @@ def download_cr_details(page, log, force: bool = False) -> tuple[int, int]:
             writer.writeheader()
 
         with logging_redirect_tqdm(loggers=[log._log]):
-            bar = tqdm(
-                to_fetch,
-                desc="  CR details",
-                unit="id",
-                dynamic_ncols=True,
-                colour="cyan",
-            )
-
-            for cr_id in bar:
-                url = CR_DETAIL_URL.format(id=cr_id)
-                try:
-                    t0 = time.perf_counter()
-                    page.goto(url, timeout=30_000)
-                    page.wait_for_load_state("load")
-
-                    html = page.content()
-                    text = page.locator("body").inner_text()
-                    duration = time.perf_counter() - t0
-
-                    if "Request Rejected" in text:
-                        log.warning(f"WAF rejection at CR ID {cr_id}; retrying")
-                        time.sleep(5)
-                        page.goto(url, timeout=30_000)
-                        page.wait_for_load_state("load")
-                        html = page.content()
-                        text = page.locator("body").inner_text()
-                        if "Request Rejected" in text:
-                            err += 1
-                            continue
-
-                    parsed = parse_cr_page(html)
-
-                    if parsed is None:
-                        consecutive_blank += 1
-                        if consecutive_blank >= MAX_CONSECUTIVE_CR_BLANK:
-                            log.info(f"{MAX_CONSECUTIVE_CR_BLANK} consecutive blanks — stopping at CR ID {cr_id}")
-                            break
-                        time.sleep(0.1)
+            with tqdm(desc="  CR details", unit="id", dynamic_ncols=True, colour="cyan") as bar:
+                cr_id = floor
+                while True:
+                    if cr_id in done_ids:
+                        cr_id += 1
                         continue
 
-                    consecutive_blank = 0
-                    parsed["cr_id"] = cr_id
-                    writer.writerow(parsed)
+                    url = CR_DETAIL_URL.format(id=cr_id)
+                    try:
+                        page.goto(url, timeout=30_000)
+                        page.wait_for_load_state("load")
 
-                    label = (parsed["candidate_last"] + ", " + parsed["candidate_first"])[:45]
-                    bar.set_postfix_str(label.ljust(45), refresh=False)
+                        html = page.content()
+                        text = page.locator("body").inner_text()
 
-                    ok += 1
-                    time.sleep(0.2)
+                        if "Request Rejected" in text:
+                            log.warning(f"WAF rejection at CR ID {cr_id}; retrying")
+                            time.sleep(5)
+                            page.goto(url, timeout=30_000)
+                            page.wait_for_load_state("load")
+                            html = page.content()
+                            text = page.locator("body").inner_text()
+                            if "Request Rejected" in text:
+                                err += 1
+                                cr_id += 1
+                                bar.update(1)
+                                continue
 
-                except Exception as e:
-                    log.page_scrape_error(entity="candidate", page_id=cr_id, error=str(e))
-                    err += 1
-                    time.sleep(2)
+                        parsed = parse_cr_page(html)
+
+                        if parsed is None:
+                            consecutive_blank += 1
+                            if consecutive_blank >= MAX_CONSECUTIVE_CR_BLANK:
+                                log.info(f"{MAX_CONSECUTIVE_CR_BLANK} consecutive blanks — stopping at CR ID {cr_id}")
+                                bar.update(1)
+                                break
+                            time.sleep(0.1)
+                            cr_id += 1
+                            bar.update(1)
+                            continue
+
+                        consecutive_blank = 0
+                        parsed["cr_id"] = cr_id
+                        writer.writerow(parsed)
+
+                        label = (parsed["candidate_last"] + ", " + parsed["candidate_first"])[:45]
+                        bar.set_postfix_str(label.ljust(45), refresh=False)
+
+                        ok += 1
+                        time.sleep(0.2)
+
+                    except Exception as e:
+                        log.page_scrape_error(entity="candidate", page_id=cr_id, error=str(e))
+                        err += 1
+                        time.sleep(2)
+
+                    cr_id += 1
+                    bar.update(1)
 
     total_rows = sum(1 for _ in open(CR_DETAILS_PATH, encoding="utf-8")) - 1 if CR_DETAILS_PATH.exists() else 0
     log.page_scrape_complete(filename=str(CR_DETAILS_PATH), rows=total_rows,
@@ -634,7 +643,7 @@ def download_cr_details(page, log, force: bool = False) -> tuple[int, int]:
     return ok, err
 
 
-# ── Playwright helpers ────────────────────────────────────────────────────────
+# ========================= Playwright helpers =========================
 def get_available_years(page) -> list[str]:
     sel = page.locator("select[name*='ddlReportYear']")
     if not sel.count():
@@ -648,7 +657,7 @@ def get_available_years(page) -> list[str]:
     return sorted(set(years))
 
 
-def download_candidates(page, context) -> tuple[str, int] | None:
+def download_candidates(page, context, log) -> tuple[str, int] | None:
     page_url = PAGES["candidates"]
     page.goto(page_url, timeout=30_000)
     page.wait_for_load_state("networkidle")
@@ -664,7 +673,7 @@ def download_candidates(page, context) -> tuple[str, int] | None:
 
     body_text = page.locator("body").inner_text()
     if "No records" in body_text or "0 records" in body_text.lower():
-        print("    (no records)")
+        log.info("  candidates: no records found")
         return None
 
     page.click("input[value='Export']")
@@ -673,7 +682,7 @@ def download_candidates(page, context) -> tuple[str, int] | None:
     try:
         csv_link.wait_for(timeout=15_000)
     except Exception:
-        print("    [!] Export dialog did not appear for candidates")
+        log.warning("  [!] Export dialog did not appear for candidates")
         return None
 
     filename = "CDCandidates_all.csv"
@@ -690,7 +699,7 @@ def download_candidates(page, context) -> tuple[str, int] | None:
     return filename, row_count
 
 
-def download_year(page, context, relation_type: str, year: str) -> tuple[str, int] | None:
+def download_year(page, context, relation_type: str, year: str, log) -> tuple[str, int] | None:
     page_url = PAGES[relation_type]
     page.goto(page_url, timeout=30_000)
     page.wait_for_load_state("networkidle")
@@ -711,7 +720,7 @@ def download_year(page, context, relation_type: str, year: str) -> tuple[str, in
 
     body_text = page.locator("body").inner_text()
     if "No records" in body_text or "0 records" in body_text.lower():
-        print(f"    (no records for {year})")
+        log.debug(f"  {relation_type} {year}: no records")
         return None
 
     filename = f"{STEMS[relation_type]}_{year}.csv"
@@ -734,18 +743,9 @@ def download_year(page, context, relation_type: str, year: str) -> tuple[str, in
     return filename, row_count
 
 
-# ── Main runner ───────────────────────────────────────────────────────────────
+# ============================ orchestrator ============================
 def run(force: bool = False, entities: bool = False, transactions: bool = False):
-    """
-    Flag semantics
-    ──────────────
-    (no flags)              current-year transactions + any missing entities
-    --transactions          transactions only (current-year always, past years if missing)
-    --entities              entities only (GR/CR details incremental, candidates if missing)
-    --force                 force-refresh everything
-    --force --transactions  force-refresh all transaction years
-    --force --entities      force-refresh all entities (GR/CR/candidates/groups)
-    """
+    """Orchestrate download of transaction CSVs and/or candidate/group entities."""
     log = get_logger("alaska", "scrape")
     t0  = time.perf_counter()
     log.info("Starting Alaska scraper")
@@ -790,7 +790,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
     )
 
     try:
-        # ── Playwright: transaction CSVs + candidate/group exports ────────────
+        # Playwright: transaction CSVs + candidate/group exports
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=False)
             context = browser.new_context(accept_downloads=True)
@@ -802,7 +802,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
 
                 log.info(f"\nAlaska {relation_type}:")
 
-                # ── Candidates ────────────────────────────────────────────────
+                # Candidates
                 if relation_type == "candidates":
                     key = ("candidates", "all")
                     cand_file = RAW_DIR / "CDCandidates_all.csv"
@@ -814,7 +814,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                         result  = None
                         err_msg = None
                         try:
-                            result = download_candidates(page, context)
+                            result = download_candidates(page, context, log)
                         except Exception as e:
                             err_msg = str(e)
 
@@ -837,7 +837,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                             done.add(key)
                     continue
 
-                # ── Transactional tables + groups ─────────────────────────────
+                # Transactional tables + groups
                 page.goto(page_url, timeout=30_000)
                 page.wait_for_load_state("networkidle")
 
@@ -864,7 +864,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                     result  = None
                     err_msg = None
                     try:
-                        result = download_year(page, context, relation_type, year)
+                        result = download_year(page, context, relation_type, year, log)
                     except Exception as e:
                         err_msg = str(e)
 
@@ -892,7 +892,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
 
             browser.close()
 
-        # ── GR + CR detail scrape (entities only) ────────────────────────────
+        # GR + CR detail scrape (entities only)
         if do_entities:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=False)
@@ -926,10 +926,21 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                   pages_ok=pages_ok, pages_err=pages_err)
         raise
 
-
+# ====== CLI ==================================
 if __name__ == "__main__":
+    # flag semantics
+    # --------------
+    # (no flags)              current-year transactions + any missing entities
+    # --transactions          transactions only (current-year always, past years if missing)
+    # --entities              entities only (GR/CR details incremental, candidates if missing)
+    # --force                 force-refresh everything
+    # --force --transactions  force-refresh all transaction years
+    # --force --entities      force-refresh all entities (GR/CR/candidates/groups)
     import argparse
-    ap = argparse.ArgumentParser(description="Alaska APOC scraper")
+    ap = argparse.ArgumentParser(
+        description="Download Alaska APOC campaign finance data. "
+                    "Fetches transaction CSVs and/or candidate/group registration details."
+    )
     ap.add_argument("--force",        action="store_true",
                     help="force re-download (scope: all, or --transactions/--entities)")
     ap.add_argument("--transactions", action="store_true",

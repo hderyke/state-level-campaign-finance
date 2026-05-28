@@ -2,12 +2,15 @@
 src/orc.py — High-level pipeline orchestration.
 
 Usage:
-    python3 src/orc.py rescrape             AK AL AZ
-    python3 src/orc.py update               AK AL
-    python3 src/orc.py update-entities      AK AL
-    python3 src/orc.py update-transactions  AK AL
+    python3 src/orc.py rescrape               AK AL AZ
+    python3 src/orc.py update                 AK AL
+    python3 src/orc.py update-entities        AK AL
+    python3 src/orc.py update-transactions    AK AL
+    python3 src/orc.py rescrape-entities      AK AL
+    python3 src/orc.py rescrape-transactions  AK AL
 """
 
+import csv
 import os
 import subprocess
 import sys
@@ -18,17 +21,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "pipeline"))
-from src.logger import get_logger
+from src.reporting.logger import get_logger
 import aggregate as _aggregate
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# ── State registry ─────────────────────────────────────────────────────────────
-ABBR_TO_NAME = {
-    "AL": "alabama",  "AK": "alaska",   "AZ": "arizona",  "AR": "arkansas",
-    "CA": "california", "CO": "colorado",
-    # extend as you add states
+# =========================== Configuration ===========================
+
+# Loaded from src/aliases/states.csv — add a row there to register a new state.
+_STATES_CSV  = PROJECT_ROOT / "src" / "aliases" / "states.csv"
+ABBR_TO_NAME: dict[str, str] = {
+    row["abbr"]: row["name"].lower()
+    for row in csv.DictReader(open(_STATES_CSV, encoding="utf-8"))
 }
+
+
 
 SCRAPER_DIR = PROJECT_ROOT / "src" / "pipeline" / "scrapers"
 PARSER_DIR  = PROJECT_ROOT / "src" / "pipeline" / "parsers"
@@ -37,19 +44,24 @@ VALIDATE    = PROJECT_ROOT / "tests" / "validate.py"
 
 PYTHON = sys.executable
 
-# ── Command → scraper mode ─────────────────────────────────────────────────────
 COMMAND_TO_MODE = {
-    "rescrape":             "force",
-    "update":               "update",
-    "update-entities":      "update-entities",
-    "update-transactions":  "update-transactions",
+    "rescrape":               "force",
+    "update":                 "update",
+    "update-entities":        "update-entities",
+    "update-transactions":    "update-transactions",
+    "rescrape-entities":      "rescrape-entities",
+    "rescrape-transactions":  "rescrape-transactions",
 }
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-def _setup_run_id() -> str:
-    """Generate a unique run ID, set CF_RUN_ID in env so subprocesses share it."""
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+# === Helpers ===========================================
+def _setup_run_id(command: str, state_abbrs: list[str]) -> str:
+    """Build a human-readable run ID and set CF_RUN_ID for all subprocesses."""
+    ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
+    cmd     = command.replace("-", "_")
+    states  = "all" if (len(state_abbrs) == 1 and state_abbrs[0].lower() == "all") \
+              else "-".join(a.upper() for a in state_abbrs)
+    run_id  = f"{ts}_{cmd}_{states}"
     os.environ["CF_RUN_ID"] = run_id
     return run_id
 
@@ -57,6 +69,19 @@ def _setup_run_id() -> str:
 def header(msg: str):
     bar = "─" * 60
     print(f"\n{bar}\n  {msg}\n{bar}")
+
+
+def _summary(results: dict[str, bool]):
+    bar = "=" * 60
+    print(f"\n{bar}\n  SUMMARY\n{bar}")
+    for abbr, ok in results.items():
+        mark = "✓" if ok else "✗"
+        print(f"  {mark}  {abbr}")
+    failed = [k for k, v in results.items() if not v]
+    if failed:
+        print(f"\n  {len(failed)} state(s) failed: {', '.join(failed)}")
+    else:
+        print(f"\n  All {len(results)} state(s) succeeded")
 
 
 def _subprocess(cmd: list[str], label: str) -> bool:
@@ -103,22 +128,30 @@ def _scraper_flags(state: str, mode: str) -> list[str]:
             "update":              ["--update"],
             "update-entities":     ["--update"],
             "update-transactions": ["--update"],
+            "rescrape-entities":   ["--force", "--update"],
+            "rescrape-transactions": ["--force", "--update"],
         }[mode]
     if state in ("alabama", "alaska"):
         return {
-            "force":               ["--force"],
-            "update":              [],
-            "update-entities":     ["--entities"],
-            "update-transactions": ["--transactions"],
+            "force":                 ["--force"],
+            "update":                [],
+            "update-entities":       ["--entities"],
+            "update-transactions":   ["--transactions"],
+            "rescrape-entities":     ["--force", "--entities"],
+            "rescrape-transactions": ["--force", "--transactions"],
         }[mode]
     return {
-        "force":               ["--force"],
-        "update":              [],
-        "update-entities":     ["--update-entities"],
-        "update-transactions": ["--update-transactions"],
+        "force":                 ["--force"],
+        "update":                [],
+        "update-entities":       ["--update-entities"],
+        "update-transactions":   ["--update-transactions"],
+        "rescrape-entities":     ["--force", "--update-entities"],
+        "rescrape-transactions": ["--force", "--update-transactions"],
     }[mode]
 
 
+
+# ====== Orchestration ========================
 def _run_state(abbr: str, name: str, scraper_mode: str,
                log, tabulate_on_pass: bool = True) -> bool:
     """
@@ -128,7 +161,7 @@ def _run_state(abbr: str, name: str, scraper_mode: str,
     """
     header(f"{abbr.upper()} — {scraper_mode}")
 
-    # 1. Scraper
+    # Scraper
     sp = scraper_path(name)
     if sp is None:
         print(f"  [!] No scraper found for {name} — skipping scrape step")
@@ -141,27 +174,28 @@ def _run_state(abbr: str, name: str, scraper_mode: str,
             log._emit("state_completed", state=name, status="failed", stage="scrape")
             return False
 
-    # 2. Parser
+    # Parser
     pp = parser_path(name)
     if pp is None:
         print(f"  [!] No parser found for {name} — skipping")
         log._emit("state_completed", state=name, status="failed", stage="parse",
                   reason="no parser found")
         return False
+
     ok = _subprocess([PYTHON, str(pp)], f"parser/{name}.py")
     if not ok:
         print(f"  [!] Parser failed for {abbr} — aborting this state")
         log._emit("state_completed", state=name, status="failed", stage="parse")
         return False
 
-    # 3. Validate
+    # Validate
     ok = _subprocess([PYTHON, str(VALIDATE), name], f"validate.py {name}")
     if not ok:
         print(f"  [!] Validation FAILED for {abbr} — NOT tabulating")
         log._emit("state_completed", state=name, status="failed", stage="validate")
         return False
 
-    # 4. Tabulate
+    # Tabulate
     if tabulate_on_pass:
         ok = _subprocess([PYTHON, str(TABULATE), name], f"tabulate.py {name}")
         if not ok:
@@ -173,22 +207,10 @@ def _run_state(abbr: str, name: str, scraper_mode: str,
     return True
 
 
-def _summary(results: dict[str, bool]):
-    bar = "=" * 60
-    print(f"\n{bar}\n  SUMMARY\n{bar}")
-    for abbr, ok in results.items():
-        mark = "✓" if ok else "✗"
-        print(f"  {mark}  {abbr}")
-    failed = [k for k, v in results.items() if not v]
-    if failed:
-        print(f"\n  {len(failed)} state(s) failed: {', '.join(failed)}")
-    else:
-        print(f"\n  All {len(results)} state(s) succeeded")
 
-
-# ── Main entrypoint ────────────────────────────────────────────────────────────
 def main(command: str, state_abbrs: list[str]):
-    run_id = _setup_run_id()
+    """Run the full pipeline (scrape → parse → validate → tabulate → aggregate) for the given states."""
+    run_id = _setup_run_id(command, state_abbrs)
     log    = get_logger(None, "orc")
     t0     = time.perf_counter()
 
@@ -241,18 +263,29 @@ def main(command: str, state_abbrs: list[str]):
         raise
 
 
-# ── CLI ────────────────────────────────────────────────────────────────────────
+# ======= CLI =========================
 if __name__ == "__main__":
+    # command semantics
+    # -----------------
+    # rescrape               force-refresh everything (scrape + parse + validate + tabulate)
+    # update                 scrape new data, then parse / validate / tabulate
+    # update-entities        fetch new entity registrations only
+    # update-transactions    fetch new transactions only
+    # rescrape-entities      force-refresh all entities
+    # rescrape-transactions  force-refresh all transactions
+
+    import argparse
     COMMANDS = list(COMMAND_TO_MODE.keys())
-
-    if len(sys.argv) < 3 or sys.argv[1] not in COMMANDS:
-        print("Usage: python3 src/orc.py <command> <STATE> [STATE ...]")
-        print(f"Commands: {', '.join(COMMANDS)}")
-        print("Example:  python3 src/orc.py update AK AL AZ")
-        sys.exit(1)
-
+    ap = argparse.ArgumentParser(
+        description="Run the campaign finance pipeline for one or more states.",
+        epilog="Example:  python3 src/orc.py update AK AL AZ",
+    )
+    ap.add_argument("command", choices=COMMANDS, help="Pipeline command to run")
+    ap.add_argument("states", nargs="+", metavar="STATE",
+                    help="State abbreviations (e.g. AK AL) or 'all'")
+    args = ap.parse_args()
     try:
-        main(sys.argv[1], sys.argv[2:])
+        main(args.command, args.states)
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception:

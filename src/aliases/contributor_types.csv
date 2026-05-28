@@ -1,0 +1,45 @@
+state,raw,canonical
+# == Alabama ===================================================================
+AL,Individual,Individual
+AL,Group/Business/Corporation,Organization
+AL,Group / Business / Corporation,Organization
+AL,PAC,PAC
+AL,Lending Institution,Organization
+AL,None,
+AL,Other,
+AL,Returned (Cash Only),
+AL,In-Kind (Itemized),
+# == Alaska ====================================================================
+# Alaska contributor_type is an APOC registration status, not a contributor category.
+# "Candidate" = any registered APOC entity (individuals, PACs, campaign committees, self-funders)
+# "Group" = unregistered/small contributors (individuals and orgs under reporting threshold)
+# "Entity" = large donors acting through a business entity
+# None map cleanly to canonical categories — all suppressed in aggregate.
+AK,Group,
+AK,Candidate,
+AK,Entity,
+# == Arkansas ==================================================================
+AR,Individual,Individual
+AR,Business/Organization/Unlisted PAC,Organization
+AR,Political Action Committee,PAC
+AR,Candidate,Candidate
+AR,County Political Party Committee,Party
+AR,Political Party,Party
+AR,Independent Expenditure Committee,PAC
+# == Arizona ===================================================================
+# contributor_type in AZ describes the recipient committee, not the contributor
+# — all mapped to NULL; contributor type is derivable from transaction_type instead
+AZ,Candidate,
+AZ,Party,
+AZ,PAC,
+AZ,Officeholder,
+# == California ================================================================
+CA,IND,Individual
+CA,OTH,Organization
+CA,COM,PAC
+CA,SCC,PAC
+CA,PTY,Party
+CA,BNM,Organization
+CA,RCP,
+CA,OFF,
+CA,Com,PAC

@@ -3,10 +3,12 @@ src/main.py — Single entry point for the campaign finance pipeline.
 
   Pipeline commands          stages run
   ─────────────────────────────────────────────────────────────────
-  update <states>            scrape → parse → validate → tabulate → aggregate
-  rescrape <states>          scrape --force → parse → validate → tabulate → aggregate
-  update-entities <states>   scrape --update-entities → parse → validate → tabulate → aggregate
-  update-transactions <st.>  scrape --update-transactions → parse → validate → tabulate → aggregate
+  update <states>                scrape → parse → validate → tabulate → aggregate
+  rescrape <states>              scrape --force → parse → validate → tabulate → aggregate
+  update-entities <states>       scrape --entities → parse → validate → tabulate → aggregate
+  update-transactions <states>   scrape --transactions → parse → validate → tabulate → aggregate
+  rescrape-entities <states>     scrape --force --entities → parse → validate → tabulate → aggregate
+  rescrape-transactions <states> scrape --force --transactions → parse → validate → tabulate → aggregate
 
   Data commands
   ─────────────────────────────────────────────────────────────────
@@ -17,6 +19,7 @@ src/main.py — Single entry point for the campaign finance pipeline.
            or 'all' to run every known state
 
   Flags:   --daemon           silent mode for scheduled/cron runs
+           --no-report        skip HTML report generation after run
 
   Examples
   ─────────────────────────────────────────────────────────────────
@@ -29,8 +32,11 @@ src/main.py — Single entry point for the campaign finance pipeline.
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
+
+# =========================== Configuration ===========================
 # Load .env (R2 credentials, etc.) before anything else
 try:
     from dotenv import load_dotenv
@@ -45,22 +51,29 @@ sys.path.insert(0, str(PROJECT_ROOT / "src" / "pipeline"))
 from src import orc
 from src import cloudflare
 
-PIPELINE_COMMANDS = {"update", "rescrape", "update-entities", "update-transactions"}
+PIPELINE_COMMANDS = {"update", "rescrape", "update-entities", "update-transactions",
+                     "rescrape-entities", "rescrape-transactions"}
 DATA_COMMANDS     = {"push", "pull"}
 ALL_COMMANDS      = PIPELINE_COMMANDS | DATA_COMMANDS
+
+# Set True to automatically generate an HTML report after every run.
+AUTO_REPORT = True
 
 
 def _print_help():
     print(__doc__)
 
 
-# ── Push / pull ────────────────────────────────────────────────────────────────
+# ====================== Push / pull dispatch =========================
+
 def _push(targets: list[str]):
+    """Route a push command to the appropriate cloudflare helper."""
     if not targets:
         print("[!] push requires a target: <states>, all, or db")
         sys.exit(1)
 
     if len(targets) == 1 and targets[0].lower() == "db":
+        # aggregate DB only
         db_path = PROJECT_ROOT / "data" / "state-level-cf.db"
         if not db_path.exists():
             print(f"[!] Aggregate db not found: {db_path}")
@@ -68,9 +81,11 @@ def _push(targets: list[str]):
         cloudflare.push_file(db_path, "data/state-level-cf.db")
 
     elif len(targets) == 1 and targets[0].lower() == "all":
+        # all state data directories
         cloudflare.push_all(PROJECT_ROOT)
 
     else:
+        # one or more state abbreviations
         for abbr in targets:
             state_name = orc.ABBR_TO_NAME.get(abbr.upper())
             if not state_name:
@@ -81,18 +96,22 @@ def _push(targets: list[str]):
 
 
 def _pull(targets: list[str]):
+    """Route a pull command to the appropriate cloudflare helper."""
     if not targets:
         print("[!] pull requires a target: <states>, all, or db")
         sys.exit(1)
 
     if len(targets) == 1 and targets[0].lower() == "db":
+        # aggregate DB only
         db_path = PROJECT_ROOT / "data" / "state-level-cf.db"
         cloudflare.pull_file("data/state-level-cf.db", db_path)
 
     elif len(targets) == 1 and targets[0].lower() == "all":
+        # all state data directories
         cloudflare.pull_all(PROJECT_ROOT)
 
     else:
+        # one or more state abbreviations
         for abbr in targets:
             state_name = orc.ABBR_TO_NAME.get(abbr.upper())
             if not state_name:
@@ -101,13 +120,16 @@ def _pull(targets: list[str]):
             cloudflare.pull_state(state_name.capitalize(), PROJECT_ROOT)
 
 
-# ── Entrypoint ─────────────────────────────────────────────────────────────────
+# ========================== Entry point ==============================
+
 def main():
+    """Parse top-level CLI args and dispatch to orc, push, or pull."""
     args = sys.argv[1:]
 
-    # Strip --daemon flag wherever it appears
-    daemon = "--daemon" in args
-    args   = [a for a in args if a != "--daemon"]
+    # Strip --daemon and --no-report flags wherever they appear
+    daemon    = "--daemon" in args
+    no_report = "--no-report" in args
+    args      = [a for a in args if a not in ("--daemon", "--no-report")]
 
     if not args or args[0] in ("-h", "--help"):
         _print_help()
@@ -129,13 +151,13 @@ def main():
     if daemon:
         os.environ["CF_DAEMON"] = "1"
 
-    # All commands get a run ID so logs always land in logs/runs/
-    if not os.environ.get("CF_RUN_ID"):
-        import uuid
-        from datetime import datetime
-        os.environ["CF_RUN_ID"] = (
-            datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
-        )
+    # Push/pull get named run IDs here; pipeline commands let orc._setup_run_id handle it
+    if command in DATA_COMMANDS and not os.environ.get("CF_RUN_ID"):
+        ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+        tgt = (targets[0].lower()
+               if len(targets) == 1 and targets[0].lower() in ("all", "db")
+               else "-".join(t.upper() for t in targets))
+        os.environ["CF_RUN_ID"] = f"{ts}_{command}_{tgt}"
 
     if command in PIPELINE_COMMANDS:
         orc.main(command, targets)
@@ -146,11 +168,26 @@ def main():
     elif command == "pull":
         _pull(targets)
 
+    if AUTO_REPORT and not no_report:
+        run_id = os.environ.get("CF_RUN_ID")
+        if run_id:
+            run_dir = PROJECT_ROOT / "logs" / "prod" / run_id
+            log_path = run_dir / "log.jsonl"
+            if log_path.exists():
+                from src.reporting import log_report
+                report   = log_report.build_report(log_report.load_events(log_path))
+                html     = log_report.render_html(report, log_path, run_dir=run_dir)
+                out_path = run_dir / "report.html"
+                out_path.write_text(html, encoding="utf-8")
+                print(f"  ✓ report → {out_path.relative_to(PROJECT_ROOT)}")
 
+# =============== CLI ======================
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception:
+        import traceback
+        traceback.print_exc()
         sys.exit(1)

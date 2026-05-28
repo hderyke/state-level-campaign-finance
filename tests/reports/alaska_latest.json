@@ -1,71 +1,105 @@
 {
   "state": "AK",
-  "run_at": "2026-05-20T13:14:02.321712",
+  "run_at": "2026-05-28T17:09:24.264483",
   "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/alaska/cleaned",
   "passed": true,
   "row_counts": {
-    "candidates": 6103,
-    "committees": 1782,
-    "contributions": 1515307,
-    "expenditures": 194333
+    "candidates": 6109,
+    "committees": 1783,
+    "contributions": 1514931,
+    "expenditures": 194310
+  },
+  "sampled_tables": {
+    "contributions": 1514931
   },
   "tier1_failures": [],
+  "tier1_fill_rates": {
+    "candidates": {
+      "_total": 6109,
+      "state": 100.0,
+      "person_id": 100.0,
+      "state_filer_id": 100.0,
+      "candidate_name": 100.0
+    },
+    "committees": {
+      "_total": 1783,
+      "state": 100.0,
+      "state_filer_id": 100.0
+    },
+    "contributions": {
+      "_total": 500000,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    },
+    "expenditures": {
+      "_total": 194310,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    }
+  },
   "tier2_warnings": [
     {
       "table": "contributions",
-      "warning": "3142 rows have negative amount \u2014 may indicate refunds/reversals"
+      "warning": "499,969 non-empty 'contributor_state' values are not recognised US state/territory codes (100.0%) \u2014 e.g. ['AE', 'Alabama', 'Alaska', 'American Samoa', 'Arizona']"
+    },
+    {
+      "table": "contributions",
+      "warning": "2,169 non-empty 'contributor_zip' values don't match ZIP format (0.4%) \u2014 e.g. ['#N/A', '$10.00', '$14.00', '$140.00', '$15.00']"
     },
     {
       "table": "expenditures",
-      "warning": "3562 rows have negative amount \u2014 may indicate refunds/reversals"
+      "warning": "194,129 non-empty 'payee_state' values are not recognised US state/territory codes (99.9%) \u2014 e.g. ['02-523', '2010', '2D02', '5928LW', 'AUS']"
     },
     {
-      "table": "candidates",
-      "warning": "Only 78.1% of rows have office \u2014 check parser"
-    },
-    {
-      "table": "candidates",
-      "warning": "Only 0.0% of rows have party \u2014 check parser"
+      "table": "expenditures",
+      "warning": "4,063 non-empty 'payee_zip' values don't match ZIP format (2.1%) \u2014 e.g. ['\"02451', '\"06830', '$75,204.00', '$99,804.00', '+++0']"
     }
   ],
   "tier2_enrichment": {
     "candidates": {
-      "total": 6103,
+      "total": 6109,
       "person_id": 100.0,
       "candidate_first": 100.0,
       "candidate_last": 100.0,
-      "office": 78.1,
+      "office": 78.2,
       "district": 0.0,
       "jurisdiction": 100.0,
       "party": 0.0,
       "election_year": 100.0,
-      "status": 100.0,
       "incumbent": 0.0
     },
     "committees": {
-      "total": 1782,
+      "total": 1783,
       "committee_type": 100.0,
       "committee_name": 100.0,
-      "candidate_name": 45.5,
+      "candidate_name": 45.4,
       "treasurer_name": 82.4,
       "city": 83.1,
       "zip": 83.1
     },
     "contributions": {
-      "total": 1000000,
+      "total": 500000,
       "contributor_name": 100.0,
       "contributor_type": 100.0,
       "contributor_city": 99.8,
       "contributor_state": 100.0,
       "contributor_zip": 99.8,
-      "employer": 84.3,
-      "occupation": 72.6,
-      "candidate_name": 21.3,
-      "office": 19.3,
+      "employer": 86.8,
+      "occupation": 73.4,
+      "candidate_name": 22.3,
+      "office": 20.0,
       "election_year": 100.0
     },
     "expenditures": {
-      "total": 194333,
+      "total": 194310,
       "payee_name": 100.0,
       "transaction_type": 100.0,
       "purpose": 100.0,
@@ -76,6 +110,25 @@
       "candidate_name": 67.9,
       "office": 60.6,
       "election_year": 100.0
+    }
+  },
+  "tier2_breakdowns": {
+    "committees": {
+      "committee_type": {
+        "Candidate": 1104,
+        "Independent Expenditure": 155,
+        "Ballot Proposition": 153,
+        "PAC": 149,
+        "Special Interest": 99,
+        "Political Party": 81,
+        "Initiative Proposal": 27,
+        "Controlled": 7,
+        "Entity": 7,
+        "Group": 1
+      },
+      "active": {
+        "(blank)": 1783
+      }
     }
   },
   "drift_warnings": []

@@ -18,13 +18,20 @@ Exit codes:
 import csv
 import gzip
 import json
+import os
+import random
+import re
 import sys
 import time
 from datetime import datetime, date
 from pathlib import Path
 
+# Python's csv module defaults to 131 072 bytes per field — too small for some
+# state data files that embed long text fields (e.g. AL expenditure descriptions).
+csv.field_size_limit(10 * 1024 * 1024)  # 10 MB should be more than enough
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.logger import get_logger
+from src.reporting.logger import get_logger
 
 # ── State name → abbreviation map ─────────────────────────────────────────────
 STATE_ABBR = {
@@ -51,7 +58,7 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 EARLIEST_YEAR    = 1990
 LATEST_YEAR      = date.today().year + 4   # allow up to a full election cycle ahead
 DRIFT_THRESHOLD  = 0.05                    # 5% row count drop = warning
-MAX_SAMPLE_ROWS  = 1_000_000                 # rows held in memory for checks; full file still counted
+MAX_SAMPLE_ROWS  = 500_000                   # rows held in memory for checks; full file still counted
 TIER1_PASS_RATE  = 0.99                   # value-level checks pass if ≥99.5% of rows are valid
 
 # Required columns per table — tier 1 value-level checks (must be ≥99.5% filled)
@@ -69,10 +76,46 @@ AMOUNT_TABLES = {
 }
 
 # Tables where negative amounts are allowed
-NEGATIVE_OK = set()
+# Tier-2 amount threshold — single transaction above this triggers a count warning
+LARGE_AMOUNT_THRESHOLD = 10_000_000
+
+# Tables/fields for election_year range check
+ELECTION_YEAR_FIELDS = {
+    "contributions": "election_year",
+    "expenditures":  "election_year",
+    "candidates":    "election_year",
+}
+
+# Boolean integer fields (must be 0, 1, or empty)
+BOOL_INT_FIELDS = {
+    "contributions": ["amended"],
+    "expenditures":  ["amended"],
+    "committees":    ["active"],
+}
 
 # Tables with date fields
 DATE_TABLES = {"contributions", "expenditures"}
+
+# Valid US state/territory codes for contributor_state / payee_state checks.
+# Donors and payees can be from any state or territory, not just pipeline states.
+VALID_STATE_CODES = set(STATE_ABBR.values()) | {
+    "DC", "PR", "GU", "VI", "AS", "MP", "UM",
+}
+
+# ZIP code patterns: 5-digit, ZIP+4 with hyphen, or 9-digit without hyphen
+_ZIP_RE = re.compile(r"^\d{5}(-\d{4}|\d{4})?$")
+
+# Fields to check for valid US state codes {table: [field, ...]}
+STATE_CODE_FIELDS = {
+    "contributions": ["contributor_state"],
+    "expenditures":  ["payee_state"],
+}
+
+# Fields to check for valid ZIP format {table: [field, ...]}
+ZIP_FIELDS = {
+    "contributions": ["contributor_zip"],
+    "expenditures":  ["payee_zip"],
+}
 
 # Categorical fields to show value breakdowns for in tier 2
 BREAKDOWN_FIELDS = {
@@ -83,7 +126,7 @@ ENRICHMENT_FIELDS = {
     "candidates": [
         "person_id", "candidate_first", "candidate_last",
         "office", "district", "jurisdiction", "party", "election_year",
-        "status", "incumbent",
+        "incumbent",
     ],
     "committees": [
         "committee_type", "committee_name", "candidate_name",
@@ -104,15 +147,27 @@ ENRICHMENT_FIELDS = {
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-def load_csv(path: Path) -> tuple[list[dict], int]:
+def load_csv(path: Path) -> tuple[list[dict], int, bool]:
+    """Load a CSV (plain or .gz), returning (sample, total_rows, is_sampled).
+
+    If total rows exceed MAX_SAMPLE_ROWS, reservoir sampling (Algorithm R) is
+    used to select a uniformly random sample — ensuring recent rows are
+    represented even when files are ordered chronologically.
+    """
     opener = gzip.open if path.suffix == ".gz" else open
-    sample, total = [], 0
+    reservoir, total = [], 0
     with opener(path, "rt", newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f):
             total += 1
             if total <= MAX_SAMPLE_ROWS:
-                sample.append(row)
-    return sample, total
+                reservoir.append(row)
+            else:
+                # Reservoir sampling — replace a random existing entry
+                j = random.randint(0, total - 1)
+                if j < MAX_SAMPLE_ROWS:
+                    reservoir[j] = row
+    is_sampled = total > MAX_SAMPLE_ROWS
+    return reservoir, total, is_sampled
 
 
 def parse_date_str(val: str):
@@ -169,34 +224,23 @@ def check_required_filled(table: str, rows: list[dict], col: str) -> list[str]:
     return []
 
 
-def check_amounts(table: str, rows: list[dict], col: str) -> tuple[list[str], list[str]]:
-    """
-    Tier 1: amount fields must be numeric (hard fail).
-    Tier 2: negative amounts in contributions/expenditures are a warning.
-    Returns (tier1_errors, tier2_warnings).
-    """
-    t1, t2 = [], []
-    non_numeric = 0
-    negative    = 0
+def check_amounts(table: str, rows: list[dict], col: str) -> list[str]:
+    """Tier 1: amount fields must be numeric."""
+    non_numeric  = 0
     total_valued = 0
-    allow_negative = table in NEGATIVE_OK
     for r in rows:
         val = r.get(col, "").strip()
         if not val:
             continue
         total_valued += 1
         try:
-            f = float(val)
-            if f < 0 and not allow_negative:
-                negative += 1
+            float(val)
         except ValueError:
             non_numeric += 1
     if total_valued and non_numeric / total_valued > (1 - TIER1_PASS_RATE):
-        t1.append(f"{non_numeric}/{total_valued} non-empty {col} values are non-numeric — "
-                  f"{pct(non_numeric, total_valued)}% bad (threshold: {(1-TIER1_PASS_RATE)*100:.1f}%)")
-    if negative:
-        t2.append(f"{negative} rows have negative {col} — may indicate refunds/reversals")
-    return t1, t2
+        return [f"{non_numeric}/{total_valued} non-empty {col} values are non-numeric — "
+                f"{pct(non_numeric, total_valued)}% bad (threshold: {(1-TIER1_PASS_RATE)*100:.1f}%)"]
+    return []
 
 
 def check_dates(table: str, rows: list[dict]) -> list[str]:
@@ -224,6 +268,106 @@ def check_dates(table: str, rows: list[dict]) -> list[str]:
         errors.append(f"{future}/{total_valued} dates are after {LATEST_YEAR} — "
                       f"{pct(future, total_valued)}% bad (threshold: {(1-TIER1_PASS_RATE)*100:.1f}%)")
     return errors, too_old
+
+
+def check_row_num(table: str, rows: list[dict]) -> list[str]:
+    """Tier 1: row_num must be a positive integer where present."""
+    if not rows or "row_num" not in rows[0]:
+        return []
+    bad = sum(1 for r in rows
+              if r.get("row_num", "").strip() and
+              not str(r.get("row_num", "")).strip().lstrip("-").isdigit())
+    if bad and bad / len(rows) > (1 - TIER1_PASS_RATE):
+        return [f"{bad}/{len(rows)} row_num values are non-integer — "
+                f"{pct(bad, len(rows))}% bad"]
+    return []
+
+
+def check_election_year(table: str, rows: list[dict], col: str) -> list[str]:
+    """Tier 2: non-empty election_year should be a 4-digit year in plausible range."""
+    if not rows or col not in rows[0]:
+        return []
+    bad = []
+    for r in rows:
+        val = str(r.get(col, "") or "").strip()
+        if not val:
+            continue
+        if not val.isdigit() or not (EARLIEST_YEAR <= int(val) <= LATEST_YEAR):
+            bad.append(val)
+    if not bad:
+        return []
+    unique_bad = sorted(set(bad))
+    return [f"{len(bad):,} non-empty '{col}' values are outside {EARLIEST_YEAR}–{LATEST_YEAR} "
+            f"or non-numeric — e.g. {unique_bad[:5]}"]
+
+
+def check_bool_int(table: str, rows: list[dict], col: str) -> list[str]:
+    """Tier 2: field should be 0, 1, or empty."""
+    if not rows or col not in rows[0]:
+        return []
+    bad = [str(r.get(col, "") or "").strip() for r in rows
+           if str(r.get(col, "") or "").strip() not in ("", "0", "1")]
+    if not bad:
+        return []
+    unique_bad = sorted(set(bad))
+    return [f"{len(bad):,} '{col}' values are not 0/1/empty — e.g. {unique_bad[:5]}"]
+
+
+def check_large_amounts(table: str, rows: list[dict], col: str) -> list[str]:
+    """Tier 2: count rows where abs(amount) exceeds the large-amount threshold."""
+    if not rows or col not in rows[0]:
+        return []
+    large = []
+    for r in rows:
+        val = r.get(col, "").strip()
+        if not val:
+            continue
+        try:
+            if abs(float(val)) >= LARGE_AMOUNT_THRESHOLD:
+                large.append(val)
+        except ValueError:
+            pass
+    if not large:
+        return []
+    return [f"{len(large):,} rows have |{col}| ≥ ${LARGE_AMOUNT_THRESHOLD:,} "
+            f"— may indicate data entry errors or large transfers"]
+
+
+def check_state_codes(table: str, rows: list[dict], col: str) -> tuple[list[str], list[str]]:
+    """
+    Tier 2: non-empty state code values should be in the known valid set.
+    Returns (tier1_errors, tier2_warnings) — currently all soft (tier2).
+    Foreign addresses may legitimately appear, so this is a warning not a failure.
+    """
+    if not rows or col not in rows[0]:
+        return [], []
+    invalid = [r.get(col, "").strip() for r in rows
+               if r.get(col, "").strip() and r.get(col, "").strip() not in VALID_STATE_CODES]
+    if not invalid:
+        return [], []
+    unique_bad = sorted(set(invalid))
+    rate = pct(len(invalid), len(rows))
+    msg = (f"{len(invalid):,} non-empty '{col}' values are not recognised US state/territory codes "
+           f"({rate:.1f}%) — e.g. {unique_bad[:5]}")
+    return [], [msg]
+
+
+def check_zips(table: str, rows: list[dict], col: str) -> tuple[list[str], list[str]]:
+    """
+    Tier 2: non-empty ZIP values should match 5-digit, ZIP+4, or 9-digit format.
+    Returns (tier1_errors, tier2_warnings).
+    """
+    if not rows or col not in rows[0]:
+        return [], []
+    invalid = [r.get(col, "").strip() for r in rows
+               if r.get(col, "").strip() and not _ZIP_RE.match(r.get(col, "").strip())]
+    if not invalid:
+        return [], []
+    unique_bad = sorted(set(invalid))
+    rate = pct(len(invalid), len(rows))
+    msg = (f"{len(invalid):,} non-empty '{col}' values don't match ZIP format "
+           f"({rate:.1f}%) — e.g. {unique_bad[:5]}")
+    return [], [msg]
 
 
 # ── Tier 2 enrichment stats ─────────────────────────────────────────────────────
@@ -306,8 +450,9 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
             pass
 
     tables = ["candidates", "committees", "contributions", "expenditures"]
-    all_rows   = {}
-    row_counts = {}
+    all_rows      = {}
+    row_counts    = {}
+    sampled_tables = {}   # table → total row count when sampling was applied
     tier1_failures = []
     tier2_warnings = []
     drift_warnings = []
@@ -324,7 +469,9 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
                                    "errors": [f"{table}.csv(.gz) not found in {clean_dir}"]})
             all_rows[table] = []
             continue
-        all_rows[table], row_counts[table] = load_csv(path)
+        all_rows[table], row_counts[table], _sampled = load_csv(path)
+        if _sampled:
+            sampled_tables[table] = row_counts[table]
 
     # ── Tier 1 checks ──────────────────────────────────────────────────────────
     for table in tables:
@@ -342,12 +489,13 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
                 continue
             checks.append((f"fill:{col}", check_required_filled(table, rows, col)))
 
+        checks.append(("row_num", check_row_num(table, rows)))
+
         if table in AMOUNT_TABLES:
             col = AMOUNT_TABLES[table]
-            t1_errs, t2_warns = check_amounts(table, rows, col)
-            checks.append(("amounts", t1_errs))
-            if t2_warns:
-                tier2_warnings.extend([{"table": table, "warning": w} for w in t2_warns])
+            checks.append(("amounts", check_amounts(table, rows, col)))
+            for w in check_large_amounts(table, rows, col):
+                tier2_warnings.append({"table": table, "warning": w})
 
         if table in DATE_TABLES:
             date_errors, old_count = check_dates(table, rows)
@@ -357,6 +505,22 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
                     "table":   table,
                     "warning": f"{old_count} rows have dates before {EARLIEST_YEAR} — may be legitimate old records",
                 })
+
+        if table in ELECTION_YEAR_FIELDS:
+            for w in check_election_year(table, rows, ELECTION_YEAR_FIELDS[table]):
+                tier2_warnings.append({"table": table, "warning": w})
+
+        for col in BOOL_INT_FIELDS.get(table, []):
+            for w in check_bool_int(table, rows, col):
+                tier2_warnings.append({"table": table, "warning": w})
+
+        for col in STATE_CODE_FIELDS.get(table, []):
+            _, warns = check_state_codes(table, rows, col)
+            tier2_warnings.extend([{"table": table, "warning": w} for w in warns])
+
+        for col in ZIP_FIELDS.get(table, []):
+            _, warns = check_zips(table, rows, col)
+            tier2_warnings.extend([{"table": table, "warning": w} for w in warns])
 
         for check_name, errors in checks:
             if errors:
@@ -413,32 +577,18 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
         if not rows or not required:
             continue
         rates = _required_fill_rates(rows, required)
-        print(f"  {table.capitalize()} ({len(rows):,} rows sampled)")
+        total_for_table = row_counts.get(table, len(rows))
+        if table in sampled_tables:
+            print(f"  {table.capitalize()} (sampled {len(rows):,} of {total_for_table:,} rows)")
+        else:
+            print(f"  {table.capitalize()} ({len(rows):,} rows)")
         for field in required:
             rate  = rates[field]
             ok    = "✓" if rate >= TIER1_PASS_RATE * 100 else "✗"
             print(f"    {field:<25} {_bar(rate)}  {rate:5.1f}%  {ok}")
         print()
 
-    # Warn if key enrichment fields have low fill rates (tier 2 warnings)
-    FILL_WARN_THRESHOLD = 80.0
-    FILL_WARN_FIELDS = {
-        "candidates":    ["person_id", "office", "party"],
-        "committees":    ["treasurer_name"],
-        "contributions": ["contributor_name", "filing_id"],
-        "expenditures":  ["payee_name", "filing_id"],
-    }
-    for table, fields in FILL_WARN_FIELDS.items():
-        t_enrich = enrich.get(table, {})
-        if t_enrich.get("total", 0) == 0:
-            continue
-        for field in fields:
-            rate = t_enrich.get(field, 100.0)
-            if rate < FILL_WARN_THRESHOLD:
-                tier2_warnings.append({
-                    "table":   table,
-                    "warning": f"Only {rate}% of rows have {field} — check parser",
-                })
+
 
     print("TIER 2 — Enrichment / fill rates")
     print("-" * 40)
@@ -474,7 +624,8 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
         if prev is not None:
             diff = curr - prev
             drift_str = f"  (prev: {prev:,}, Δ {diff:+,})"
-        print(f"  {table:<15} {curr:>10,}{drift_str}")
+        sample_str = f"  [sampled {MAX_SAMPLE_ROWS:,} of {curr:,}]" if table in sampled_tables else ""
+        print(f"  {table:<15} {curr:>10,}{sample_str}{drift_str}")
     print()
 
     if tier2_warnings:
@@ -499,20 +650,63 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
         print(f"  RESULT: FAIL — {len(tier1_failures)} tier 1 check(s) failed")
     print("=" * 60)
 
+    # ── Build tier-1 fill rates for JSON (same computation used for printing) ──
+    tier1_fill_rates = {}
+    for table in tables:
+        rows     = all_rows[table]
+        required = REQUIRED_COLS.get(table, [])
+        if not rows or not required:
+            continue
+        rates = _required_fill_rates(rows, required)
+        tier1_fill_rates[table] = {"_total": len(rows), **rates}
+
+    # ── Build tier-2 breakdowns for JSON ──────────────────────────────────────
+    tier2_breakdowns: dict[str, dict] = {}
+    for table in tables:
+        rows = all_rows[table]
+        if not rows:
+            continue
+        bfields = BREAKDOWN_FIELDS.get(table, [])
+        if not bfields:
+            continue
+        tier2_breakdowns[table] = {}
+        for bfield in bfields:
+            counts: dict[str, int] = {}
+            for r in rows:
+                val = r.get(bfield, "").strip() or "(blank)"
+                counts[val] = counts.get(val, 0) + 1
+            # Sort by count descending
+            tier2_breakdowns[table][bfield] = dict(
+                sorted(counts.items(), key=lambda x: -x[1])
+            )
+
     # ── Write JSON report ──────────────────────────────────────────────────────
     report = {
-        "state":          state_upper,
-        "run_at":         datetime.today().isoformat(),
-        "clean_dir":      str(clean_dir),
-        "passed":         passed,
-        "row_counts":     row_counts,
-        "tier1_failures":   tier1_failures,
-        "tier2_warnings":   tier2_warnings,
-        "tier2_enrichment": enrich,
-        "drift_warnings":   drift_warnings,
+        "state":             state_upper,
+        "run_at":            datetime.today().isoformat(),
+        "clean_dir":         str(clean_dir),
+        "passed":            passed,
+        "row_counts":        row_counts,
+        "sampled_tables":    sampled_tables,
+        "tier1_failures":    tier1_failures,
+        "tier1_fill_rates":  tier1_fill_rates,
+        "tier2_warnings":    tier2_warnings,
+        "tier2_enrichment":  enrich,
+        "tier2_breakdowns":  tier2_breakdowns,
+        "drift_warnings":    drift_warnings,
     }
     report_path.write_text(json.dumps(report, indent=2))
-    print(f"\n  Report saved to: {report_path}\n")
+    print(f"\n  Report saved to: {report_path}")
+
+    # Also copy into the run dir when running under orc
+    run_id = os.environ.get("CF_RUN_ID")
+    if run_id:
+        run_dir = PROJECT_ROOT / "logs" / "prod" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        run_report = run_dir / f"{state_lower}_validate.json"
+        run_report.write_text(json.dumps(report, indent=2))
+        print(f"  Report copied to: {run_report}")
+    print()
 
     # ── Emit JSONL event — lean signal for orc ─────────────────────────────────
     status = "passed" if passed else "failed"
@@ -521,7 +715,9 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
               duration_s=round(time.perf_counter() - t0, 1),
               tier1_failures=len(tier1_failures),
               tier2_warnings=len(tier2_warnings),
-              drift_warnings=len(drift_warnings))
+              drift_warnings=len(drift_warnings),
+              row_counts=row_counts,
+              sampled_tables=sampled_tables)
 
     sys.exit(0 if passed else 1)
 

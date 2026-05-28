@@ -18,7 +18,7 @@ import os
 import traceback
 from contextlib import contextmanager
 
-from src.logger import StateLogger
+from src.reporting.logger import StateLogger
 
 
 @contextmanager
@@ -33,7 +33,7 @@ def pipeline_stage(log: StateLogger, component: str):
     Dev mode         — complete no-op. Exceptions propagate to the terminal as
                        normal so you get the full stack trace.
     """
-    if not os.environ.get("CF_RUN_ID"):
+    if not os.environ.get("CF_RUN_ID"):  # set by orc.py when running a managed pipeline job
         yield   # dev mode: don't interfere
         return
 

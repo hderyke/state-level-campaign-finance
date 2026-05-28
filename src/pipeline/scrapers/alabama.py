@@ -1,3 +1,11 @@
+"""
+scrapers/alabama.py — Download Alabama campaign finance data from the FCPA site.
+
+Uses verify=False throughout — Alabama's SSL cert triggers urllib3 warnings,
+suppressed via disable_warnings. Entity detail pages encode id and type as
+base64 in query params.
+"""
+
 import csv
 import io
 import json
@@ -8,29 +16,37 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
+
 import requests
 import urllib3
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-# Make project root importable whether the file is run directly or as a module
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from src.logger import StateLogger, get_logger
+# make project root importable before importing local modules
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT))
+from src.reporting.logger import StateLogger, get_logger
+
+from config import USER_AGENT
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# ============================= constants ==============================
+
+# paths and file prep
+
 RAW_DIR      = PROJECT_ROOT / "data" / "Alabama" / "raw"
 MANIFEST     = PROJECT_ROOT / "data" / "Alabama" / "manifest.csv"
-
-RAW_DIR.mkdir(parents=True, exist_ok=True)
-
-BASE_URL      = "https://fcpa.alabamavotes.gov/page.request.do"
-MANIFEST_COLS = ["id", "filename", "downloaded_at", "row_count"]
-
 PAC_OUT_PATH = RAW_DIR / "pac_committees.csv"
 PCC_OUT_PATH = RAW_DIR / "pcc_committees.csv"
+RAW_DIR.mkdir(parents=True, exist_ok=True)
+MANIFEST_COLS = ["id", "filename", "downloaded_at", "row_count"]
 
+# urls
+
+BASE_URL = "https://fcpa.alabamavotes.gov/page.request.do"
+
+# site-specific attributes
 CRITERIA_PAC = json.dumps([
     {"field_key": "committeeType", "comparison_type": "equalTo",
      "comparison_value_1": "2"}
@@ -52,13 +68,13 @@ COMMITTEE_COLS = [
 ]
 
 
-# ── Manifest helpers ──────────────────────────────────────────────────────────
+# ========================== manifest helpers ==========================
 
-TRANSACTION_IDS = range(1, 57)   # all known Alabama ZIP IDs
-
+MAX_ZIP_ID            = 200
+MAX_CONSECUTIVE_FAILS = 2
 
 def load_manifest() -> dict[int, str]:
-    """Return {id: filename} for every entry in the manifest."""
+    """Returns {id: filename} for every entry in the manifest."""
     if not MANIFEST.exists():
         return {}
     with open(MANIFEST, newline="") as f:
@@ -72,17 +88,18 @@ def upsert_manifest(record: dict):
         with open(MANIFEST, newline="") as f:
             existing = [r for r in csv.DictReader(f)
                         if r["id"] != str(record["id"])]
-    write_header = not MANIFEST.exists()
     with open(MANIFEST, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=MANIFEST_COLS)
         writer.writeheader()
-        writer.writerows(existing)
+        writer.writerows(existing) # rewrite the whole file with the new record appended
         writer.writerow(record)
 
 
-# ── Transactions ──────────────────────────────────────────────────────────────
+# ============================ transactions ============================
 
 def download_zip(log: StateLogger, id: int) -> tuple[str, int] | None:
+    """Fetch a ZIP by numeric id, extract its CSV, and write it to RAW_DIR.
+        Returns (filename, row_count) on success, None on any failure."""
     params = {"page": "getTransactionData", "id": id}
     t0 = time.perf_counter()
     try:
@@ -121,49 +138,40 @@ def download_zip(log: StateLogger, id: int) -> tuple[str, int] | None:
 
 
 def download_transactions(log: StateLogger, force: bool = False) -> tuple[int, int]:
-    """
-    Smart download logic — behaviour depends on what's already present:
+    """Download transaction ZIPs. Fills gaps and refreshes current-year files,
+    then probes beyond the manifest max to pick up new IDs. --force re-fetches all."""
 
-    force / manifest empty   → fetch all IDs (full historical download)
-    partial (some IDs missing) → fetch missing IDs + refresh current-year IDs
-    complete (all IDs present) → refresh current-year IDs only
-    """
     current_year = str(datetime.today().year)
-    all_ids      = set(TRANSACTION_IDS)
 
     if force:
         manifest = {}
     else:
-        manifest = load_manifest()   # {id: filename}
+        manifest = load_manifest()
 
-    done_ids        = set(manifest.keys())
-    missing_ids     = all_ids - done_ids
-    current_yr_ids  = {i for i, fn in manifest.items() if fn.startswith(current_year)}
+    #identify which files are present
+    done_ids       = set(manifest.keys())
+    max_known_id   = max(done_ids) if done_ids else 0
+    missing_ids    = set(range(1, max_known_id + 1)) - done_ids
+    current_yr_ids = {i for i, fn in manifest.items() if fn.startswith(current_year)}
 
     if force or not done_ids:
-        to_fetch = sorted(all_ids)
+        to_fetch_known = []
+        probe_start    = 1
         log.info("Transactions: full download")
     elif missing_ids:
-        to_fetch = sorted(missing_ids | current_yr_ids)
+        to_fetch_known = sorted(missing_ids | current_yr_ids)
+        probe_start    = max_known_id + 1
         log.info(f"Transactions: {len(missing_ids)} missing + "
-                 f"{len(current_yr_ids)} current-year → {len(to_fetch)} ZIP(s) to fetch")
+                 f"{len(current_yr_ids)} current-year + discovery from {probe_start}")
     else:
-        # All IDs present — only refresh current year
-        to_fetch = sorted(current_yr_ids)
-        log.info(f"Transactions: complete — refreshing {len(to_fetch)} current-year ZIP(s)")
-
-    if not to_fetch:
-        log.info("Transactions: nothing to download.")
-        return 0, 0
+        to_fetch_known = sorted(current_yr_ids)
+        probe_start    = max_known_id + 1
+        log.info(f"Transactions: complete — refreshing {len(to_fetch_known)} "
+                 f"current-year + discovery from {probe_start}")
 
     ok = err = 0
-    for id in to_fetch:
-        log.file_download_start(filename=f"ZIP {id}")
-        result = download_zip(log, id)
-        if result is None:
-            err += 1
-            time.sleep(0.5)
-            continue
+
+    def _save(id: int, result: tuple[str, int]):
         filename, row_count = result
         upsert_manifest({
             "id":            id,
@@ -171,21 +179,47 @@ def download_transactions(log: StateLogger, force: bool = False) -> tuple[int, i
             "downloaded_at": datetime.today().strftime("%Y-%m-%d"),
             "row_count":     row_count,
         })
-        ok += 1
+
+    # known IDs (gaps + current-year refresh)
+    for id in to_fetch_known:
+        log.file_download_start(filename=f"ZIP {id}")
+        result = download_zip(log, id)
+        if result is None:
+            err += 1
+        else:
+            _save(id, result)
+            ok += 1
+        time.sleep(0.5)
+
+    # probe upward until MAX_CONSECUTIVE_FAILS consecutive failures - force and new files
+    consecutive_fails = 0
+    for id in range(probe_start, MAX_ZIP_ID + 1):
+        if consecutive_fails >= MAX_CONSECUTIVE_FAILS:
+            log.info(f"Transactions: discovery stopped at ID {id} "
+                     f"({MAX_CONSECUTIVE_FAILS} consecutive failures)")
+            break
+        log.file_download_start(filename=f"ZIP {id}")
+        result = download_zip(log, id)
+        if result is None:
+            consecutive_fails += 1
+            err += 1
+        else:
+            consecutive_fails = 0
+            _save(id, result)
+            ok += 1
         time.sleep(0.5)
 
     return ok, err
 
 
-# ── Entities (PAC + PCC committees) ──────────────────────────────────────────
+# ============================== entities ==============================
 
 def make_session() -> requests.Session:
+    """Create a requests session with SSL disabled and browser-spoofing headers."""
     s = requests.Session()
     s.verify = False
     s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": USER_AGENT,
         "Referer": f"{BASE_URL}?page=page.acfPublicPoliticalActionCommitteeSearch",
     })
     return s
@@ -193,6 +227,8 @@ def make_session() -> requests.Session:
 
 def fetch_all_committee_ids(log: StateLogger, session: requests.Session,
                             criteria: str) -> list[dict]:
+    """Paginate the committee search API and return all matching stubs."""
+
     PAGE_SIZE   = 500
     all_records = []
     page        = 1
@@ -221,6 +257,7 @@ def fetch_all_committee_ids(log: StateLogger, session: requests.Session,
 
 def fetch_detail(log: StateLogger, session: requests.Session, internal_id: int,
                  type_str: str = "pac") -> dict | None:
+    """Fetch the full detail page for a committee and return the parsed JSON blob."""
     import base64
     params = {
         "page": "page.acfPublicCommitteeDetails",
@@ -248,6 +285,7 @@ def fetch_detail(log: StateLogger, session: requests.Session, internal_id: int,
 
 
 def extract_member(members: list, member_type: str) -> dict:
+    """Pull one member from the detail blob by type (e.g. 'Treasurer', 'Chairperson')."""
     for m in members:
         if m.get("memberType", "").lower() == member_type.lower():
             return m
@@ -255,6 +293,9 @@ def extract_member(members: list, member_type: str) -> dict:
 
 
 def flatten_detail(detail: dict) -> dict:
+    """Map the raw blob to a flat row matching COMMITTEE_COLS.
+        Falls back to candidate name if committeeName is blank (PCCs only)."""
+
     members   = detail.get("members", [])
     treasurer = extract_member(members, "Treasurer")
     chair     = extract_member(members, "Chairperson")
@@ -305,10 +346,13 @@ def flatten_detail(detail: dict) -> dict:
 def fetch_and_write(log: StateLogger, session: requests.Session, criteria: str,
                     type_str: str, out_path: Path, label: str,
                     force: bool) -> tuple[int, int]:
+    """Fetch all committee details for a given criteria filter and write to CSV.
+    Resumes from existing output file unless force=True. Returns (ok, err) counts."""
     done_ids:      set[int]   = set()
     existing_rows: list[dict] = []
     t0 = time.perf_counter()
 
+    # load existing output for resumability
     if out_path.exists() and not force:
         with open(out_path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
@@ -318,9 +362,8 @@ def fetch_and_write(log: StateLogger, session: requests.Session, criteria: str,
                     existing_rows.append(row)
         log.info(f"  Resuming: {len(done_ids)} {label} already fetched")
 
+    # fetch and deduplicate stubs
     stubs = fetch_all_committee_ids(log, session, criteria)
-
-    # Deduplicate stubs — the API can return the same committee on multiple pages
     seen: set[int] = set()
     unique_stubs: list[dict] = []
     for s in stubs:
@@ -336,6 +379,7 @@ def fetch_and_write(log: StateLogger, session: requests.Session, criteria: str,
     to_fetch = [s for s in stubs if int(s["id"]) not in done_ids]
     log.info(f"  {len(done_ids)} already done, {len(to_fetch)} to fetch out of {len(stubs)} unique stubs")
 
+    # fetch details
     new_rows: list[dict] = []
     ok = err = 0
     with logging_redirect_tqdm(loggers=[log._log]):
@@ -349,12 +393,10 @@ def fetch_and_write(log: StateLogger, session: requests.Session, criteria: str,
         interrupted = False
         try:
             for stub in bar:
-                t0   = time.perf_counter()
                 iid  = int(stub["id"])
                 name = stub.get("committeeName", f"id={iid}")
                 bar.set_postfix_str(name[:45].ljust(45), refresh=False)
                 detail = fetch_detail(log, session, iid, type_str)
-                duration = time.perf_counter() - t0
                 if detail is None:
                     err += 1
                     time.sleep(0.25)
@@ -367,6 +409,7 @@ def fetch_and_write(log: StateLogger, session: requests.Session, criteria: str,
             bar.close()
             interrupted = True
 
+    # --- write output (old rows + new) ---
     all_rows = existing_rows + new_rows
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=COMMITTEE_COLS, extrasaction="ignore")
@@ -395,19 +438,10 @@ def download_entities(log: StateLogger, force: bool = False) -> tuple[int, int]:
     return total_ok, total_err
 
 
-# ── Orchestrator ──────────────────────────────────────────────────────────────
+# ============================ orchestrator ============================
 
 def run(force: bool = False, entities: bool = False, transactions: bool = False):
-    """
-    Flag semantics
-    ──────────────
-    (no flags)              update everything incrementally
-    --transactions          transactions only, incremental
-    --entities              entities only, incremental
-    --force                 force-refresh everything
-    --force --transactions  force-refresh transactions only
-    --force --entities      force-refresh entities only
-    """
+    """Orchestrate download of transaction ZIPs and/or committee entities."""
     log = get_logger("alabama", "scrape")
     t0  = time.perf_counter()
     log.info("Starting Alabama scraper")
@@ -436,7 +470,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                   files_ok=files_ok, files_err=files_err,
                   pages_ok=pages_ok, pages_err=pages_err)
 
-    except KeyboardInterrupt:
+    except KeyboardInterrupt: # cc user interrupt
         log.warning("Interrupted")
         log._emit("scrape_completed", status="interrupted",
                   duration_s=round(time.perf_counter() - t0, 1),
@@ -444,10 +478,21 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                   pages_ok=pages_ok, pages_err=pages_err)
         raise
 
-
+# ====== CLI ==================================
 if __name__ == "__main__":
+    # flag semantics
+    # --------------
+    # (no flags)              update everything incrementally
+    # --transactions          transactions only, incremental
+    # --entities              entities only, incremental
+    # --force                 force-refresh everything
+    # --force --transactions  force-refresh transactions only
+    # --force --entities      force-refresh entities only
     import argparse
-    ap = argparse.ArgumentParser(description="Alabama FCPA scraper")
+    ap = argparse.ArgumentParser(
+        description="Download Alabama campaign finance data from the FCPA site. "
+                    "Fetches transaction ZIPs and/or PAC/PCC committee details."
+    )
     ap.add_argument("--force",        action="store_true",
                     help="force re-download (scope: all, or --transactions/--entities)")
     ap.add_argument("--transactions", action="store_true",
