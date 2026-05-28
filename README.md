@@ -40,6 +40,10 @@ pip install -r requirements.txt
 playwright install
 ```
 
+**Configure your user agent:**
+
+`config.py` contains a `USER_AGENT` string used by all scrapers to avoid 403s from state disclosure sites. The default is a Mac Chrome string — if you're on Linux or Windows, replace it with your own. You can find your user agent at [whatismybrowser.com](https://www.whatismybrowser.com).
+
 ### Running the Pipeline
 
 Run the full pipeline (scrape → parse → validate → tabulate → aggregate) for one or more states using two-letter abbreviations:
