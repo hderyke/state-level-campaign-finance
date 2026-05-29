@@ -203,6 +203,142 @@ def run(state: str):
     for r in rows:
         print(f"  {trunc(r[0],c1):<{c1}}  {r[1]:>{c2},}  {fmt_money(r[2]):>{c3}}  {trunc(r[3] or '—',c4):<{c4}}  {fmt_money(r[4]):>{c5}}")
 
+    # ── 5. Contributions & expenditures by year ──────────────────────────────
+    section("ACTIVITY BY YEAR — contribution and expenditure row counts and totals", state)
+    rows = con.execute("""
+        WITH cy AS (
+            SELECT YEAR(date) AS yr,
+                   COUNT(*) AS cont_n,
+                   ROUND(SUM(TRY_CAST(amount AS DOUBLE)), 0) AS cont_total
+            FROM contributions
+            WHERE date IS NOT NULL AND YEAR(date) BETWEEN 1990 AND 2030
+            GROUP BY yr
+        ),
+        ey AS (
+            SELECT YEAR(date) AS yr,
+                   COUNT(*) AS expn_n,
+                   ROUND(SUM(TRY_CAST(amount AS DOUBLE)), 0) AS expn_total
+            FROM expenditures
+            WHERE date IS NOT NULL AND YEAR(date) BETWEEN 1990 AND 2030
+            GROUP BY yr
+        )
+        SELECT COALESCE(cy.yr, ey.yr) AS year,
+               COALESCE(cy.cont_n,     0) AS cont_n,
+               COALESCE(cy.cont_total, 0) AS cont_total,
+               COALESCE(ey.expn_n,     0) AS expn_n,
+               COALESCE(ey.expn_total, 0) AS expn_total
+        FROM cy FULL OUTER JOIN ey ON cy.yr = ey.yr
+        ORDER BY year
+    """).fetchall()
+
+    W_YR = 6; W_N = 10; W_T = 16
+    print(f"  {'Year':>{W_YR}}  {'Cont N':>{W_N}}  {'Cont Total':>{W_T}}  {'Expn N':>{W_N}}  {'Expn Total':>{W_T}}")
+    print(f"  {'-'*W_YR}  {'-'*W_N}  {'-'*W_T}  {'-'*W_N}  {'-'*W_T}")
+    for r in rows:
+        yr, cn, ct, en, et = r
+        print(f"  {str(yr):>{W_YR}}  {cn:>{W_N},}  {fmt_money(ct):>{W_T}}  {en:>{W_N},}  {fmt_money(et):>{W_T}}")
+
+    # ── 6. Contributor type breakdown ─────────────────────────────────────────
+    section("CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total", state)
+    rows = con.execute("""
+        SELECT
+            CASE WHEN contributor_type IS NULL OR contributor_type = ''
+                 THEN '(blank)' ELSE contributor_type END AS contributor_type,
+            COUNT(*) AS n,
+            ROUND(SUM(TRY_CAST(amount AS DOUBLE)), 0) AS total,
+            ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct_rows
+        FROM contributions
+        GROUP BY contributor_type
+        ORDER BY n DESC
+    """).fetchall()
+
+    W_CT = 30; W_N2 = 10; W_T2 = 16; W_P = 8
+    print(f"  {'Contributor Type':<{W_CT}}  {'N':>{W_N2}}  {'Total':>{W_T2}}  {'% rows':>{W_P}}")
+    print(f"  {'-'*W_CT}  {'-'*W_N2}  {'-'*W_T2}  {'-'*W_P}")
+    for r in rows:
+        ct, n, total, pct = r
+        print(f"  {trunc(ct, W_CT):<{W_CT}}  {n:>{W_N2},}  {fmt_money(total):>{W_T2}}  {pct:>{W_P}.1f}%")
+
+    # ── 7. Top 10 contributor states ──────────────────────────────────────────
+    section("TOP 10 CONTRIBUTOR STATES — where the money comes from", state)
+    rows = con.execute("""
+        SELECT
+            CASE WHEN contributor_state IS NULL OR contributor_state = ''
+                 THEN '(blank)' ELSE contributor_state END AS contributor_state,
+            COUNT(*) AS n,
+            ROUND(SUM(TRY_CAST(amount AS DOUBLE)), 0) AS total,
+            ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct_rows
+        FROM contributions
+        GROUP BY contributor_state
+        ORDER BY n DESC
+        LIMIT 10
+    """).fetchall()
+
+    W_ST2 = 18
+    print(f"  {'State':<{W_ST2}}  {'N':>{W_N2}}  {'Total':>{W_T2}}  {'% rows':>{W_P}}")
+    print(f"  {'-'*W_ST2}  {'-'*W_N2}  {'-'*W_T2}  {'-'*W_P}")
+    for r in rows:
+        st2, n, total, pct = r
+        print(f"  {trunc(st2, W_ST2):<{W_ST2}}  {n:>{W_N2},}  {fmt_money(total):>{W_T2}}  {pct:>{W_P}.1f}%")
+
+    # ── 8. Expenditure transaction type breakdown ─────────────────────────────
+    section("EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total", state)
+    rows = con.execute("""
+        SELECT
+            CASE WHEN transaction_type IS NULL OR transaction_type = ''
+                 THEN '(blank)' ELSE transaction_type END AS transaction_type,
+            COUNT(*) AS n,
+            ROUND(SUM(TRY_CAST(amount AS DOUBLE)), 0) AS total,
+            ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct_rows
+        FROM expenditures
+        GROUP BY transaction_type
+        ORDER BY n DESC
+    """).fetchall()
+
+    print(f"  {'Transaction Type':<{W_CT}}  {'N':>{W_N2}}  {'Total':>{W_T2}}  {'% rows':>{W_P}}")
+    print(f"  {'-'*W_CT}  {'-'*W_N2}  {'-'*W_T2}  {'-'*W_P}")
+    for r in rows:
+        tt, n, total, pct = r
+        print(f"  {trunc(tt, W_CT):<{W_CT}}  {n:>{W_N2},}  {fmt_money(total):>{W_T2}}  {pct:>{W_P}.1f}%")
+
+    # ── 9. 10 largest single contributions ────────────────────────────────────
+    section("10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check", state)
+    rows = con.execute("""
+        SELECT date, contributor_name, contributor_type, committee_name,
+               ROUND(TRY_CAST(amount AS DOUBLE), 0) AS amount
+        FROM contributions
+        WHERE TRY_CAST(amount AS DOUBLE) IS NOT NULL
+        ORDER BY TRY_CAST(amount AS DOUBLE) DESC
+        LIMIT 10
+    """).fetchall()
+
+    W_DT = 12; W_CN = 34; W_CT3 = 6; W_CMT = 36; W_AM = 16
+    print(f"  {'Date':<{W_DT}}  {'Contributor':<{W_CN}}  {'Type':<{W_CT3}}  {'Committee':<{W_CMT}}  {'Amount':>{W_AM}}")
+    print(f"  {'-'*W_DT}  {'-'*W_CN}  {'-'*W_CT3}  {'-'*W_CMT}  {'-'*W_AM}")
+    for r in rows:
+        dt, cn, ct3, cmt, amt = r
+        print(f"  {str(dt or ''):<{W_DT}}  {trunc(cn or '',W_CN):<{W_CN}}  {trunc(ct3 or '',W_CT3):<{W_CT3}}  {trunc(cmt or '',W_CMT):<{W_CMT}}  {fmt_money(amt):>{W_AM}}")
+
+    # ── 9. 10 random contribution rows ────────────────────────────────────────
+    section("10 RANDOM CONTRIBUTION ROWS — raw data spot check", state)
+    rows = con.execute("""
+        SELECT date, contributor_name, contributor_type,
+               ROUND(TRY_CAST(amount AS DOUBLE), 0) AS amount,
+               committee_name, contributor_city, contributor_state,
+               employer, occupation
+        FROM contributions
+        USING SAMPLE 10
+        ORDER BY date
+    """).fetchall()
+
+    W_DT2 = 12; W_CN2 = 28; W_CT4 = 5; W_AM2 = 12
+    W_CMT2 = 30; W_CITY = 18; W_ST3 = 4; W_EMP = 22; W_OCC = 20
+    print(f"  {'Date':<{W_DT2}}  {'Contributor':<{W_CN2}}  {'T':<{W_CT4}}  {'Amount':>{W_AM2}}  {'Committee':<{W_CMT2}}  {'City':<{W_CITY}}  {'St':<{W_ST3}}  {'Employer':<{W_EMP}}  {'Occupation':<{W_OCC}}")
+    print(f"  {'-'*W_DT2}  {'-'*W_CN2}  {'-'*W_CT4}  {'-'*W_AM2}  {'-'*W_CMT2}  {'-'*W_CITY}  {'-'*W_ST3}  {'-'*W_EMP}  {'-'*W_OCC}")
+    for r in rows:
+        dt, cn, ct4, amt, cmt, city, st3, emp, occ = r
+        print(f"  {str(dt or ''):<{W_DT2}}  {trunc(cn or '',W_CN2):<{W_CN2}}  {trunc(ct4 or '',W_CT4):<{W_CT4}}  {fmt_money(amt):>{W_AM2}}  {trunc(cmt or '',W_CMT2):<{W_CMT2}}  {trunc(city or '',W_CITY):<{W_CITY}}  {trunc(st3 or '',W_ST3):<{W_ST3}}  {trunc(emp or '',W_EMP):<{W_EMP}}  {trunc(occ or '',W_OCC):<{W_OCC}}")
+
     con.close()
     print()
 
