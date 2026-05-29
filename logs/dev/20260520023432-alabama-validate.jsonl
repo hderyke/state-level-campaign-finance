@@ -1,2 +1,0 @@
-{"ts": "2026-05-20T06:34:32+00:00", "state": "alabama", "operation": "validate", "type": "validate_started"}
-{"ts": "2026-05-20T06:34:45+00:00", "state": "alabama", "operation": "validate", "type": "validate_completed", "status": "failed", "duration_s": 12.4, "tier1_failures": 1, "tier2_warnings": 4, "drift_warnings": 0}

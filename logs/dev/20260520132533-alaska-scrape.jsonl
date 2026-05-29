@@ -1,3 +1,0 @@
-{"ts": "2026-05-20T17:25:33+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_started", "force": false, "entities": true, "transactions": false}
-{"ts": "2026-05-20T17:25:41+00:00", "state": "alaska", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "GRForms_2026.csv", "bytes": 50540, "rows": 185, "duration_s": 2.54}
-{"ts": "2026-05-20T17:29:30+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_completed", "status": "interrupted", "duration_s": 237.0, "files_ok": 1, "files_err": 0, "pages_ok": 0, "pages_err": 0}

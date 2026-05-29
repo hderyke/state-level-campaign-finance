@@ -1,5 +1,0 @@
-{"ts": "2026-05-20T00:23:39+00:00", "state": null, "operation": "orc", "type": "run_started", "run_id": "20260519_202339_b1a58f", "command": "rescrape", "states": ["AK"]}
-{"ts": "2026-05-20T00:23:39+00:00", "state": "alaska", "operation": "orc", "type": "state_started"}
-{"ts": "2026-05-20T00:23:39+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_started", "force": true, "update_transactions": false, "update_entities": false}
-{"ts": "2026-05-20T00:23:51+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_completed", "status": "interrupted", "duration_s": 11.6, "files_ok": 0, "files_err": 0, "pages_ok": 0, "pages_err": 0}
-{"ts": "2026-05-20T00:23:51+00:00", "state": null, "operation": "orc", "type": "run_completed", "run_id": "20260519_202339_b1a58f", "status": "interrupted", "duration_s": 11.8}

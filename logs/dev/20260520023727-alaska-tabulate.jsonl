@@ -1,6 +1,0 @@
-{"ts": "2026-05-20T06:37:27+00:00", "state": "alaska", "operation": "tabulate", "type": "tabulate_started", "db": "alaska.db"}
-{"ts": "2026-05-20T06:37:31+00:00", "state": "alaska", "operation": "tabulate", "type": "table_loaded", "table": "contributions", "rows": 1515307, "duration_s": 3.47}
-{"ts": "2026-05-20T06:37:31+00:00", "state": "alaska", "operation": "tabulate", "type": "table_loaded", "table": "expenditures", "rows": 194333, "duration_s": 0.58}
-{"ts": "2026-05-20T06:37:31+00:00", "state": "alaska", "operation": "tabulate", "type": "table_loaded", "table": "committees", "rows": 1782, "duration_s": 0.01}
-{"ts": "2026-05-20T06:37:31+00:00", "state": "alaska", "operation": "tabulate", "type": "table_loaded", "table": "candidates", "rows": 6095, "duration_s": 0.04}
-{"ts": "2026-05-20T06:37:31+00:00", "state": "alaska", "operation": "tabulate", "type": "tabulate_completed", "status": "completed", "duration_s": 4.1, "tables_ok": 4, "tables_err": 0}

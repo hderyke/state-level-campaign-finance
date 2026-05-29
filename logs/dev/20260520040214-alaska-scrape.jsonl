@@ -1,2 +1,0 @@
-{"ts": "2026-05-20T08:02:14+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_started", "force": false, "update_transactions": false, "update_entities": false}
-{"ts": "2026-05-20T08:02:30+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_completed", "status": "interrupted", "duration_s": 16.4, "files_ok": 0, "files_err": 0, "pages_ok": 0, "pages_err": 0}

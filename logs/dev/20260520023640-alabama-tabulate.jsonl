@@ -1,6 +1,0 @@
-{"ts": "2026-05-20T06:36:40+00:00", "state": "alabama", "operation": "tabulate", "type": "tabulate_started", "db": "alabama.db"}
-{"ts": "2026-05-20T06:36:43+00:00", "state": "alabama", "operation": "tabulate", "type": "table_loaded", "table": "contributions", "rows": 1066385, "duration_s": 2.3}
-{"ts": "2026-05-20T06:36:44+00:00", "state": "alabama", "operation": "tabulate", "type": "table_loaded", "table": "expenditures", "rows": 457441, "duration_s": 1.1}
-{"ts": "2026-05-20T06:36:44+00:00", "state": "alabama", "operation": "tabulate", "type": "table_loaded", "table": "committees", "rows": 8115, "duration_s": 0.03}
-{"ts": "2026-05-20T06:36:44+00:00", "state": "alabama", "operation": "tabulate", "type": "table_loaded", "table": "candidates", "rows": 5241, "duration_s": 0.03}
-{"ts": "2026-05-20T06:36:44+00:00", "state": "alabama", "operation": "tabulate", "type": "tabulate_completed", "status": "completed", "duration_s": 3.5, "tables_ok": 4, "tables_err": 0}

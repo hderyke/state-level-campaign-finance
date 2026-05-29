@@ -1,9 +1,0 @@
-{"ts": "2026-05-20T08:00:46+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_started", "force": false, "entities": true, "transactions": false}
-{"ts": "2026-05-20T08:00:56+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "2044", "duration_s": 0.14}
-{"ts": "2026-05-20T08:00:57+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "4739", "duration_s": 0.12}
-{"ts": "2026-05-20T08:00:57+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "3494", "duration_s": 0.12}
-{"ts": "2026-05-20T08:00:58+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "3522", "duration_s": 0.21}
-{"ts": "2026-05-20T08:00:58+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "3697", "duration_s": 0.19}
-{"ts": "2026-05-20T08:00:58+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "3778", "duration_s": 0.17}
-{"ts": "2026-05-20T08:00:59+00:00", "state": "alabama", "operation": "scrape", "type": "page_scrape", "status": "ok", "entity": "pcc", "page_id": "4046", "duration_s": 0.11}
-{"ts": "2026-05-20T08:00:59+00:00", "state": "alabama", "operation": "scrape", "type": "scrape_completed", "status": "interrupted", "duration_s": 12.9, "files_ok": 0, "files_err": 0, "pages_ok": 0, "pages_err": 0}

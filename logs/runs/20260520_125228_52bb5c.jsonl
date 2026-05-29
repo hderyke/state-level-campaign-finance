@@ -1,6 +1,0 @@
-{"ts": "2026-05-20T16:52:28+00:00", "state": null, "operation": "orc", "type": "run_started", "run_id": "20260520_125228_52bb5c", "command": "update-entities", "states": ["AK"]}
-{"ts": "2026-05-20T16:52:28+00:00", "state": "alaska", "operation": "orc", "type": "state_started"}
-{"ts": "2026-05-20T16:52:28+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_started", "force": false, "entities": true, "transactions": false}
-{"ts": "2026-05-20T16:52:36+00:00", "state": "alaska", "operation": "scrape", "type": "file_download", "status": "ok", "filename": "GRForms_2026.csv", "bytes": 50540, "rows": 185, "duration_s": 2.97}
-{"ts": "2026-05-20T16:59:36+00:00", "state": "alaska", "operation": "scrape", "type": "scrape_completed", "status": "interrupted", "duration_s": 428.6, "files_ok": 1, "files_err": 0, "pages_ok": 0, "pages_err": 0}
-{"ts": "2026-05-20T16:59:37+00:00", "state": null, "operation": "orc", "type": "run_completed", "run_id": "20260520_125228_52bb5c", "status": "interrupted", "duration_s": 428.8}
