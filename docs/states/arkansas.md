@@ -121,6 +121,8 @@ One file per year per type: `contributions_{year}.csv` and `expenditures_{year}.
 
 Arkansas has a proper entity registry, so committees and candidates are loaded from the registry files first and joined to transactions by `Filing Entity ID` → `filerEntityID`.
 
+**person_id model:** `person` — `filerEntityID` is a stable person-level ID that persists across election cycles (unlike Alabama/Arizona which re-register per cycle). `person_id` is set to `filerEntityID` directly, prefixed with Arkansas's FIPS code (05), producing 14-digit integers.
+
 **Output tables:** `committees.csv`, `candidates.csv`, `contributions.csv`, `expenditures.csv`, `loans_debts.csv` (empty — no loan data available from this source)
 
 **Key transformations:**
