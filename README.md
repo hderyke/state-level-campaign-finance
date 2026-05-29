@@ -188,8 +188,8 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 | Alaska (AK) | ✅ | ✅ | @hderyke       | |
 | Arizona (AZ) | ⚠️ | ⚠️ | @hderyke       | |
 | Arkansas (AR) | ✅ | ✅ | @hderyke       | |
-| California (CA) | ⚠️ | ⚠️ | @hderyke       | |
+| California (CA) | ✅ | ✅ | @hderyke       | |
 | Colorado (CO) | ⚠️ | ⚠️ | @hderyke       | |
 
-**Key:** ✅ Done &nbsp; ⚠️ Partial / known issues &nbsp; 🔲 Not yet run &nbsp; ❌ Broken
+**Key:** ✅ Done &nbsp; ⚠️ Partial / known issues &nbsp;  ❌ Broken
 
