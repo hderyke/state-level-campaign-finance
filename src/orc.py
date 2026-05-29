@@ -244,9 +244,6 @@ def _run_state(abbr: str, name: str, scraper_mode: str,
         _run_queries(name, log)
         return False
 
-    # Spot-check queries (informational — never blocks pipeline)
-    _run_queries(name, log)
-
     # Tabulate
     if tabulate_on_pass:
         ok = _subprocess([PYTHON, str(TABULATE), name], f"tabulate.py {name}")
@@ -254,6 +251,9 @@ def _run_state(abbr: str, name: str, scraper_mode: str,
             print(f"  [!] Tabulate failed for {abbr}")
             log._emit("state_completed", state=name, status="failed", stage="tabulate")
             return False
+
+    # Spot-check queries — runs after tabulate so the DB reflects this run's data
+    _run_queries(name, log)
 
     log._emit("state_completed", state=name, status="passed")
     return True

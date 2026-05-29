@@ -1,5 +1,5 @@
-data/
-venv/
+
+#setup stuff
 __pycache__/
 *.pyc
 *.db
@@ -8,7 +8,13 @@ __pycache__/
 .idea/
 .venv/
 
+#local run data
+data/
+logs/dev/*
+logs/prod/*
+tests/reports/*
+
 # credentials — never commit
 .env
-logs/
+venv/
 

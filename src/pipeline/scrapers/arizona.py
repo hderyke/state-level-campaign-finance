@@ -1,24 +1,60 @@
+"""
+scrapers/arizona.py — Download Arizona campaign finance data.
+
+Bulk transaction data from Arizona's SeeTheMoney disclosure site:
+  https://seethemoney.az.gov/Reporting/AdvancedSearch/
+
+Transactions are fetched via the AdvancedSearch JSON API (POST).  No browser
+required — a plain requests session with the right headers works fine.
+
+Key request structure (confirmed from browser network capture):
+  - Search criteria go in the URL *query string*
+  - POST body is DataTables format: draw, columns[N][data], start, length, order
+  - Pagination: start=0 for first page, start+=length for each subsequent page
+
+The committee registry and detail pages are fetched via the same session.
+
+Downloaded files are tracked in manifest.csv — re-running skips already-fetched
+combinations. Current-year combinations are always re-fetched.
+
+Output CSV columns for Income/Expenditures files (TX_COLS):
+  CommitteeID, CommitteeName, TransactionDate, Amount, TransactionName,
+  TransactionType, Occupation, Employer, City, State, ZipCode,
+  FirstName, LastName, FilerName, Memo
+"""
+
 import argparse
 import csv
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
 
 import requests as req_lib
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RAW_DIR      = PROJECT_ROOT / "data" / "Arizona" / "raw"
-MANIFEST     = PROJECT_ROOT / "data" / "Arizona" / "manifest.csv"
+sys.path.insert(0, str(PROJECT_ROOT))
+from src.reporting.logger import get_logger
+
+from config import USER_AGENT
+
+# =============================== paths ================================
+RAW_DIR  = PROJECT_ROOT / "data" / "Arizona" / "raw"
+MANIFEST = PROJECT_ROOT / "data" / "Arizona" / "manifest.csv"
 
 RAW_DIR.mkdir(parents=True, exist_ok=True)
+
+MANIFEST_COLS = ["cycle_label", "filer_type", "category_type", "filename", "downloaded_at", "row_count"]
+
+# ========================= state-specific constants ===================
 
 BASE_URL      = "https://seethemoney.az.gov/Reporting/AdvancedSearch/"
 REPORTING_URL = "https://seethemoney.az.gov/Reporting"
 
-MANIFEST_COLS = ["cycle_label", "filer_type", "category_type", "filename", "downloaded_at", "row_count"]
+TABLE_LENGTH = 3000  # rows per API page — server maxJsonLength rejects ~10k+; 3k is safe
 
 CYCLES = [
     ("2026",        "44~1/1/2025 12:00:00 AM~12/31/2026 11:59:59 PM"),
@@ -48,11 +84,6 @@ FILER_TYPES = [
     ("96",  "Officeholder"),
 ]
 
-DT_COLUMNS = [
-    "TransactionDate", "CommitteeName", "Amount", "TransactionName",
-    "TransactionType", "Occupation", "Employer", "City", "State", "ZipCode",
-]
-
 REGISTRY_PAGES = {
     1: "Candidate",
     2: "PAC",
@@ -79,10 +110,96 @@ DETAIL_COLS = [
     "chairman_name", "treasurer_name", "master_committee_id",
 ]
 
+# Columns written to Income_* / Expenditures_* CSV files.
+# CommitteeID and CommitteeName are present in the JSON API response but
+# absent from the old CSV export — this is why we use the API.
+TX_COLS = [
+    "CommitteeID", "CommitteeName", "TransactionDate",
+    "Amount", "TransactionName", "TransactionType",
+    "Occupation", "Employer", "City", "State", "ZipCode",
+    "FirstName", "LastName", "FilerName", "Memo",
+]
 
-# ── Shared helpers ─────────────────────────────────────────────────────────────
+
+# ========================= requests-only test =========================
+
+def test_requests_only():
+    """Test whether a plain requests session works with the correct URL structure.
+    Run: python scrapers/arizona.py --test-requests
+    """
+    import uuid
+    from urllib.parse import urlencode
+
+    uid = str(uuid.uuid4())
+    session = req_lib.Session()
+    session.headers.update({
+        "User-Agent":       ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                             "AppleWebKit/537.36 (KHTML, like Gecko) "
+                             "Chrome/147.0.0.0 Safari/537.36"),
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept":           "application/json, text/javascript, */*; q=0.01",
+        "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+        "Origin":           "https://seethemoney.az.gov",
+        "Referer":          BASE_URL,
+        "Sec-Fetch-Site":   "same-origin",
+        "Sec-Fetch-Mode":   "cors",
+        "Sec-Fetch-Dest":   "empty",
+    })
+    session.cookies.set(
+        "SeeTheMoneyUserHistory",
+        f"UserID={uid}&URLHash=JurisdictionId=0|Page=1|startYear=2025|endYear=2027"
+        "|IsLessActive=false|ShowOfficeHolder=false|View=Detail|TablePage=1|TableLength=10",
+        domain="seethemoney.az.gov",
+    )
+
+    # 2022 PAC Income — small-ish cycle, good test case
+    cycle_id_str = "39~1/1/2021 12:00:00 AM~12/31/2022 11:59:59 PM"
+    start_date, end_date = parse_cycle_dates(cycle_id_str)
+
+    query_params = {
+        "CommiteeReportId": "", "CategoryType": "Income", "JurisdictionId": "0",
+        "CycleId": cycle_id_str, "StartDate": start_date, "EndDate": end_date,
+        "FilerName": "", "FilerId": "", "BallotName": "", "BallotMeasureId": "",
+        "FilerTypeId": "131",  # PAC
+        "OfficeTypeId": "", "OfficeId": "", "PartyId": "", "ContributorName": "",
+        "VendorName": "", "StateId": "", "City": "", "Employer": "", "Occupation": "",
+        "CandidateName": "", "CandidateFilerId": "", "Position": "Support",
+        "LowAmount": "", "HighAmount": "",
+    }
+    dt_body = {
+        "draw": "1", "start": "0", "length": "10",
+        "search[value]": "", "search[regex]": "false",
+        "order[0][column]": "0", "order[0][dir]": "asc",
+    }
+    for i, col in enumerate(_DT_COLUMNS):
+        dt_body[f"columns[{i}][data]"] = col
+        dt_body[f"columns[{i}][name]"] = ""
+        dt_body[f"columns[{i}][searchable]"] = "true"
+        dt_body[f"columns[{i}][orderable]"] = "true"
+        dt_body[f"columns[{i}][search][value]"] = ""
+        dt_body[f"columns[{i}][search][regex]"] = "false"
+
+    url = BASE_URL + "?" + urlencode(query_params)
+    print(f"POST {url[:80]}...")
+    r = session.post(url, data=dt_body, timeout=30)
+    print(f"Status: {r.status_code}  len={len(r.text)}  preview={repr(r.text[:200])}")
+    if r.status_code == 200 and r.text not in ('""', ''):
+        try:
+            j = r.json()
+            print(f"✓ Got JSON: keys={list(j.keys())}  "
+                  f"recordsTotal={j.get('recordsTotal')}  rows={len(j.get('data', []))}")
+            if j.get("data"):
+                print(f"  Sample row: {j['data'][0]}")
+        except Exception as e:
+            print(f"JSON parse error: {e}")
+    else:
+        print("✗ No data — Playwright still needed")
+
+
+# ========================= shared helpers =============================
 
 def parse_net_date(val) -> str:
+    """Parse a .NET JSON Date(ms) or plain string to YYYY-MM-DD."""
     if not val:
         return ""
     if isinstance(val, str):
@@ -97,41 +214,41 @@ def s(v) -> str:
     return str(v).strip() if v is not None else ""
 
 
-def warmup_session(pw_context=None) -> req_lib.Session:
-    if pw_context is not None:
-        cookies = pw_context.cookies()
-    else:
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError:
-            print("[!] pip install playwright && playwright install chromium")
-            sys.exit(1)
-        print("Warming up browser session ...")
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
-            ctx     = browser.new_context()
-            page    = ctx.new_page()
-            page.goto(BASE_URL, timeout=30_000)
-            page.wait_for_load_state("networkidle")
-            cookies = ctx.cookies()
-            browser.close()
-        print("Session ready.\n")
+def build_session() -> req_lib.Session:
+    """Build a plain requests session — no browser required.
 
+    The AdvancedSearch endpoint only needs correct headers + the right
+    URL structure (search params in query string, DataTables body in POST).
+    A random UserID in SeeTheMoneyUserHistory satisfies the cookie check.
+    """
+    import uuid
+    ua = (USER_AGENT if isinstance(USER_AGENT, str) and USER_AGENT
+          else ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/147.0.0.0 Safari/537.36"))
     session = req_lib.Session()
-    for cookie in cookies:
-        session.cookies.set(cookie["name"], cookie["value"],
-                            domain=cookie.get("domain", ""))
     session.headers.update({
-        "User-Agent":       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent":       ua,
         "X-Requested-With": "XMLHttpRequest",
+        "Accept":           "application/json, text/javascript, */*; q=0.01",
+        "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+        "Origin":           "https://seethemoney.az.gov",
         "Referer":          BASE_URL,
+        "Sec-Fetch-Site":   "same-origin",
+        "Sec-Fetch-Mode":   "cors",
+        "Sec-Fetch-Dest":   "empty",
     })
+    session.cookies.set(
+        "SeeTheMoneyUserHistory",
+        f"UserID={uuid.uuid4()}&URLHash=JurisdictionId=0|Page=1"
+        "|startYear=2025|endYear=2027|IsLessActive=false"
+        "|ShowOfficeHolder=false|View=Detail|TablePage=1|TableLength=10",
+        domain="seethemoney.az.gov",
+    )
     return session
 
 
-# ── Registry ───────────────────────────────────────────────────────────────────
+# ============================= registry ===============================
 
 def fetch_registry_page(session: req_lib.Session, page_num: int) -> list[dict]:
     params = {
@@ -176,31 +293,41 @@ def normalize_registry_row(raw: dict, filer_type: str) -> dict:
     }
 
 
-def download_registry(session: req_lib.Session):
+def download_registry(log, session: req_lib.Session) -> tuple[int, int]:
+    """Fetch all registry pages and write az_committees_all.csv. Returns (ok, err)."""
     out   = RAW_DIR / "az_committees_all.csv"
     total = 0
+    ok = err = 0
+    t0 = time.perf_counter()
     with open(out, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=REGISTRY_COLS, extrasaction="ignore")
         writer.writeheader()
         for page_num, filer_type in REGISTRY_PAGES.items():
-            print(f"  Registry page={page_num} ({filer_type})...", end=" ", flush=True)
+            log.info(f"  Registry page={page_num} ({filer_type})...")
             try:
                 rows = fetch_registry_page(session, page_num)
             except Exception as e:
-                print(f"ERROR: {e}")
+                log.page_scrape_error(entity=filer_type, page_id=page_num, error=str(e))
+                err += 1
                 continue
             if not isinstance(rows, list):
-                print(f"unexpected type: {type(rows)}")
+                log.page_scrape_error(entity=filer_type, page_id=page_num,
+                                      error=f"unexpected type: {type(rows)}")
+                err += 1
                 continue
             for raw in rows:
                 writer.writerow(normalize_registry_row(raw, filer_type))
+            ok += 1
             total += len(rows)
-            print(f"{len(rows):,} rows")
+            log.info(f"    → {len(rows):,} rows")
             time.sleep(0.5)
-    print(f"  Registry: {total:,} total → {out.name}\n")
+    log.page_scrape_complete(filename=str(out), rows=total,
+                             duration_s=round(time.perf_counter() - t0, 2),
+                             ok=ok, err=err)
+    return ok, err
 
 
-# ── Transactions ───────────────────────────────────────────────────────────────
+# =========================== transactions =============================
 
 def parse_cycle_dates(cycle_id_str: str) -> tuple[str, str]:
     _, raw_start, raw_end = cycle_id_str.split("~", 2)
@@ -210,61 +337,180 @@ def parse_cycle_dates(cycle_id_str: str) -> tuple[str, str]:
     return start, end
 
 
-def build_hash_url(cycle_id_str: str, category_type: str, filer_type_id: str) -> str:
+_DT_COLUMNS = [
+    "TransactionDate", "CommitteeName", "Amount", "TransactionName",
+    "TransactionType", "Occupation", "Employer", "City", "State", "ZipCode",
+]
+
+
+def fetch_transactions_page(session: req_lib.Session, cycle_id_str: str,
+                             category_type: str, filer_type_id: str,
+                             start: int = 0,
+                             length: int = TABLE_LENGTH) -> tuple[list[dict], int]:
+    """POST to AdvancedSearch and return (rows, total_records).
+
+    Request structure (confirmed from browser network capture):
+      - Search params go in the URL query string
+      - POST body is DataTables format: draw, columns[N][data], start, length, order
+      - Pagination: start=0 for first page, start+=length for each subsequent page
+    """
+    from urllib.parse import urlencode
+
     start_date, end_date = parse_cycle_dates(cycle_id_str)
-    id_part, raw_start, raw_end = cycle_id_str.split("~", 2)
-    encoded_cycle = f"{id_part}~{quote(raw_start, safe='')}~{quote(raw_end, safe='')}"
-    params = "|".join([
-        "JurisdictionId=0", "CommiteeReportId=",
-        f"CategoryType={category_type}", f"CycleId={encoded_cycle}",
-        f"StartDate={start_date}", f"EndDate={end_date}",
-        "FilerName=", "FilerId=", "BallotName=", "BallotMeasureId=",
-        f"FilerTypeId={filer_type_id}",
-        "OfficeTypeId=", "OfficeId=", "PartyId=",
-        "ContributorName=", "VendorName=", "StateId=", "City=",
-        "Employer=", "Occupation=", "CandidateName=", "CandidateFilerId=",
-        "Position=Support", "LowAmount=", "HighAmount=",
-        "TablePage=1", "TableLength=10",
-    ])
-    return f"{BASE_URL}#{params}"
+
+    query_params = {
+        "CommiteeReportId": "",
+        "CategoryType":     category_type,
+        "JurisdictionId":   "0",
+        "CycleId":          cycle_id_str,
+        "StartDate":        start_date,
+        "EndDate":          end_date,
+        "FilerName":        "",
+        "FilerId":          "",
+        "BallotName":       "",
+        "BallotMeasureId":  "",
+        "FilerTypeId":      filer_type_id,
+        "OfficeTypeId":     "",
+        "OfficeId":         "",
+        "PartyId":          "",
+        "ContributorName":  "",
+        "VendorName":       "",
+        "StateId":          "",
+        "City":             "",
+        "Employer":         "",
+        "Occupation":       "",
+        "CandidateName":    "",
+        "CandidateFilerId": "",
+        "Position":         "Support",
+        "LowAmount":        "",
+        "HighAmount":       "",
+    }
+
+    # DataTables POST body — mirrors exactly what the SPA sends
+    dt_body: dict[str, str] = {
+        "draw":             "1",
+        "start":            str(start),
+        "length":           str(length),
+        "search[value]":    "",
+        "search[regex]":    "false",
+        "order[0][column]": "0",
+        "order[0][dir]":    "asc",
+    }
+    for i, col in enumerate(_DT_COLUMNS):
+        dt_body[f"columns[{i}][data]"]            = col
+        dt_body[f"columns[{i}][name]"]            = ""
+        dt_body[f"columns[{i}][searchable]"]      = "true"
+        dt_body[f"columns[{i}][orderable]"]       = "true"
+        dt_body[f"columns[{i}][search][value]"]   = ""
+        dt_body[f"columns[{i}][search][regex]"]   = "false"
+
+    url = BASE_URL + "?" + urlencode(query_params)
+
+    text = None
+    for attempt in range(3):
+        r = session.post(url, data=dt_body, timeout=60)
+        r.raise_for_status()
+        text = r.text
+        if "maxJsonLength" in text:
+            raise RuntimeError(f"maxJsonLength exceeded at length={length} — reduce TABLE_LENGTH")
+        if text and text != '""':
+            break
+        time.sleep(5 * (attempt + 1))
+    else:
+        raise RuntimeError(f"empty response (len={len(text)}) after 3 attempts")
+
+    inner = r.json()
+    if not isinstance(inner, dict):
+        raise RuntimeError(f"unexpected response type={type(inner)}: {repr(text[:100])}")
+    rows  = inner.get("data") or []
+    total = int(inner.get("recordsTotal") or inner.get("iTotalRecords") or 0)
+    return rows, total
 
 
-def download_one(cycle_label, cycle_id_str, filer_type_id, filer_type_label,
-                 category_type, pw_context) -> tuple[str, int] | None:
-    page     = pw_context.new_page()
+def normalize_tx_row(raw: dict) -> dict:
+    return {
+        "CommitteeID":    s(raw.get("CommitteeID")),
+        "CommitteeName":  s(raw.get("CommitteeName")),
+        "TransactionDate": parse_net_date(raw.get("TransactionDate")),
+        "Amount":         s(raw.get("Amount")),
+        "TransactionName": s(raw.get("TransactionName")),
+        "TransactionType": s(raw.get("TransactionType")),
+        "Occupation":     s(raw.get("Occupation")),
+        "Employer":       s(raw.get("Employer")),
+        "City":           s(raw.get("City")),
+        "State":          s(raw.get("State")),
+        "ZipCode":        s(raw.get("ZipCode")),
+        "FirstName":      s(raw.get("FirstName")),
+        "LastName":       s(raw.get("LastName")),
+        "FilerName":      s(raw.get("FilerName")),
+        "Memo":           s(raw.get("Memo")),
+    }
+
+
+def download_one_api(log, session: req_lib.Session,
+                     cycle_label: str, cycle_id_str: str,
+                     filer_type_id: str, filer_type_label: str,
+                     category_type: str) -> tuple[str, int] | None:
+    """Download one cycle/filer/category via JSON API. Returns (filename, row_count) or None."""
     filename = f"{category_type}_{cycle_label}_{filer_type_label}.csv"
     out_path = RAW_DIR / filename
+    t0 = time.perf_counter()
+    log.file_download_start(filename=filename)
 
+    total_rows = 0
+    start = 0
+    worker_session = session
     try:
-        page.goto(build_hash_url(cycle_id_str, category_type, filer_type_id),
-                  timeout=60_000)
-        page.wait_for_load_state("networkidle")
-        page.locator("button.ExportDiv:visible").click(timeout=15_000)
-        page.wait_for_selector("#ExportFormatOptions", timeout=10_000)
-        page.select_option("#ExportFormatOptions", value="CSV")
-        with page.expect_download(timeout=180_000) as dl_info:
-            page.click("button#Export")
-        dl_info.value.save_as(str(out_path))
+        with open(out_path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=TX_COLS, extrasaction="ignore")
+            writer.writeheader()
+
+            while True:
+                try:
+                    rows, total = fetch_transactions_page(worker_session, cycle_id_str,
+                                                          category_type, filer_type_id,
+                                                          start, TABLE_LENGTH)
+                except RuntimeError as e:
+                    if "empty response" in str(e):
+                        # Session likely expired — rebuild and retry this page once
+                        log.info(f"    {filename}: session expired at offset {start}, rebuilding...")
+                        worker_session = build_session()
+                        time.sleep(10)
+                        rows, total = fetch_transactions_page(worker_session, cycle_id_str,
+                                                              category_type, filer_type_id,
+                                                              start, TABLE_LENGTH)
+                    else:
+                        raise
+
+                if not rows:
+                    break
+
+                for raw in rows:
+                    writer.writerow(normalize_tx_row(raw))
+                total_rows += len(rows)
+
+                if start == 0:
+                    log.info(f"    {filename}: {total:,} total records")
+
+                if total_rows >= total or len(rows) < TABLE_LENGTH:
+                    break   # last page
+
+                start += TABLE_LENGTH
+                time.sleep(0.1)
+
     except Exception as e:
-        print(f"failed: {e}")
-        page.close()
+        log.file_download_error(filename=filename, error=str(e))
         return None
 
-    page.close()
+    if total_rows == 0:
+        log.info(f"  {filename}: no records, skipping")
+        return filename, 0
 
-    raw = out_path.read_bytes()
-    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        text = raw.decode("utf-16")
-    elif len(raw) > 1 and raw[1] == 0:
-        text = raw.decode("utf-16-le")
-    elif raw[:3] == b"\xef\xbb\xbf":
-        text = raw[3:].decode("utf-8")
-    else:
-        text = raw.decode("utf-8", errors="replace")
-
-    out_path.write_text(text, encoding="utf-8")
-    row_count = max(text.count("\n") - 1, 0)
-    return filename, row_count
+    log.file_download_ok(filename=filename,
+                         bytes=out_path.stat().st_size,
+                         rows=total_rows,
+                         duration_s=round(time.perf_counter() - t0, 2))
+    return filename, total_rows
 
 
 def load_manifest() -> set[tuple[str, str, str]]:
@@ -302,47 +548,82 @@ def append_manifest(record: dict):
         writer.writerow(record)
 
 
-def download_transactions(pw_context, done: set, current_only: bool = False):
+PARALLEL_WORKERS = 4   # concurrent download threads; raise if server doesn't rate-limit
+
+
+def download_transactions(log, session: req_lib.Session, done: set,
+                          current_only: bool = False,
+                          _counts: list | None = None) -> tuple[int, int]:
+    """Download transaction CSVs for all cycles via JSON API. Returns (ok, err).
+
+    Downloads PARALLEL_WORKERS combinations simultaneously; each thread gets its
+    own session so there are no shared-state issues.  Manifest writes are
+    serialised with a lock.
+    """
     current_year = str(datetime.today().year)
     cycles = [(lbl, cid) for lbl, cid in CYCLES
               if not current_only or current_year in lbl]
 
+    # Build the full work list, skipping already-done entries
+    tasks = []
     for cycle_label, cycle_id_str in cycles:
         for filer_type_id, filer_type_label in FILER_TYPES:
             for category_type in CATEGORY_TYPES:
                 key = (cycle_label, filer_type_label, category_type)
                 if key in done and current_year not in cycle_label:
-                    print(f"  {category_type} {cycle_label} {filer_type_label}: skip")
-                    continue
+                    log.file_download_skip(
+                        filename=f"{category_type}_{cycle_label}_{filer_type_label}.csv")
+                else:
+                    tasks.append((cycle_label, cycle_id_str,
+                                  filer_type_id, filer_type_label, category_type))
 
-                print(f"  {category_type} {cycle_label} {filer_type_label}: ",
-                      end="", flush=True)
-                result = download_one(cycle_label, cycle_id_str,
-                                      filer_type_id, filer_type_label,
-                                      category_type, pw_context)
+    ok = err = 0
+    manifest_lock = threading.Lock()
+
+    def _run_one(task):
+        cycle_label, cycle_id_str, filer_type_id, filer_type_label, category_type = task
+        worker_session = build_session()   # each thread owns its session
+        return download_one_api(log, worker_session, cycle_label, cycle_id_str,
+                                filer_type_id, filer_type_label, category_type)
+
+    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as pool:
+        futures = {pool.submit(_run_one, t): t for t in tasks}
+        for future in as_completed(futures):
+            cycle_label, _, _, filer_type_label, category_type = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                log.file_download_error(
+                    filename=f"{category_type}_{cycle_label}_{filer_type_label}.csv",
+                    error=str(exc))
+                err += 1
+            else:
                 if result is None:
-                    print("failed — will retry next run")
-                    continue
+                    err += 1
+                else:
+                    filename, row_count = result
+                    if row_count > 0:
+                        ok += 1
+                        key = (cycle_label, filer_type_label, category_type)
+                        with manifest_lock:
+                            append_manifest({
+                                "cycle_label":   cycle_label,
+                                "filer_type":    filer_type_label,
+                                "category_type": category_type,
+                                "filename":      filename,
+                                "downloaded_at": datetime.today().strftime("%Y-%m-%d"),
+                                "row_count":     row_count,
+                            })
+                            done.add(key)
 
-                filename, row_count = result
-                if row_count == 0:
-                    print("no records, skipping")
-                    continue
+            if _counts is not None:
+                _counts[0] = ok
+                _counts[1] = err
 
-                print(f"→ {filename} ({row_count:,} rows)")
-                append_manifest({
-                    "cycle_label":   cycle_label,
-                    "filer_type":    filer_type_label,
-                    "category_type": category_type,
-                    "filename":      filename,
-                    "downloaded_at": datetime.today().strftime("%Y-%m-%d"),
-                    "row_count":     row_count,
-                })
-                done.add(key)
-                time.sleep(1)
+    return ok, err
 
 
-# ── Committee details ──────────────────────────────────────────────────────────
+# ========================= committee details ==========================
 
 def load_detail_done() -> set[str]:
     out = RAW_DIR / "az_committee_details.csv"
@@ -357,7 +638,7 @@ def load_entity_ids() -> list[str]:
     if not reg.exists():
         reg = RAW_DIR / "az_committees.csv"
     if not reg.exists():
-        print("[!] No committee registry found — run without --update-entities first")
+        print("[!] No committee registry found — run without --entities first")
         sys.exit(1)
     ids = []
     with open(reg, newline="", encoding="utf-8") as f:
@@ -393,19 +674,21 @@ def extract_detail_fields(entity_id: str, info: dict) -> dict:
     return row
 
 
-def download_committee_details(session: req_lib.Session, force: bool = False):
+def download_committee_details(log, session: req_lib.Session,
+                               force: bool = False) -> tuple[int, int]:
+    """Fetch detail pages for all known entity IDs. Returns (ok, err)."""
     out        = RAW_DIR / "az_committee_details.csv"
     entity_ids = load_entity_ids()
     done       = set() if force else load_detail_done()
     todo       = [eid for eid in entity_ids if eid not in done]
 
-    print(f"Committee details: {len(entity_ids)} total, {len(done)} done, {len(todo)} to fetch")
+    log.info(f"Committee details: {len(entity_ids)} total, {len(done)} done, {len(todo)} to fetch")
     if not todo:
-        print("Nothing to do.")
-        return
+        log.info("Nothing to do.")
+        return 0, 0
 
-    errors  = 0
-    fetched = 0
+    ok = err = 0
+    t0 = time.perf_counter()
 
     with open(out, "w" if force else "a", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=DETAIL_COLS, extrasaction="ignore")
@@ -425,85 +708,345 @@ def download_committee_details(session: req_lib.Session, force: bool = False):
                     data = r.json()
                     info = (data.get("ReportFilerInfo") or {}) if isinstance(data, dict) else {}
                     writer.writerow(extract_detail_fields(eid, info))
-                    fetched += 1
+                    ok += 1
                 else:
-                    print(f"  [{i}/{len(todo)}] {eid}: HTTP {r.status_code}")
-                    errors += 1
+                    log.page_scrape_error(entity="committee", page_id=eid,
+                                          error=f"HTTP {r.status_code}")
+                    err += 1
             except Exception as e:
-                print(f"  [{i}/{len(todo)}] {eid}: ERROR {e}")
-                errors += 1
+                log.page_scrape_error(entity="committee", page_id=eid, error=str(e))
+                err += 1
 
-            if i % 500 == 0:
-                print(f"  {i}/{len(todo)} ({100*i/len(todo):.0f}%)  "
-                      f"fetched={fetched}  errors={errors}")
+            if i % 100 == 0:
+                log.info(f"  {i}/{len(todo)} ({100*i/len(todo):.0f}%)  "
+                         f"fetched={ok}  errors={err}")
 
             time.sleep(0.15)
 
-    print(f"Details done: {fetched} fetched, {errors} errors → {out.name}\n")
+    log.page_scrape_complete(filename=str(out), rows=ok,
+                             duration_s=round(time.perf_counter() - t0, 2),
+                             ok=ok, err=err)
+    return ok, err
 
 
-# ── Orchestrator ───────────────────────────────────────────────────────────────
+# ============================= orchestrator ===========================
 
-def run(force: bool = False, update_transactions: bool = False,
-        update_entities: bool = False):
+def run(force: bool = False, entities: bool = False, transactions: bool = False):
+    """Download Arizona campaign finance data from SeeTheMoney."""
+    log = get_logger("arizona", "scrape")
+    t0  = time.perf_counter()
+    log._emit("scrape_started", force=force, entities=entities, transactions=transactions)
+
+    # Resolve scope: if neither flag is set, run both
+    do_both         = not entities and not transactions
+    do_transactions = transactions or do_both
+    do_entities     = entities     or do_both
+
+    files_ok = files_err = pages_ok = pages_err = 0
+    _tx_counts = [0, 0]
+
+    try:
+        current_year = str(datetime.today().year)
+
+        if force:
+            if MANIFEST.exists():
+                MANIFEST.unlink()
+            done = set()
+        elif do_transactions and not do_entities:
+            strip_manifest(lambda r: current_year not in r.get("cycle_label", ""))
+            done = load_manifest()
+        else:
+            done = load_manifest()
+
+        session = build_session()
+
+        if do_entities:
+            log.info("Downloading registry...")
+            ok, err = download_registry(log, session)
+            pages_ok += ok; pages_err += err
+
+        if do_transactions:
+            log.info("Downloading transactions...")
+            ok, err = download_transactions(log, session, done,
+                                            current_only=(not force and not do_both),
+                                            _counts=_tx_counts)
+            files_ok += ok; files_err += err
+
+        if do_entities:
+            log.info("Downloading committee details...")
+            ok, err = download_committee_details(log, session, force=force)
+            pages_ok += ok; pages_err += err
+
+        duration = round(time.perf_counter() - t0, 1)
+        log.info(f"Done in {duration}s")
+        log._emit("scrape_completed", status="completed", duration_s=duration,
+                  files_ok=files_ok, files_err=files_err,
+                  pages_ok=pages_ok, pages_err=pages_err)
+
+    except KeyboardInterrupt:
+        interrupted_files_ok  = files_ok  or _tx_counts[0]
+        interrupted_files_err = files_err or _tx_counts[1]
+        log.warning("Interrupted")
+        log._emit("scrape_completed", status="interrupted",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  files_ok=interrupted_files_ok, files_err=interrupted_files_err,
+                  pages_ok=pages_ok, pages_err=pages_err)
+        raise
+
+    except Exception as e:
+        log._emit("scrape_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  files_ok=files_ok, files_err=files_err,
+                  pages_ok=pages_ok, pages_err=pages_err,
+                  error_type=type(e).__name__, error=str(e))
+        raise
+
+
+# ============================= diagnostic ==============================
+
+def run_diagnostic():
+    """Capture all network traffic and page state to debug the AdvancedSearch endpoint."""
+    import json
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         print("[!] pip install playwright && playwright install chromium")
-        return
-
-    current_year = str(datetime.today().year)
-
-    if force:
-        if MANIFEST.exists():
-            MANIFEST.unlink()
-        done = set()
-    elif update_transactions:
-        strip_manifest(lambda r: current_year not in r.get("cycle_label", ""))
-        done = load_manifest()
-    else:
-        done = load_manifest()
-
-    if update_entities:
-        session = warmup_session()
-        download_registry(session)
-        download_committee_details(session, force=True)
-        return
+        sys.exit(1)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         context = browser.new_context()
+        page    = context.new_page()
 
-        warmup = context.new_page()
-        warmup.goto(BASE_URL, timeout=30_000)
-        warmup.wait_for_load_state("networkidle")
-        warmup.close()
+        # Capture ALL requests to the site (GET and POST) via route interceptor
+        # page.route gives us reliable POST body access; on("response") does not
+        route_log = []
+        def handle_route(route):
+            req = route.request
+            if "seethemoney.az.gov" in req.url:
+                route_log.append({
+                    "method":  req.method,
+                    "url":     req.url,
+                    "headers": dict(req.headers),
+                    "body":    req.post_data or "",
+                })
+            route.continue_()
+        page.route("**", handle_route)
 
-        session = warmup_session(pw_context=context)
+        # Also capture response bodies
+        resp_log = []
+        def on_response(resp):
+            if "seethemoney.az.gov" in resp.url:
+                try:
+                    body = resp.text()
+                except Exception:
+                    body = "[unreadable]"
+                resp_log.append({"url": resp.url, "status": resp.status, "body": body[:400]})
+        page.on("response", on_response)
 
-        if not update_transactions:
-            print("Downloading registry (all filer types)...")
-            download_registry(session)
+        print(f"\n>>> Navigating to {BASE_URL} ...")
+        page.goto(BASE_URL, timeout=30_000)
+        page.wait_for_load_state("networkidle")
+        print(f">>> networkidle — {len(route_log)} request(s) to site\n")
 
-        print("Downloading transactions...")
-        download_transactions(context, done, current_only=update_transactions)
+        for i, r in enumerate(route_log):
+            rb = resp_log[i] if i < len(resp_log) else {}
+            print(f"[{i}] {r['method']} {r['url']}")
+            if r['body']:
+                print(f"     req_body: {r['body'][:200]}")
+            print(f"     resp {rb.get('status','?')}: {repr(rb.get('body',''))[:200]}\n")
 
+        # Dump page JS state
+        state = page.evaluate("""() => ({
+            hasJquery:    typeof $ !== 'undefined',
+            jqVersion:    typeof $ !== 'undefined' ? $.fn.jquery : null,
+            ajaxHeaders:  typeof $ !== 'undefined' && $.ajaxSettings && $.ajaxSettings.headers
+                          ? JSON.stringify($.ajaxSettings.headers) : null,
+            csrfToken:    (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || null,
+            pageUrl:      location.href,
+            formCount:    document.querySelectorAll('form').length,
+            inputs:       Array.from(document.querySelectorAll('form input,form select'))
+                              .map(el => ({ name: el.name, type: el.type, value: (el.value||'').slice(0,40) })),
+        })""")
+        print(">>> Page JS state:")
+        print(json.dumps(state, indent=2))
+
+        # Dump the actual CycleId dropdown options
+        print("\n>>> CycleId dropdown options:")
+        cycle_opts = page.evaluate("""() =>
+            Array.from(document.querySelectorAll('[name="CycleId"] option'))
+                .map(o => ({ value: o.value, text: o.textContent.trim() }))
+        """)
+        for o in cycle_opts:
+            print(f"  value={repr(o['value'])}  text={repr(o['text'])}")
+
+        # Dump FilerTypeId dropdown options too
+        print("\n>>> FilerTypeId dropdown options:")
+        filer_opts = page.evaluate("""() =>
+            Array.from(document.querySelectorAll('[name="FilerTypeId"] option'))
+                .map(o => ({ value: o.value, text: o.textContent.trim() }))
+        """)
+        for o in filer_opts:
+            print(f"  value={repr(o['value'])}  text={repr(o['text'])}")
+
+        # Pick the first real CycleId option and do a real search via the form
+        first_cycle = next((o["value"] for o in cycle_opts if o["value"]), None)
+        first_filer = next((o["value"] for o in filer_opts if o["value"]), None)
+        print(f"\n>>> Will trigger a real search: CycleId={first_cycle!r}  FilerTypeId={first_filer!r}")
+
+        if first_cycle:
+            # --- Strategy A: navigate with pre-filled URL hash ---
+            # The SPA reads the hash on load and auto-searches when params are present.
+            hash_params = (
+                f"JurisdictionId=0|CommiteeReportId=|CategoryType=Income"
+                f"|CycleId={first_cycle}"
+                f"|StartDate=|EndDate=|FilerName=|FilerId=|BallotName=|BallotMeasureId="
+                f"|FilerTypeId={first_filer or ''}|OfficeTypeId=|OfficeId=|PartyId="
+                f"|ContributorName=|VendorName=|StateId=|City=|Employer=|Occupation="
+                f"|CandidateName=|CandidateFilerId=|Position=Support|LowAmount=|HighAmount="
+                f"|TablePage=1|TableLength=10"
+            )
+            hash_url = BASE_URL + "#" + hash_params
+            print(f"\n>>> Strategy A: navigate with hash URL ...")
+            print(f"  {hash_url}")
+
+            hash_captured = []
+            def on_hash_response(resp):
+                if "AdvancedSearch" in resp.url and resp.request.method == "POST":
+                    try:
+                        body = resp.text()
+                    except Exception:
+                        body = "[unreadable]"
+                    hash_captured.append({
+                        "req_body": resp.request.post_data or "",
+                        "status":   resp.status,
+                        "resp":     body[:600],
+                    })
+            page.on("response", on_hash_response)
+            page.goto(hash_url, timeout=30_000)
+            page.wait_for_load_state("networkidle", timeout=20_000)
+
+            print(f"  Captured {len(hash_captured)} AdvancedSearch response(s)")
+            for sc in hash_captured:
+                print(f"  req_body: {sc['req_body'][:400]}")
+                print(f"  status:   {sc['status']}")
+                print(f"  resp:     {repr(sc['resp'])}")
+
+            # --- Strategy B: use Playwright .click() on the search button ---
+            print(f"\n>>> Strategy B: Playwright click on Search button ...")
+            # Dump every button first so we know exactly what's there
+            all_btns = page.evaluate("""() =>
+                Array.from(document.querySelectorAll('button, input[type=button], input[type=submit], a.btn'))
+                    .map(b => ({
+                        tag:     b.tagName,
+                        type:    b.type || '',
+                        id:      b.id   || '',
+                        cls:     b.className || '',
+                        text:    b.textContent.trim().slice(0, 50),
+                        visible: b.offsetParent !== null,
+                    }))
+            """)
+            print(f"  All buttons ({len(all_btns)}):")
+            for b in all_btns:
+                print(f"    {b}")
+
+            # Search button is id="Search" (confirmed from button dump)
+            btn_sel = '#Search'
+            print(f"  Using button selector: {btn_sel}")
+            if page.locator(btn_sel).count() == 0:
+                print("  #Search not found — skipping Strategy B")
+                btn_sel = None
+            if btn_sel:
+                # Reset logs so only click-triggered requests appear
+                before_click = len(route_log)
+
+                # Set cycle in form first
+                page.select_option('[name="CycleId"]', first_cycle)
+                if first_filer:
+                    page.select_option('[name="FilerTypeId"]', first_filer)
+
+                # Verify the DOM values actually stuck
+                vals = page.evaluate("""() => ({
+                    cycleId:    document.querySelector('[name="CycleId"]').value,
+                    filerTypeId: document.querySelector('[name="FilerTypeId"]').value,
+                    categoryType: document.querySelector('[name="CategoryType"]:checked')?.value,
+                })""")
+                print(f"  Form values before click: {vals}")
+
+                page.click(btn_sel)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=10_000)
+                except Exception:
+                    pass
+
+                new_requests = route_log[before_click:]
+                az_requests = [r for r in new_requests if "seethemoney.az.gov" in r["url"]]
+                print(f"  {len(az_requests)} seethemoney request(s) triggered by click:")
+                for r in az_requests:
+                    resp_entry = next((x for x in resp_log if x["url"] == r["url"]), {})
+                    print(f"    {r['method']} {r['url']}")
+                    if r['body']:
+                        print(f"      req_body: {r['body'][:400]}")
+                    print(f"      resp {resp_entry.get('status','?')}: {repr(resp_entry.get('body',''))[:300]}")
+
+            # --- Strategy C: raw XHR (fix: pass args as single object) ---
+            print(f"\n>>> Strategy C: raw XHR with correct CycleId ...")
+            xhr_result = page.evaluate("""async (args) => {
+                const body = new URLSearchParams({
+                    CommiteeReportId:'', CategoryType:'Income', JurisdictionId:'0',
+                    CycleId:    args.cycleId,
+                    StartDate:'', EndDate:'',
+                    FilerName:'', FilerId:'', BallotName:'', BallotMeasureId:'',
+                    FilerTypeId: args.filerTypeId, OfficeTypeId:'', OfficeId:'', PartyId:'',
+                    ContributorName:'', VendorName:'', StateId:'', City:'',
+                    Employer:'', Occupation:'', CandidateName:'', CandidateFilerId:'',
+                    Position:'Support', LowAmount:'', HighAmount:'',
+                    TablePage:'1', TableLength:'10',
+                });
+                return new Promise((resolve) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/Reporting/AdvancedSearch/', true);
+                    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+                    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                    xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText.slice(0, 600) });
+                    xhr.onerror = () => resolve({ error: 'network error' });
+                    xhr.send(body.toString());
+                });
+            }""", {"cycleId": first_cycle, "filerTypeId": first_filer or ""})
+            print(f"  status: {xhr_result.get('status')}")
+            print(f"  body:   {repr(xhr_result.get('body', ''))}")
+        else:
+            print(">>> No CycleId options found — cannot trigger search")
+
+        input("\n>>> Press Enter to close the browser...")
         browser.close()
 
-    if not update_transactions:
-        print("Downloading committee details...")
-        session = warmup_session()
-        download_committee_details(session)
 
-    print("\nArizona: done.")
-
-
+# ================================= CLI ================================
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--force",               action="store_true")
-    ap.add_argument("--update-transactions", action="store_true")
-    ap.add_argument("--update-entities",     action="store_true")
+    ap = argparse.ArgumentParser(
+        description="Download Arizona campaign finance data from SeeTheMoney."
+    )
+    ap.add_argument("--force",        action="store_true",
+                    help="re-download everything, ignoring the manifest")
+    ap.add_argument("--transactions", action="store_true",
+                    help="transactions only")
+    ap.add_argument("--entities",     action="store_true",
+                    help="entities only (registry + committee details)")
+    ap.add_argument("--diag",          action="store_true",
+                    help="run diagnostic: capture page traffic and test API call, then exit")
+    ap.add_argument("--test-requests", action="store_true",
+                    help="test whether plain requests (no browser) can reach the API")
     args = ap.parse_args()
-    run(force=args.force,
-        update_transactions=args.update_transactions,
-        update_entities=args.update_entities)
+    if args.diag:
+        run_diagnostic()
+        sys.exit(0)
+    if args.test_requests:
+        test_requests_only()
+        sys.exit(0)
+    try:
+        run(force=args.force, entities=args.entities, transactions=args.transactions)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception:
+        sys.exit(1)

@@ -1,3 +1,4 @@
+beautifulsoup4==4.14.3
 boto3==1.43.10
 duckdb==1.5.2
 playwright==1.59.0
