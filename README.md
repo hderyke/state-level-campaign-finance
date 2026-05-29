@@ -187,7 +187,7 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 | Alabama (AL) | ✅ | ✅ | @hderyke       | |
 | Alaska (AK) | ✅ | ✅ | @hderyke       | |
 | Arizona (AZ) | ⚠️ | ⚠️ | @hderyke       | |
-| Arkansas (AR) | ⚠️ | ⚠️ | @hderyke       | |
+| Arkansas (AR) | ✅ | ✅ | @hderyke       | |
 | California (CA) | ⚠️ | ⚠️ | @hderyke       | |
 | Colorado (CO) | ⚠️ | ⚠️ | @hderyke       | |
 
