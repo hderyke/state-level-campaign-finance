@@ -702,6 +702,18 @@ Notes:
 """
 ```
 
+### Section header style
+
+Use `==` banners for top-level section separators inside scrapers and parsers. The banner should be 72 characters wide (including `# `), with the label centered and padded evenly on both sides:
+
+```python
+# ============================== constants ==============================
+# ========================= state-specific constants ===================
+# ============================= registry ===============================
+```
+
+Use this style consistently — don't mix in solid-dash lines (`# ------`) or unbalanced padding. Subsections within a block (e.g. a comment label above a few lines) are plain inline comments, not banners.
+
 ### Inline comments
 
 Comment the *why*, not the *what*. Avoid restating what the code clearly does:

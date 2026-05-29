@@ -602,6 +602,51 @@ td.right { color: #e6edf3; }
 .validate-mini-table td.bcnt { white-space: normal; }
 .validate-mini-table td.bcnt { text-align: right; color: #8b949e; min-width: 60px; max-width: none; }
 
+/* == Query terminal window == */
+.query-section {
+    border-top: 1px solid #30363d;
+}
+.query-section > summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #8b949e;
+    user-select: none;
+}
+.query-section > summary::-webkit-details-marker { display: none; }
+.query-section > summary::before {
+    content: "▶";
+    font-size: 9px;
+    color: #484f58;
+    transition: transform 0.15s;
+}
+.query-section[open] > summary::before { transform: rotate(90deg); }
+.query-terminal {
+    margin: 0 20px 16px;
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    overflow: auto;
+    max-height: 520px;
+}
+.query-terminal pre {
+    padding: 14px 16px;
+    margin: 0;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #c9d1d9;
+    white-space: pre;
+    tab-size: 2;
+}
+
 /* == Aggregate == */
 .aggregate-card {
     border: 1px solid #30363d;
@@ -1031,7 +1076,18 @@ def render_validate_report(vr: dict) -> str:
 </div>'''
 
 
-def render_state(name, data, validate_report: dict | None = None):
+def render_query_output(query_text: str) -> str:
+    """Render captured test_queries output as a collapsible terminal window."""
+    if not query_text or not query_text.strip():
+        return ""
+    return f'''<details class="query-section">
+  <summary>Spot-check queries</summary>
+  <div class="query-terminal"><pre>{h(query_text.rstrip())}</pre></div>
+</details>'''
+
+
+def render_state(name, data, validate_report: dict | None = None,
+                 query_output: str | None = None):
     sc = data.get("scrape", {})
     pa = data.get("parse", {})
     va = data.get("validate", {})
@@ -1059,6 +1115,8 @@ def render_state(name, data, validate_report: dict | None = None):
         details += render_validate_report(validate_report)
     if ta:
         details += render_tabulate_tables(ta)
+    if query_output:
+        details += render_query_output(query_output)
 
     return f'''<details class="state-card" open>
   <summary>
@@ -1100,6 +1158,21 @@ def render_aggregate(ag):
   </div>
   <div class="aggregate-body">{stats}</div>
 </div>'''
+
+
+def load_query_outputs(run_dir: Path | None, state_names: list[str]) -> dict[str, str]:
+    """Load {state}_queries.txt files from run_dir, keyed by state name."""
+    if not run_dir or not run_dir.is_dir():
+        return {}
+    out = {}
+    for name in state_names:
+        p = run_dir / f"{name.lower()}_queries.txt"
+        if p.exists():
+            try:
+                out[name] = p.read_text(encoding="utf-8")
+            except Exception:
+                pass
+    return out
 
 
 def load_validate_reports(run_dir: Path | None, state_names: list[str]) -> dict[str, dict]:
@@ -1392,11 +1465,14 @@ def render_html(report: dict, source_path: Path, run_dir: Path | None = None) ->
 
     state_order = report.get("_state_order", [])
     validate_reports = load_validate_reports(run_dir, state_order)
+    query_outputs    = load_query_outputs(run_dir, state_order)
 
     state_cards = ""
     for name in state_order:
         vr = validate_reports.get(name)
-        state_cards += render_state(name, report["states"][name], validate_report=vr)
+        qo = query_outputs.get(name)
+        state_cards += render_state(name, report["states"][name],
+                                    validate_report=vr, query_output=qo)
 
     agg_html = render_aggregate(report.get("aggregate", {}))
 

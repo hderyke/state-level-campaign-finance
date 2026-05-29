@@ -101,6 +101,20 @@ Each stage — scraper, parser, validate, tabulate — is run via `subprocess.ru
 - `stdout` and `stderr` stream to the terminal in real time.
 - The exit code is the failure signal. A non-zero exit from any stage causes `orc.py` to abort that state and record it as failed. Subsequent states in the batch still run.
 
+### Pipeline commands
+
+| Command | Stages |
+|---|---|
+| `update` | scrape → parse → validate → tabulate → aggregate |
+| `rescrape` | scrape `--force` → parse → validate → tabulate → aggregate |
+| `reparse` | *(skip scrape)* parse → validate → tabulate → aggregate |
+| `update-transactions` | scrape `--transactions` → parse → validate → tabulate → aggregate |
+| `update-entities` | scrape `--entities` → parse → validate → tabulate → aggregate |
+| `rescrape-transactions` | scrape `--force --transactions` → parse → validate → tabulate → aggregate |
+| `rescrape-entities` | scrape `--force --entities` → parse → validate → tabulate → aggregate |
+
+`reparse` is useful when the raw data is already current (e.g. a scrape just finished) and only the parser, alias mappings, or schema has changed.
+
 ### Scraper flags
 
 Different states use different CLI interfaces for their scrapers, so `_scraper_flags(state, mode)` translates a pipeline command (e.g. `update-entities`) into the correct flags for each state's scraper. Colorado uses `--update`/`--force`, Alabama and Alaska use `--entities`/`--transactions`, and most others use `--update-entities`/`--update-transactions`. This mapping lives entirely in `orc.py` and does not need to be touched when adding a new state that follows the standard flag convention.
