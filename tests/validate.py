@@ -124,7 +124,7 @@ BREAKDOWN_FIELDS = {
 
 ENRICHMENT_FIELDS = {
     "candidates": [
-        "person_id", "candidate_first", "candidate_last",
+        "candidate_first", "candidate_last",
         "office", "district", "jurisdiction", "party", "election_year",
         "incumbent",
     ],

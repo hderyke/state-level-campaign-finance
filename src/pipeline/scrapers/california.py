@@ -1,5 +1,5 @@
 """
-California.py — Download California CAL-ACCESS campaign finance tables.
+scrapers/california.py — Download California CAL-ACCESS campaign finance tables.
 
 Source: CAL-ACCESS bulk export ZIP, updated daily by the CA Secretary of State.
 URL:    https://campaignfinance.cdn.sos.ca.gov/dbwebexport.zip
@@ -10,7 +10,7 @@ about, decompress in memory, and write as UTF-8 TSVs.  Never downloads the
 full 1.5 GB ZIP.
 
 Target tables
-─────────────
+=============
   RCPT_CD.TSV                     → contributions received
   EXPN_CD.TSV                     → expenditures made
   FILERNAME_CD.TSV                → committee / filer names
@@ -20,14 +20,18 @@ Target tables
 
 import csv
 import struct
+import sys
+import time
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# == Paths =====================================================================
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT))
+from src.reporting.logger import get_logger
 RAW_DIR      = PROJECT_ROOT / "data" / "California" / "raw"
 MANIFEST     = PROJECT_ROOT / "data" / "California" / "manifest.csv"
 
@@ -55,7 +59,7 @@ ENTITY_TABLES      = {"FILERNAME_CD.tsv", "CVR_CAMPAIGN_DISCLOSURE_CD.tsv",
                       "FILER_TO_FILER_TYPE_CD.tsv"}
 
 
-# ── Manifest helpers ──────────────────────────────────────────────────────────
+# == Manifest helpers ==========================================================
 def load_manifest() -> dict[str, str]:
     """Return {filename: server_last_modified} for already-downloaded files."""
     if not MANIFEST.exists():
@@ -96,7 +100,7 @@ def update_manifest(filename: str, record: dict):
         writer.writerows(rows)
 
 
-# ── ZIP central directory parsing ─────────────────────────────────────────────
+# == ZIP central directory parsing =============================================
 def fetch_bytes(session: requests.Session, start: int, end: int) -> bytes:
     """Fetch a byte range from the ZIP_URL (inclusive on both ends)."""
     resp = session.get(ZIP_URL, headers={"Range": f"bytes={start}-{end}"}, timeout=120)
@@ -200,7 +204,7 @@ def read_central_directory(session: requests.Session, zip_size: int) -> dict:
     return entries
 
 
-# ── Selective extraction ──────────────────────────────────────────────────────
+# == Selective extraction ======================================================
 def extract_entry(session: requests.Session, entry: dict, zip_path: str,
                   out_path: Path) -> int:
     """
@@ -218,7 +222,7 @@ def extract_entry(session: requests.Session, entry: dict, zip_path: str,
     cd_comp    = entry["comp_size"]   # from central directory — used as fallback
     method     = entry["method"]
 
-    # ── Step 1: read local file header ────────────────────────────────────────
+    # == Step 1: read local file header ========================================
     lh_head = fetch_bytes(session, lh_offset, lh_offset + 1023)
     if lh_head[:4] != b"PK\x03\x04":
         raise ValueError(f"Bad local header signature for {zip_path}")
@@ -258,7 +262,7 @@ def extract_entry(session: requests.Session, entry: dict, zip_path: str,
     print(f"    → fetching {comp_size / 1024 / 1024:.0f} MB compressed...",
           end=" ", flush=True)
 
-    # ── Step 2: stream-download + decompress ──────────────────────────────────
+    # == Step 2: stream-download + decompress ==================================
     CHUNK   = 8 * 1024 * 1024   # 8 MB per HTTP request
     decomp  = zlib.decompressobj(wbits=-15) if method == 8 else None
 
@@ -302,88 +306,127 @@ def extract_entry(session: requests.Session, entry: dict, zip_path: str,
     return max(row_count - 1, 0)
 
 
-# ── Main runner ───────────────────────────────────────────────────────────────
+# == Main runner ===============================================================
 def run(force: bool = False, update_transactions: bool = False,
         update_entities: bool = False):
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/124.0.0.0 Safari/537.36",
-    })
+    log = get_logger("california", "scrape")
+    t0  = time.perf_counter()
+    log._emit("scrape_started", force=force,
+              entities=update_entities, transactions=update_transactions)
 
-    print("California: checking server...", end=" ", flush=True)
+    files_ok = files_err = 0
+
     try:
-        zip_size, server_last_mod = check_zip(session)
-    except requests.RequestException as e:
-        print(f"failed: {e}")
-        return
-    print(f"ZIP = {zip_size / 1024**3:.2f} GB, last modified {server_last_mod}")
-
-    if force:
-        done = {}
-    else:
-        done = load_manifest()
-
-    # Determine which tables to pull
-    if update_transactions:
-        targets = {k: v for k, v in TARGET_TABLES.items() if v in TRANSACTION_TABLES}
-    elif update_entities:
-        targets = {k: v for k, v in TARGET_TABLES.items() if v in ENTITY_TABLES}
-    else:
-        targets = TARGET_TABLES
-
-    # For update_* modes, ignore Last-Modified check (force re-pull of selected tables)
-    force_selected = force or update_transactions or update_entities
-
-    if not force_selected and all(done.get(n) == server_last_mod for n in targets.values()):
-        print("California: selected files current — skipping.")
-        return
-
-    print("California: reading ZIP central directory...", end=" ", flush=True)
-    try:
-        cd = read_central_directory(session, zip_size)
-    except Exception as e:
-        print(f"failed: {e}")
-        return
-    print(f"({len(cd)} entries)")
-
-    for zip_path, local_name in targets.items():
-        if not force_selected and done.get(local_name) == server_last_mod:
-            print(f"  {local_name}: already current — skipping")
-            continue
-
-        if zip_path not in cd:
-            print(f"  {local_name}: not found in ZIP — skipping")
-            continue
-
-        out_path = RAW_DIR / local_name
-        print(f"  {local_name}:", end=" ", flush=True)
-
-        try:
-            row_count = extract_entry(session, cd[zip_path], zip_path, out_path)
-        except Exception as e:
-            print(f"failed: {e}")
-            continue
-
-        print(f"{row_count:,} rows")
-        update_manifest(local_name, {
-            "filename":             local_name,
-            "server_last_modified": server_last_mod,
-            "downloaded_at":        datetime.today().strftime("%Y-%m-%d"),
-            "row_count":            row_count,
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/124.0.0.0 Safari/537.36",
         })
 
-    print("California: done.")
+        print("California: checking server...", end=" ", flush=True)
+        zip_size, server_last_mod = check_zip(session)
+        print(f"ZIP = {zip_size / 1024**3:.2f} GB, last modified {server_last_mod}")
+
+        done = {} if force else load_manifest()
+
+        # Determine which tables to pull
+        if update_transactions:
+            targets = {k: v for k, v in TARGET_TABLES.items() if v in TRANSACTION_TABLES}
+        elif update_entities:
+            targets = {k: v for k, v in TARGET_TABLES.items() if v in ENTITY_TABLES}
+        else:
+            targets = TARGET_TABLES
+
+        # For update_* modes, ignore Last-Modified check (force re-pull of selected tables)
+        force_selected = force or update_transactions or update_entities
+
+        if not force_selected and all(done.get(n) == server_last_mod for n in targets.values()):
+            print("California: selected files current — skipping.")
+            log._emit("scrape_completed", status="completed",
+                      duration_s=round(time.perf_counter() - t0, 1),
+                      files_ok=0, files_err=0, note="all_current")
+            return
+
+        print("California: reading ZIP central directory...", end=" ", flush=True)
+        cd = read_central_directory(session, zip_size)
+        print(f"({len(cd)} entries)")
+
+        for zip_path, local_name in targets.items():
+            if not force_selected and done.get(local_name) == server_last_mod:
+                print(f"  {local_name}: already current — skipping")
+                log.file_download_skip(filename=local_name)
+                continue
+
+            if zip_path not in cd:
+                print(f"  {local_name}: not found in ZIP — skipping")
+                log.file_download_error(filename=local_name,
+                                        error="not found in ZIP central directory")
+                files_err += 1
+                continue
+
+            out_path = RAW_DIR / local_name
+            print(f"  {local_name}:", end=" ", flush=True)
+            log.file_download_start(filename=local_name)
+            t_file = time.perf_counter()
+
+            try:
+                row_count = extract_entry(session, cd[zip_path], zip_path, out_path)
+            except Exception as e:
+                print(f"failed: {e}")
+                log.file_download_error(filename=local_name, error=str(e))
+                files_err += 1
+                continue
+
+            print(f"{row_count:,} rows")
+            log.file_download_ok(filename=local_name,
+                                 bytes=out_path.stat().st_size,
+                                 rows=row_count,
+                                 duration_s=round(time.perf_counter() - t_file, 1))
+            update_manifest(local_name, {
+                "filename":             local_name,
+                "server_last_modified": server_last_mod,
+                "downloaded_at":        datetime.today().strftime("%Y-%m-%d"),
+                "row_count":            row_count,
+            })
+            files_ok += 1
+
+        print("California: done.")
+        log._emit("scrape_completed", status="completed",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  files_ok=files_ok, files_err=files_err)
+
+    except KeyboardInterrupt:
+        log._emit("scrape_completed", status="interrupted",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  files_ok=files_ok, files_err=files_err)
+        raise
+
+    except Exception as e:
+        log._emit("scrape_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  files_ok=files_ok, files_err=files_err,
+                  error_type=type(e).__name__, error=str(e))
+        raise
 
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--force",               action="store_true")
-    ap.add_argument("--update-transactions", action="store_true")
-    ap.add_argument("--update-entities",     action="store_true")
+    ap = argparse.ArgumentParser(
+        description="Download California CAL-ACCESS campaign finance tables."
+    )
+    ap.add_argument("--force",               action="store_true",
+                    help="re-download everything, ignoring the manifest")
+    ap.add_argument("--update-transactions", action="store_true",
+                    help="transactions only (RCPT, EXPN, DEBT, LOAN)")
+    ap.add_argument("--update-entities",     action="store_true",
+                    help="entities only (FILERNAME, CVR, FILER_TO_FILER_TYPE)")
     args = ap.parse_args()
-    run(force=args.force,
-        update_transactions=args.update_transactions,
-        update_entities=args.update_entities)
+    try:
+        run(force=args.force,
+            update_transactions=args.update_transactions,
+            update_entities=args.update_entities)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception:
+        sys.exit(1)

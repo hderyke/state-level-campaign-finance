@@ -97,6 +97,49 @@ def _subprocess(cmd: list[str], label: str) -> bool:
     return result.returncode == 0
 
 
+TEST_QUERIES = PROJECT_ROOT / "tests" / "test_queries.py"
+QUERIES_DIR  = PROJECT_ROOT / "tests" / "reports"
+
+
+def _run_queries(name: str, log) -> None:
+    """Capture test_queries.py output and save to run dir + tests/reports.
+    Never blocks the pipeline — errors are printed and logged but ignored."""
+    if not TEST_QUERIES.exists():
+        return
+
+    print(f"\n  ▶ test_queries/{name}.py")
+    t0 = time.perf_counter()
+    try:
+        result = subprocess.run(
+            [PYTHON, str(TEST_QUERIES), name],
+            capture_output=True, text=True, cwd=PROJECT_ROOT,
+        )
+        output   = result.stdout
+        if result.stderr:
+            output += "\n" + result.stderr
+        duration = round(time.perf_counter() - t0, 1)
+
+        # Always write to tests/reports/{state}_queries.txt (latest)
+        QUERIES_DIR.mkdir(parents=True, exist_ok=True)
+        (QUERIES_DIR / f"{name}_queries.txt").write_text(output, encoding="utf-8")
+
+        # Copy to run dir if we're in orc mode
+        run_id = os.environ.get("CF_RUN_ID")
+        if run_id:
+            run_dir = PROJECT_ROOT / "logs" / "prod" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / f"{name}_queries.txt").write_text(output, encoding="utf-8")
+
+        status = "completed" if result.returncode == 0 else "error"
+        print(f"\n  {'✓' if status == 'completed' else '!'} queries: {duration}s")
+        log._emit("queries_completed", state=name, status=status, duration_s=duration)
+
+    except Exception as e:
+        print(f"\n  [!] test_queries failed for {name}: {e}")
+        log._emit("queries_completed", state=name, status="error",
+                  duration_s=round(time.perf_counter() - t0, 1), error=str(e))
+
+
 def scraper_path(state: str) -> Path | None:
     p = SCRAPER_DIR / f"{state}.py"
     return p if p.exists() else None
@@ -197,7 +240,12 @@ def _run_state(abbr: str, name: str, scraper_mode: str,
     if not ok:
         print(f"  [!] Validation FAILED for {abbr} — NOT tabulating")
         log._emit("state_completed", state=name, status="failed", stage="validate")
+        # Still run queries — informational even on failure
+        _run_queries(name, log)
         return False
+
+    # Spot-check queries (informational — never blocks pipeline)
+    _run_queries(name, log)
 
     # Tabulate
     if tabulate_on_pass:
