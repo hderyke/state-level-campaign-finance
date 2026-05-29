@@ -157,15 +157,6 @@ Arkansas has a proper entity registry, so committees and candidates are loaded f
 
 ---
 
-## Status
-
-- [x] Scraper complete
-- [x] Parser complete
-- [x] Loaded into DB
-- [x] Verified / QA'd (2026-05-29)
-
----
-
 ## Last Updated
 
 | Component | Date |
