@@ -51,6 +51,7 @@ COMMAND_TO_MODE = {
     "update-transactions":    "update-transactions",
     "rescrape-entities":      "rescrape-entities",
     "rescrape-transactions":  "rescrape-transactions",
+    "reparse":                "reparse",   # skip scrape; parse → validate → tabulate → aggregate
 }
 
 
@@ -131,7 +132,7 @@ def _scraper_flags(state: str, mode: str) -> list[str]:
             "rescrape-entities":   ["--force", "--update"],
             "rescrape-transactions": ["--force", "--update"],
         }[mode]
-    if state in ("alabama", "alaska"):
+    if state in ("alabama", "alaska", "arizona", "arkansas"):
         return {
             "force":                 ["--force"],
             "update":                [],
@@ -162,17 +163,20 @@ def _run_state(abbr: str, name: str, scraper_mode: str,
     header(f"{abbr.upper()} — {scraper_mode}")
 
     # Scraper
-    sp = scraper_path(name)
-    if sp is None:
-        print(f"  [!] No scraper found for {name} — skipping scrape step")
+    if scraper_mode == "reparse":
+        print(f"  ↷ Skipping scrape (reparse mode)")
     else:
-        flags = _scraper_flags(name, scraper_mode)
-        ok = _subprocess([PYTHON, str(sp)] + flags,
-                         f"scraper/{name}.py {' '.join(flags)}")
-        if not ok:
-            print(f"  [!] Scraper failed for {abbr} — aborting this state")
-            log._emit("state_completed", state=name, status="failed", stage="scrape")
-            return False
+        sp = scraper_path(name)
+        if sp is None:
+            print(f"  [!] No scraper found for {name} — skipping scrape step")
+        else:
+            flags = _scraper_flags(name, scraper_mode)
+            ok = _subprocess([PYTHON, str(sp)] + flags,
+                             f"scraper/{name}.py {' '.join(flags)}")
+            if not ok:
+                print(f"  [!] Scraper failed for {abbr} — aborting this state")
+                log._emit("state_completed", state=name, status="failed", stage="scrape")
+                return False
 
     # Parser
     pp = parser_path(name)

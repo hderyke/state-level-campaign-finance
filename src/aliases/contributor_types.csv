@@ -27,12 +27,35 @@ AR,County Political Party Committee,Party
 AR,Political Party,Party
 AR,Independent Expenditure Committee,PAC
 # == Arizona ===================================================================
-# contributor_type in AZ describes the recipient committee, not the contributor
-# — all mapped to NULL; contributor type is derivable from transaction_type instead
-AZ,Candidate,
-AZ,Party,
-AZ,PAC,
-AZ,Officeholder,
+# contributor_type is set from TransactionType in the raw API response.
+AZ,Contribution from Individuals,Individual
+AZ,CCEC $5 Qualifying Contribution,Individual
+AZ,In-State Contributions $100 or Less,Individual
+AZ,In-Kind Cont. from Individual,Individual
+AZ,Refund Contribution from Individual,Individual
+AZ,Contributions from PACs,PAC
+AZ,Contributions from Candidate Committees,PAC
+AZ,Contribution from Candidate or Family,Candidate
+AZ,In-Kind Cont. Candidate or Family,Candidate
+AZ,Contributions from Corps and LLCs,Organization
+AZ,Corp and LLC In-Kind Contribution,Organization
+AZ,Contributions from Partnerships,Organization
+AZ,Contributions from Labor Organizations,Organization
+AZ,Labor Org In-Kind Contribution,Organization
+AZ,Contributions from Parties,Party
+AZ,Non-Contribution Income,
+AZ,Receive CCEC Funding,
+AZ,Receive Interest/Dividends,
+AZ,Receive Loan from Individual,
+AZ,Receive Loan from Candidate or Family Member,
+AZ,Receive Shared Expense Payment from Committee,
+AZ,Transfer in Surplus from Prev Committee,
+AZ,Submit $5 Qualifying Contributions to SOS,
+AZ,Payment on Individual Loan,
+AZ,Payment on Candidate/Family Loan,
+AZ,Refund Contribution Less than $50,
+AZ,Refund Non-Contribution Income,
+AZ,Refund Contributions from Corps and LLCs,
 # == California ================================================================
 CA,IND,Individual
 CA,OTH,Organization

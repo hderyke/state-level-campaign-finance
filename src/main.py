@@ -5,6 +5,7 @@ src/main.py — Single entry point for the campaign finance pipeline.
   ─────────────────────────────────────────────────────────────────
   update <states>                scrape → parse → validate → tabulate → aggregate
   rescrape <states>              scrape --force → parse → validate → tabulate → aggregate
+  reparse <states>               parse → validate → tabulate → aggregate  (skip scrape)
   update-entities <states>       scrape --entities → parse → validate → tabulate → aggregate
   update-transactions <states>   scrape --transactions → parse → validate → tabulate → aggregate
   rescrape-entities <states>     scrape --force --entities → parse → validate → tabulate → aggregate
@@ -51,7 +52,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "src" / "pipeline"))
 from src import orc
 from src import cloudflare
 
-PIPELINE_COMMANDS = {"update", "rescrape", "update-entities", "update-transactions",
+PIPELINE_COMMANDS = {"update", "rescrape", "reparse",
+                     "update-entities", "update-transactions",
                      "rescrape-entities", "rescrape-transactions"}
 DATA_COMMANDS     = {"push", "pull"}
 ALL_COMMANDS      = PIPELINE_COMMANDS | DATA_COMMANDS
@@ -159,27 +161,36 @@ def main():
                else "-".join(t.upper() for t in targets))
         os.environ["CF_RUN_ID"] = f"{ts}_{command}_{tgt}"
 
-    if command in PIPELINE_COMMANDS:
-        orc.main(command, targets)
+    try:
+        if command in PIPELINE_COMMANDS:
+            orc.main(command, targets)
 
-    elif command == "push":
-        _push(targets)
+        elif command == "push":
+            _push(targets)
 
-    elif command == "pull":
-        _pull(targets)
+        elif command == "pull":
+            _pull(targets)
 
-    if AUTO_REPORT and not no_report:
-        run_id = os.environ.get("CF_RUN_ID")
-        if run_id:
-            run_dir = PROJECT_ROOT / "logs" / "prod" / run_id
-            log_path = run_dir / "log.jsonl"
-            if log_path.exists():
-                from src.reporting import log_report
-                report   = log_report.build_report(log_report.load_events(log_path))
-                html     = log_report.render_html(report, log_path, run_dir=run_dir)
-                out_path = run_dir / "report.html"
-                out_path.write_text(html, encoding="utf-8")
-                print(f"  ✓ report → {out_path.relative_to(PROJECT_ROOT)}")
+    finally:
+        # Generate the HTML report in all exit paths — normal completion,
+        # KeyboardInterrupt, and unhandled exceptions — as long as there is
+        # a log file to render. This ensures Ctrl+C still produces a report
+        # that shows how far the run got and what was logged before the interrupt.
+        if AUTO_REPORT and not no_report:
+            run_id = os.environ.get("CF_RUN_ID")
+            if run_id:
+                run_dir  = PROJECT_ROOT / "logs" / "prod" / run_id
+                log_path = run_dir / "log.jsonl"
+                if log_path.exists():
+                    try:
+                        from src.reporting import log_report
+                        report   = log_report.build_report(log_report.load_events(log_path))
+                        html     = log_report.render_html(report, log_path, run_dir=run_dir)
+                        out_path = run_dir / "report.html"
+                        out_path.write_text(html, encoding="utf-8")
+                        print(f"  ✓ report → {out_path.relative_to(PROJECT_ROOT)}")
+                    except Exception as report_err:
+                        print(f"  [!] report generation failed: {report_err}")
 
 # =============== CLI ======================
 if __name__ == "__main__":

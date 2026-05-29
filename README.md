@@ -61,6 +61,7 @@ python3 src/main.py update all
 **Pipeline commands:**
 - `update <states>` — full pipeline run, skipping already-downloaded files from previous years
 - `rescrape <states>` — full pipeline run, re-downloading everything from scratch
+- `reparse <states>` — skip scrape; re-run parse → validate → tabulate → aggregate on existing raw data
 - `update-transactions <states>` — update transaction data only (contributions/expenditures)
 - `update-entities <states>` — update entity data only (committees/candidates)
 - `rescrape-transactions <states>` — force re-download of transaction data

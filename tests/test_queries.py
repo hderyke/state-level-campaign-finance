@@ -97,44 +97,27 @@ def run(state: str):
     section("TOP 20 RECIPIENT CANDIDATES — total contributions received", state)
     rows = con.execute("""
         WITH dedup_candidates AS (
-            -- One row per (state, person_id): some parsers emit multiple
-            -- candidate rows for the same person (e.g. one per election-cycle
-            -- re-registration).  Without dedup the join fans out and inflates
-            -- totals N-fold.
-            SELECT DISTINCT ON (state, person_id)
+            -- One row per (state, candidate_name): person_id is per-office in
+            -- the "committee" model (AZ, AL, CA), so grouping by person_id would
+            -- fan-out for candidates who ran for multiple offices.  Deduping by
+            -- name instead ensures each contributor_name matches exactly once.
+            -- Pick the most-recent election_year so the displayed office is current.
+            SELECT DISTINCT ON (state, LOWER(TRIM(candidate_name)))
                 person_id, candidate_name, state, office, party
             FROM candidates
-        ),
-        matched AS (
-            SELECT ca.person_id, ca.candidate_name, ca.state, ca.office, ca.party,
-                   TRY_CAST(co.amount AS DOUBLE) AS amt
-            FROM dedup_candidates ca
-            JOIN contributions co
-                ON ca.state = co.state
-               AND co.candidate_name IS NOT NULL AND co.candidate_name != ''
-               AND LOWER(TRIM(ca.candidate_name)) = LOWER(TRIM(co.candidate_name))
-            WHERE TRY_CAST(co.amount AS DOUBLE) IS NOT NULL
-        ),
-        by_person AS (
-            SELECT person_id, state,
-                   COUNT(*) AS n,
-                   ROUND(SUM(amt), 0) AS total
-            FROM matched
-            GROUP BY person_id, state
-        ),
-        primary_row AS (
-            SELECT person_id, candidate_name, office, party,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY person_id
-                       ORDER BY COUNT(*) DESC
-                   ) AS rn
-            FROM matched
-            GROUP BY person_id, candidate_name, office, party
+            ORDER BY state, LOWER(TRIM(candidate_name)), election_year DESC NULLS LAST
         )
-        SELECT pr.candidate_name, bp.state, pr.office, pr.party, bp.n, bp.total
-        FROM by_person bp
-        JOIN primary_row pr ON bp.person_id = pr.person_id AND pr.rn = 1
-        ORDER BY bp.total DESC LIMIT 20
+        SELECT ca.candidate_name, ca.state, ca.office, ca.party,
+               COUNT(*) AS n,
+               ROUND(SUM(TRY_CAST(co.amount AS DOUBLE)), 0) AS total
+        FROM dedup_candidates ca
+        JOIN contributions co
+            ON ca.state = co.state
+           AND co.candidate_name IS NOT NULL AND co.candidate_name != ''
+           AND LOWER(TRIM(ca.candidate_name)) = LOWER(TRIM(co.candidate_name))
+        WHERE TRY_CAST(co.amount AS DOUBLE) IS NOT NULL
+        GROUP BY ca.candidate_name, ca.state, ca.office, ca.party
+        ORDER BY total DESC LIMIT 20
     """).fetchall()
 
     W_ST = 4
