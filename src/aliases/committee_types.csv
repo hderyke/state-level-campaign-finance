@@ -8,7 +8,7 @@ AK,Candidate,Candidate Committee
 AK,Controlled,Candidate Committee
 AK,PAC,PAC
 AK,Special Interest,PAC
-AK,Political Party,Party
+AK,Political Party,Party Committee
 AK,Independent Expenditure,Independent Expenditure
 AK,Ballot Proposition,Ballot Measure
 AK,Initiative Proposal,Ballot Measure
@@ -27,9 +27,9 @@ AZ,Political Action Committee (Mega Standing),PAC
 AZ,Segregated Fund,PAC
 AZ,Segregated Fund (Standing),PAC
 AZ,Segregated Fund (Multicandidate PAC),PAC
-AZ,Political Party,Party
-AZ,Political Party (Standing),Party
-AZ,New Party,Party
+AZ,Political Party,Party Committee
+AZ,Political Party (Standing),Party Committee
+AZ,New Party,Party Committee
 AZ,Independent Expenditures,Independent Expenditure
 AZ,Independent Expenditures (Individual),Independent Expenditure
 AZ,Independent Expenditures (Corp/LLC/Labor Org),Independent Expenditure
@@ -47,14 +47,18 @@ AZ,None,Other
 AR,Candidate,Candidate Committee
 AR,Exploratory Committee,Candidate Committee
 AR,Political Action Committee,PAC
-AR,County Political Party Committee,Party
-AR,Political Party,Party
+AR,County Political Party Committee,Party Committee
+AR,Political Party,Party Committee
 AR,Independent Expenditure Filer (Committee),Independent Expenditure
 AR,Independent Expenditure Filer (Individual),Independent Expenditure
 AR,Independent Expenditure Filer (Other Entity),Independent Expenditure
 # == California ================================================================
 # CA committee_type describes filing roles, not committee categories.
 # RECIPIENT COMMITTEE is the primary filer type; others are support roles.
+# RECIPIENT COMMITTEE is a catch-all filer type shared by both PACs and
+# candidate-controlled committees in CAL-ACCESS. The parser reclassifies
+# rows with cd.cand_name populated to Candidate Committee at parse time
+# (parsers/california.py). See STEYER FOR GOVERNOR 2026, WHITMAN 2010, etc.
 CA,CANDIDATE/OFFICEHOLDER,Candidate Committee
 CA,RECIPIENT COMMITTEE,PAC
 CA,MAJOR DONOR/INDEPENDENT EXPENDITURE COMMITTEE,Independent Expenditure
@@ -77,8 +81,62 @@ CO,Candidate Committee,Candidate Committee
 CO,Political Committee,PAC
 CO,Small Donor Committee,PAC
 CO,Federal PAC,PAC
-CO,Political Party Committee,Party
+CO,Political Party Committee,Party Committee
 CO,Independent Expenditure Committee,Independent Expenditure
 CO,Issue Committee,Ballot Measure
 CO,Small Scale Issue Committee,Ballot Measure
 CO,527 Political Organization,Other
+# == Connecticut ===============================================================
+CT,Candidate Committee,Candidate Committee
+CT,Exploratory Committee,Candidate Committee
+CT,Political Action Committee,PAC
+CT,Party Committee,Party Committee
+CT,NO,
+# == Delaware ==================================================================
+DE,Candidate Committee,Candidate Committee
+DE,Political Action Committee,PAC
+DE,Political Committee,Party Committee
+DE,3rd Party Advertiser,Other
+DE,Certification of Intention,Other
+# == Georgia ===================================================================
+# Two sources feed committees.csv:
+#  - candidates.csv rows with a committeeName: the candidate's own campaign
+#    committee (candidate_name/office/district populated). Parser writes
+#    "Candidate Committee" directly (fixed 2026-06-13; prior runs wrote "PAC").
+#  - public_committees.csv (GetCommitteeDetails): genuinely non-candidate
+#    PACs/IECs/party/leadership committees, candidate_name blank.
+GA,Candidate Committee,Candidate Committee
+GA,PAC,PAC
+GA,Political Action Committee / Non-Political Action Committee,PAC
+GA,Leadership Committee,PAC
+GA,Independent Committee,Independent Expenditure
+GA,Political Party Committee,Party Committee
+GA,County or Municipal Ballot Question Committee,Ballot Measure
+GA,Individual Committee / Other (Non-PAC),Other
+# Legacy (media.ethics.ga.gov, 2006-2024) — raw CommitteeType from
+# legacy_committees_type{1,3,4,5,6,7,8}.csv (type2 already covered above by
+# "Independent Committee").
+GA,Political Action Committee,PAC
+GA,Constitutional Amendment or Statewide Referendum,Ballot Measure
+GA,County or Municipal Ballot Question,Ballot Measure
+GA,Recall Election - Name of Public Officer & Office Held,Other
+GA,Political Party,Party Committee
+GA,Individual,Other
+GA,Corporation,Other
+# == Illinois ==================================================================
+# TypeOfCommittee is often blank; the parser infers "Candidate" for ~13K
+# blank rows that ARE linked to a candidate via CmteCandidateLinks.txt. The
+# remaining ~6K unlinked blanks stay blank and are unmapped here.
+IL,Candidate,Candidate Committee
+IL,Political Action,PAC
+IL,Political Party,Party Committee
+IL,Ballot Initiative,Ballot Measure
+IL,Independent Expenditure,Independent Expenditure
+IL,Limited Activity Committee,Other
+# == Indiana ===================================================================
+# committee_type comes from entities.csv (scraped from CommitteeDetail.aspx).
+IN,Candidate,Candidate Committee
+IN,Political Action,PAC
+IN,Regular Party,Party Committee
+IN,Legislative Caucus,Party Committee
+IN,System,

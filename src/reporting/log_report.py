@@ -83,10 +83,11 @@ def _strip_meta(e: dict) -> dict:
 
 
 _STATES_CSV = Path(__file__).resolve().parents[2] / "src" / "aliases" / "states.csv"
-_NAME_TO_ABBR: dict[str, str] = {
-    row["name"].lower(): row["abbr"]
-    for row in csv.DictReader(open(_STATES_CSV, encoding="utf-8"))
-}
+with open(_STATES_CSV, encoding="utf-8") as _f:
+    _NAME_TO_ABBR: dict[str, str] = {
+        row["name"].lower(): row["abbr"]
+        for row in csv.DictReader(_f)
+    }
 
 def _to_abbr(name: str) -> str:
     """Convert a lowercase state name to its two-letter abbreviation, or return name.upper()."""

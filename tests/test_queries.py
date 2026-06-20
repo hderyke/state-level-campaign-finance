@@ -282,16 +282,20 @@ def run(state: str):
         print(f"  {trunc(st2, W_ST2):<{W_ST2}}  {n:>{W_N2},}  {fmt_money(total):>{W_T2}}  {pct:>{W_P}.1f}%")
 
     # ── 8. Expenditure transaction type breakdown ─────────────────────────────
+    # Per-state DBs expose transaction_type; the aggregate DB drops it in favour
+    # of the normalised transaction_category.  Detect which column is present.
     section("EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total", state)
-    rows = con.execute("""
+    expn_cols = {r[1] for r in con.execute("PRAGMA table_info(expenditures)").fetchall()}
+    tx_col    = "transaction_type" if "transaction_type" in expn_cols else "transaction_category"
+    rows = con.execute(f"""
         SELECT
-            CASE WHEN transaction_type IS NULL OR transaction_type = ''
-                 THEN '(blank)' ELSE transaction_type END AS transaction_type,
+            CASE WHEN {tx_col} IS NULL OR {tx_col} = ''
+                 THEN '(blank)' ELSE {tx_col} END AS tx_type,
             COUNT(*) AS n,
             ROUND(SUM(TRY_CAST(amount AS DOUBLE)), 0) AS total,
             ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct_rows
         FROM expenditures
-        GROUP BY transaction_type
+        GROUP BY 1
         ORDER BY n DESC
     """).fetchall()
 
@@ -339,8 +343,62 @@ def run(state: str):
         dt, cn, ct4, amt, cmt, city, st3, emp, occ = r
         print(f"  {str(dt or ''):<{W_DT2}}  {trunc(cn or '',W_CN2):<{W_CN2}}  {trunc(ct4 or '',W_CT4):<{W_CT4}}  {fmt_money(amt):>{W_AM2}}  {trunc(cmt or '',W_CMT2):<{W_CMT2}}  {trunc(city or '',W_CITY):<{W_CITY}}  {trunc(st3 or '',W_ST3):<{W_ST3}}  {trunc(emp or '',W_EMP):<{W_EMP}}  {trunc(occ or '',W_OCC):<{W_OCC}}")
 
+    # ── State-specific integrity checks ──────────────────────────────────────
+    checks = _state_checks(state.upper(), con)
+    if checks:
+        section("STATE-SPECIFIC INTEGRITY CHECKS", state)
+        all_pass = True
+        for label, passed, detail in checks:
+            icon = "✓" if passed else "✗"
+            print(f"  {icon} {label}")
+            if detail:
+                print(f"      {detail}")
+            if not passed:
+                all_pass = False
+        if not all_pass:
+            print("\n  ⚠ One or more integrity checks failed.")
+
     con.close()
     print()
+
+
+def _state_checks(state: str, con) -> list[tuple[str, bool, str]]:
+    """Return [(label, passed, detail)] for state-specific integrity checks."""
+    results = []
+
+    if state == "FL":
+        # Synthesized candidate committees must be present
+        known = ["DESANTIS, RON", "CRIST, CHARLIE", "SCOTT, RICK"]
+        for name in known:
+            row = con.execute("""
+                SELECT committee_name, state_filer_id, election_year
+                FROM committees
+                WHERE state = 'FL'
+                  AND LOWER(committee_name) = LOWER(?)
+                LIMIT 1
+            """, [name]).fetchone()
+            if row:
+                detail = (f"state_filer_id={row[1]}  election_year={row[2]}")
+                results.append((f"FL committees: '{name}' present", True, detail))
+            else:
+                results.append((f"FL committees: '{name}' MISSING — synthesized pass may have failed", False, ""))
+
+        # Synthesized rows should not dominate (sanity: real rows > synthesized)
+        counts = con.execute("""
+            SELECT
+                COUNT(*) FILTER (WHERE raw_file = 'fl_committee_details.csv') AS real,
+                COUNT(*) FILTER (WHERE raw_file LIKE '%synthesized%')          AS synth
+            FROM committees WHERE state = 'FL'
+        """).fetchone()
+        real, synth = counts
+        passed = real > synth
+        results.append((
+            f"FL committees: real ({real:,}) > synthesized ({synth:,})",
+            passed,
+            "" if passed else "More synthesized rows than real ones — check parse_committees logic",
+        ))
+
+    return results
 
 
 if __name__ == "__main__":

@@ -97,6 +97,7 @@ def upsert_manifest(record: dict):
 
 # ============================ transactions ============================
 
+
 def download_zip(log: StateLogger, id: int) -> tuple[str, int] | None:
     """Fetch a ZIP by numeric id, extract its CSV, and write it to RAW_DIR.
         Returns (filename, row_count) on success, None on any failure."""
@@ -139,7 +140,9 @@ def download_zip(log: StateLogger, id: int) -> tuple[str, int] | None:
 
 def download_transactions(log: StateLogger, force: bool = False) -> tuple[int, int]:
     """Download transaction ZIPs. Fills gaps and refreshes current-year files,
-    then probes beyond the manifest max to pick up new IDs. --force re-fetches all."""
+    then probes beyond the manifest max to pick up new IDs. --force re-fetches all.
+    Note: --start-year/--end-year/--contributions/--expenditures are not supported —
+    Alabama data is indexed by ZIP ID; year and type filtering apply at parse time."""
 
     current_year = str(datetime.today().year)
 
@@ -191,7 +194,7 @@ def download_transactions(log: StateLogger, force: bool = False) -> tuple[int, i
             ok += 1
         time.sleep(0.5)
 
-    # probe upward until MAX_CONSECUTIVE_FAILS consecutive failures - force and new files
+    # probe upward until MAX_CONSECUTIVE_FAILS consecutive failures
     consecutive_fails = 0
     for id in range(probe_start, MAX_ZIP_ID + 1):
         if consecutive_fails >= MAX_CONSECUTIVE_FAILS:
@@ -470,12 +473,20 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                   files_ok=files_ok, files_err=files_err,
                   pages_ok=pages_ok, pages_err=pages_err)
 
-    except KeyboardInterrupt: # cc user interrupt
+    except KeyboardInterrupt:
         log.warning("Interrupted")
         log._emit("scrape_completed", status="interrupted",
                   duration_s=round(time.perf_counter() - t0, 1),
                   files_ok=files_ok, files_err=files_err,
                   pages_ok=pages_ok, pages_err=pages_err)
+        raise
+
+    except Exception as e:
+        log._emit("scrape_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  files_ok=files_ok, files_err=files_err,
+                  pages_ok=pages_ok, pages_err=pages_err,
+                  error_type=type(e).__name__, error=str(e))
         raise
 
 # ====== CLI ==================================
@@ -493,14 +504,18 @@ if __name__ == "__main__":
         description="Download Alabama campaign finance data from the FCPA site. "
                     "Fetches transaction ZIPs and/or PAC/PCC committee details."
     )
-    ap.add_argument("--force",        action="store_true",
+    ap.add_argument("--force",         action="store_true",
                     help="force re-download (scope: all, or --transactions/--entities)")
-    ap.add_argument("--transactions", action="store_true",
+    ap.add_argument("--transactions",  action="store_true",
                     help="transactions only")
-    ap.add_argument("--entities",     action="store_true",
+    ap.add_argument("--entities",      action="store_true",
                     help="entities (PACs + PCCs) only")
-    args = ap.parse_args()
+    # --contributions/--expenditures/--start-year/--end-year are accepted but ignored:
+    # Alabama data is indexed by ZIP ID, so year and type filtering apply at parse time.
+    args, _ = ap.parse_known_args()
     try:
         run(force=args.force, entities=args.entities, transactions=args.transactions)
     except KeyboardInterrupt:
         sys.exit(130)
+    except Exception:
+        sys.exit(1)

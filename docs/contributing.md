@@ -15,8 +15,9 @@ For source code internals (schema, person IDs, aliases, logging API), see [docs/
 5. [Write the Parser](#5-write-the-parser)
 6. [Person IDs](#6-person-ids)
 7. [Add Alias Mappings](#7-add-alias-mappings)
-8. [Test Your Work](#8-test-your-work)
-9. [Documentation](#9-documentation)
+8. [CLI](#8-cli)
+9. [Test Your Work](#9-test-your-work)
+10. [Documentation](#10-documentation)
 
 ---
 
@@ -39,9 +40,11 @@ State names throughout are lowercase (e.g. `arkansas`), matching the filename an
 Add a row to `src/aliases/states.csv`:
 
 ```
-abbr,name
-AR,arkansas
+abbr,name,fips
+AR,arkansas,05
 ```
+
+The `fips` column is the two-digit FIPS code (zero-padded) — look it up at [census.gov](https://www.census.gov/library/reference/code-lists/ansi.html) or from any existing row in the file. It's used to build globally unique `person_id` values across states.
 
 This is the only step needed to make the orchestrator recognize the abbreviation. After this, `python3 src/main.py update AR` will know where to look for the scraper and parser.
 
@@ -82,7 +85,7 @@ The patterns below are conventions, not strict rules — function matters more t
 - [ ] Writes raw files to `data/{State}/raw/`
 - [ ] Manifest respected — already-downloaded files skipped; `--force` clears relevant entries
 - [ ] Current-year files always re-fetched regardless of manifest
-- [ ] CLI with `--force`, `--transactions`, `--entities` flags
+- [ ] CLI block using the standard flag set (see [Section 8](#8-cli))
 - [ ] `KeyboardInterrupt` and `Exception` both caught and re-raised
 - [ ] `scrape_started` emitted at the top of `run()`
 - [ ] `scrape_completed` emitted in all exit paths (success, interrupt, error)
@@ -245,35 +248,6 @@ except Exception as e:
 Both exception paths must re-raise — `orc.py` relies on a non-zero exit code from the CLI to mark the state as failed. The `except Exception` block logs the error to JSONL before re-raising so the run record includes the failure reason even in daemon mode.
 
 Individual file failures inside the download loop are a different matter — catch those, log with `file_download_error`, increment `files_err`, and continue to the next file. Only truly unrecoverable errors (lost connection, unexpected response format, etc.) should bubble up to the top-level handler.
-
-### CLI
-
-The scraper must be runnable directly from the command line. Use `argparse` with the standard flags:
-
-```python
-if __name__ == "__main__":
-    import argparse
-    ap = argparse.ArgumentParser(
-        description="Download {State} campaign finance data."
-    )
-    ap.add_argument("--force",        action="store_true",
-                    help="re-download everything, ignoring the manifest")
-    ap.add_argument("--transactions", action="store_true",
-                    help="transactions only")
-    ap.add_argument("--entities",     action="store_true",
-                    help="entities only (committees, candidates)")
-    args = ap.parse_args()
-    try:
-        run(force=args.force, entities=args.entities, transactions=args.transactions)
-    except KeyboardInterrupt:
-        sys.exit(130)
-    except Exception:
-        sys.exit(1)
-```
-
-Exit code 0 = success, 1 = failure, 130 = interrupted. These are what `orc.py` reads to decide whether to proceed to the parser.
-
-If your state's source genuinely doesn't separate entities from transactions, omit those flags from argparse and add an entry for your state in `orc.py`'s `_scraper_flags` function. See [pipeline.md § Orchestration](pipeline.md#3-orchestration) for details.
 
 ### Tips
 
@@ -533,20 +507,6 @@ log.file_parsed("contributions.csv.gz", "contributions", total_contributions,
                 role="output", bytes=_bytes("contributions.csv.gz"))
 ```
 
-### CLI
-
-Parsers take no arguments:
-
-```python
-if __name__ == "__main__":
-    try:
-        run()
-    except KeyboardInterrupt:
-        sys.exit(130)
-    except Exception:
-        sys.exit(1)
-```
-
 ### Tips
 
 **Use `tqdm` for large files.** If a state has multi-million-row transaction files, a progress bar helps confirm the parser is still running during a long parse. Wrap the `csv.DictReader` loop:
@@ -627,7 +587,206 @@ Each file uses the format `state,raw,canonical`. Lines beginning with `#` are tr
 
 ---
 
-## 8. Test Your Work
+## 8. CLI
+
+Every scraper and parser must be runnable directly from the command line. Exit codes are what `orc.py` reads to decide whether to proceed to the next stage: 0 = success, 1 = failure, 130 = interrupted.
+
+### Flag taxonomy
+
+Scraper flags are divided into two axes. Implement whichever your source actually supports — states that can't filter by year or split by data type just ignore the irrelevant flags.
+
+**Vertical scope** (controls which time period is downloaded — mutually exclusive):
+
+| Flag | Behavior |
+|---|---|
+| *(no flag)* | Incremental — fill manifest gaps, always refresh current year |
+| `--start-year YYYY` | Wipe manifest entries for years ≥ YYYY and re-download them |
+| `--end-year YYYY` | Wipe manifest entries for years ≤ YYYY and re-download them (combine with `--start-year` for a range) |
+| `--force` | Wipe all manifest entries in scope and re-download everything |
+
+`--force` and `--start-year` are mutually exclusive. `--force` and `--end-year` must be validated manually (argparse can't enforce this in a group when `--end-year` stands alone). `--end-year` must not exceed the current year.
+
+Year flags apply only to year-based downloads. States whose source is a single bulk file (e.g. California) or uses opaque IDs (e.g. Alabama) do not implement year flags.
+
+**Horizontal scope** (controls which data types are downloaded — additive, not exclusive):
+
+| Flag | Scope |
+|---|---|
+| *(no flag)* | Everything |
+| `--transactions` | Contributions + expenditures |
+| `--entities` | Committees + candidates |
+| `--contributions` | Contributions only (implies transactions) |
+| `--expenditures` | Expenditures only (implies transactions) |
+| `--candidates` | Candidates only (implies entities) |
+| `--committees` | Committees only (implies entities) |
+
+Second-level flags (`--contributions`, `--expenditures`, `--candidates`, `--committees`) are additive — combining them just unions their scopes. Only implement them if the source organizes data in a way that allows the split. Entity sources that return everything in a single API call (e.g. Arkansas) can still support `--candidates` / `--committees` by filtering which output files get written.
+
+### `run()` signature
+
+The standard `run()` signature accepts all flags even if the state ignores some of them:
+
+```python
+def run(
+    force: bool = False,
+    entities: bool = False,
+    transactions: bool = False,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    contributions: bool = False,
+    expenditures: bool = False,
+    candidates: bool = False,
+    committees: bool = False,
+):
+```
+
+States that don't support a flag simply don't use the corresponding parameter. `orc.py` always passes the full set.
+
+### Scraper CLI block
+
+```python
+if __name__ == "__main__":
+    import argparse
+    from datetime import datetime
+
+    ap = argparse.ArgumentParser(
+        description="Download {State} campaign finance data."
+    )
+
+    # Vertical — mutually exclusive
+    vert = ap.add_mutually_exclusive_group()
+    vert.add_argument("--force",      action="store_true",
+                      help="re-download all years in scope, wipe manifest")
+    vert.add_argument("--start-year", type=int, metavar="YYYY",
+                      help="earliest year to download (inclusive); wipes manifest for range")
+
+    ap.add_argument("--end-year", type=int, metavar="YYYY",
+                    help="latest year to download (inclusive, ≤ current year)")
+
+    # Horizontal — top level
+    ap.add_argument("--transactions", action="store_true",
+                    help="transactions only")
+    ap.add_argument("--entities",     action="store_true",
+                    help="entities only (committees, candidates)")
+
+    # Horizontal — second level (only add flags the source supports)
+    ap.add_argument("--contributions", action="store_true", help="contributions only")
+    ap.add_argument("--expenditures",  action="store_true", help="expenditures only")
+    ap.add_argument("--candidates",    action="store_true", help="candidates only")
+    ap.add_argument("--committees",    action="store_true", help="committees only")
+
+    args, _ = ap.parse_known_args()   # parse_known_args — orc may forward unknown flags
+
+    cy = datetime.today().year
+    if args.end_year:
+        if args.end_year > cy:
+            ap.error(f"--end-year cannot exceed current year ({cy})")
+        if args.start_year and args.start_year > args.end_year:
+            ap.error("--start-year cannot be greater than --end-year")
+    if args.force and args.end_year:
+        ap.error("--force cannot be combined with --end-year")
+
+    try:
+        run(
+            force=args.force,
+            entities=args.entities,
+            transactions=args.transactions,
+            start_year=args.start_year,
+            end_year=args.end_year,
+            contributions=args.contributions,
+            expenditures=args.expenditures,
+            candidates=args.candidates,
+            committees=args.committees,
+        )
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception:
+        sys.exit(1)
+```
+
+Use `parse_known_args` rather than `parse_args` — `orc.py` may forward flags the scraper doesn't define, and `parse_args` would error on unknown arguments.
+
+### Parser CLI block
+
+Most parsers take no arguments — their scope is determined entirely by what raw files exist on disk:
+
+```python
+if __name__ == "__main__":
+    try:
+        run()
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception:
+        sys.exit(1)
+```
+
+For states with very large files where parsing individual stages is useful (e.g. California), parsers can accept the same horizontal scope flags as scrapers (`--entities`, `--transactions`, `--contributions`, `--expenditures`). Use `parse_known_args` so orc-forwarded flags don't error:
+
+```python
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(description="Parse {State} campaign finance data.")
+    ap.add_argument("--entities",      action="store_true")
+    ap.add_argument("--transactions",  action="store_true")
+    ap.add_argument("--contributions", action="store_true")
+    ap.add_argument("--expenditures",  action="store_true")
+    args, _ = ap.parse_known_args()
+    try:
+        run(entities=args.entities, transactions=args.transactions,
+            contributions=args.contributions, expenditures=args.expenditures)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception:
+        sys.exit(1)
+```
+
+### Manifest clearing for year flags
+
+When `--start-year` or `--end-year` is active, wipe the manifest entries for the in-range years before loading `done`. Without this, already-downloaded files are skipped by the file-existence fallback even though the manifest was cleared.
+
+```python
+elif start_year is not None or end_year is not None:
+    def _outside_range(r: dict) -> bool:
+        try:
+            yr = int(r["year"])
+        except (ValueError, KeyError):
+            return True  # non-year entries always kept
+        if start_year is not None and yr < start_year:
+            return True
+        if end_year is not None and yr > end_year:
+            return True
+        return False     # within range — wipe
+
+    strip_manifest(_outside_range)
+```
+
+Also suppress the file-existence fallback inside the year loop when a range is active, so the manifest is the sole source of truth:
+
+```python
+year_range_active = start_year is not None or end_year is not None
+already_done = key in done or (
+    not year_range_active
+    and expected_file.exists()
+    and expected_file.stat().st_size > 0
+)
+```
+
+When a year range is explicitly set, re-download all in-range years even if they're already in the manifest — the user is explicitly asking for a refresh. The pattern used across states:
+
+```python
+year_range_explicit = start_year is not None or end_year is not None
+
+# In the download loop:
+if key in done and year != current_year_str and not year_range_explicit:
+    log.file_download_skip(filename=filename)
+    continue
+```
+
+This ensures that `--start-year 2020 --end-year 2022` re-fetches 2020–2022 regardless of manifest state, while a plain incremental run still skips completed years.
+
+---
+
+## 9. Test Your Work
 
 Run each component individually before running through the full orchestrator:
 
@@ -648,7 +807,7 @@ python3 tests/test_queries.py {state}
 Once both pass individually, run the full pipeline:
 
 ```bash
-python3 src/main.py update {AB}
+python3 src/main.py sync {AB}
 ```
 
 Check `logs/prod/{run_id}/report.html` for a summary. A few things to verify before considering a state done:
@@ -659,7 +818,7 @@ Check `logs/prod/{run_id}/report.html` for a summary. A few things to verify bef
 - Every `contributions` and `expenditures` row has a non-empty `raw_file` and `row_num`
 - Candidates and committees have unique `person_id` populated (a quick DuckDB query against the `.db` file confirms this)
 
-## 9. Documentation
+## 10. Documentation
 
 ### Comments and docstrings
 

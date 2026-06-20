@@ -129,3 +129,106 @@ CO,Unknown,
 CO,Contributions,Contribution
 CO,Returned Expenditure,Refund
 CO,Donation for Independent Expenditures,Independent Expenditure
+# == Connecticut ===============================================================
+# CT expenditure types use a free-text code+description format. Only the top
+# codes by frequency are mapped here; the hundreds of typo/abbreviation variants
+# are left unmapped (NULL in aggregate) rather than guessed.
+# Contributions to other committees
+CT,CNTRB(Contributions to another committee),Contribution
+CT,CNTRB(),Contribution
+CT,POC(Payment to another committee),Contribution
+CT,CEF(Payment to Citizens Election Fund (CEF)),Contribution
+# Refunds and surplus
+CT,REF(Contributor returns or other revenue refunds),Refund
+CT,SRPLS(Surplus distribution in connection with the termination of the committee),Refund
+# Loans
+CT,LOAN(Payment of committee's loan),Loan
+# Operating expenses — mapped to Monetary
+CT,BNK(Bank fees, interest charges, or penalties),Monetary
+CT,WAGE(Wages and benefits paid to the committee's staff),Monetary
+CT,RMB(Reimbursement - formerly RCW),Monetary
+CT,WEB(Costs related to accessing and having a presence on the web),Monetary
+CT,CNSLT(Payments to a professional consultant),Monetary
+CT,OVHD(Overhead operating costs),Monetary
+CT,FOOD(Paid directly to a vendor for food and beverage),Monetary
+CT,PRNT(Cost of printing, photocopying or reproducing literature),Monetary
+CT,POST(Postage),Monetary
+CT,FNDR *(Expenses associated with holding a committee fundraiser),Monetary
+CT,FNDR(Expenses associated with holding a committee fundraiser),Monetary
+CT,A-OTH(Other advertising for which no specific advertise code exists),Monetary
+CT,A-OTH(Other advertising),Monetary
+CT,OFFICE(Office Supplies),Monetary
+CT,A-SIGN(Cost of preparing, printing, producing or distributing lawn or billboard signs),Monetary
+CT,A-WEB(Advertise on the World Wide Web),Monetary
+CT,A-DM(Advertise through direct mail),Monetary
+CT,A-DM(Advertisie through direct mail),Monetary
+CT,RCW(Reimburse committee workers),Monetary
+CT,A-NEWS(Advertise through a newspaper),Monetary
+CT,A-NEWS(Adevertise through a newspaper),Monetary
+CT,CHAR(Payment to tax exempt charitable organization),Monetary
+CT,TRVL(Transportation and lodging costs),Monetary
+CT,A-ATM(Advertise using Automated telephone/fax message),Monetary
+CT,A-PH-BNK(Use of phone banks),Monetary
+CT,POLLS(Costs associated with conducting polls and surveys),Monetary
+CT,A-RAD(Advertise on radio),Monetary
+CT,EFV *(Equipment, Furniture, and vehicles),Monetary
+CT,A-TV(Advertise on television),Monetary
+CT,CCP(Any payment of a Credit Card bill),Monetary
+CT,ATT *(Fee for attending a fundraiser),Monetary
+CT,ATT(Fee for attending a fundraiser),Monetary
+CT,PTY-BLDG(Party building activities (For Party and PACs use only)),Monetary
+CT,A-MAG(Advertise through a magazine),Monetary
+CT,PBA-OTH *(Other Party building expenditures (For Party and PACs use only)),Monetary
+CT,PBA-OTH(Other Party building expenditures (For Party and PACs use only)),Monetary
+CT,GIFT(Purchase of items to be given as a gift),Monetary
+CT,Gift *(Purchase of items to be given as a gift),Monetary
+CT,PETTY(Petty cash fund),Monetary
+CT,PBA-ATT *(Attendance or admission fee (For Party and PACs use only)),Monetary
+CT,PBA-ATT(Attendance or admission fee (For Party and PACs use only)),Monetary
+CT,INAUG(Costs of hosting an inaugral event),Monetary
+CT,INAUG(Costs of hosting an inaugural event),Monetary
+CT,PBA-TRVL *(Travel and lodging (For Party and PACs use only)),Monetary
+CT,PBA-TRVL(Travel and lodging (For Party and PACs use only)),Monetary
+CT,TRAIN(Campaign training events (For PAC use only)),Monetary
+CT,EFV(Equipment, Furniture, and vehicles),Monetary
+CT,NULL,
+# == Delaware ==================================================================
+DE,Contributions,Contribution
+DE,Independent Expenditures,Independent Expenditure
+DE,In-Kind,In-Kind
+DE,Media,Monetary
+DE,Printing and Campaign Materials,Monetary
+DE,Fund Raiser,Monetary
+DE,Field Expenses,Monetary
+DE,Salaries and Other compensation,Monetary
+DE,Rent and Other Office expenses,Monetary
+DE,Postage,Monetary
+DE,Other Expenses,Monetary
+DE,Total of Expenditures not exceeding $100,Monetary
+DE,Non-Candidate Loan Payment,Monetary
+DE,Candidate Loan Payment,Monetary
+DE,Reimburse,Monetary
+DE,Direct Mailing by Mail House (R),Monetary
+DE,Purchase of Equipment,Monetary
+DE,Return Contributions,Refund
+DE,Expense Reimbursement,Refund
+DE,Data Conversion,Monetary
+# == Georgia ===================================================================
+GA,Expenditure – Itemized Expenditure,Monetary
+GA,Expenditure – Unitemized Expenditure,Monetary
+GA,Expenditure – Reimbursement,Monetary
+GA,Expenditure – Credit Card,Monetary
+GA,Expenditure – In-Kind Expenditure,In-Kind
+GA,Return Expenditure – Itemized Expenditure,Refund
+GA,Return Expenditure – Unitemized Expenditure,Refund
+# Legacy (media.ethics.ga.gov, 2006-2024) — transaction_type is "Expenditure – Type"
+# where Type is "Expenditure" or "In-Kind" (Reimbursement/Credit Card already
+# match the rows above).
+GA,Expenditure – Expenditure,Monetary
+GA,Expenditure – In-Kind,In-Kind
+# == Illinois ==================================================================
+# D2Part codes (Schedule B "part" of ISBE's expenditure form). 7B (loans made)
+# is diverted to loans_debts.csv and not included here.
+IL,6B,Monetary
+IL,8B,Monetary
+IL,9B,Independent Expenditure

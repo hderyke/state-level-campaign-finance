@@ -10,12 +10,13 @@
 | **Source** | [Alaska Public Offices Commission (APOC)](https://aws.state.ak.us/apocreports/Home.aspx) |
 | **Access method** | Playwright browser automation (live Chromium session required) |
 | **Coverage** | 2008 – present (2008–2010 empty; meaningful data starts 2011) |
+| **person_id model** | `name_hash` — no numeric filer ID in source; `person_id` derived from MD5 of normalized name |
 
 ---
 
 ## Raw Data Structure
 
-Files live in `data/Alaska/raw/`. Four file types: two transaction tables (one per year), one static candidate registry, and annual group/committee registration forms.
+Four file types: two transaction tables (one per year), one static candidate registry, and annual group/committee registration forms.
 
 ### Transaction Files
 

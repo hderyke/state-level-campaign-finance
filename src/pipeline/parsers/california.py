@@ -278,18 +278,32 @@ def _build_ref_tables(con: duckdb.DuckDBPyConnection) -> None:
     print(f"{n:,} entries")
 
 
-def run(stage: int | None = None):
+def run(entities: bool = False, contributions: bool = False, expenditures: bool = False,
+        transactions: bool = False):
     """
-    stage=None  → run all three stages in sequence
-    stage=1     → build ref tables + write candidates.csv + committees.csv
-    stage=2     → write contributions.csv  (RCPT_CD.tsv)
-    stage=3     → write expenditures.csv   (EXPN_CD.tsv)
+    No flags → run all three stages in sequence.
+
+        --entities       → stage 1: ref tables + candidates + committees
+        --contributions  → stage 2: contributions (RCPT_CD.tsv)
+        --expenditures   → stage 3: expenditures  (EXPN_CD.tsv)
+        --transactions   → stages 2 + 3
     """
     log = get_logger("california", "parse")
     t0  = time.perf_counter()
     log._emit("parse_started")
 
-    run_all    = stage is None
+    if transactions:
+        contributions = expenditures = True
+
+    if entities or contributions or expenditures:
+        _stages = set()
+        if entities:      _stages.add(1)
+        if contributions: _stages.add(2)
+        if expenditures:  _stages.add(3)
+        run_all = False
+    else:
+        _stages = {1, 2, 3}
+        run_all = True
     n_cont     = 0
     n_expn     = 0
     n_cands    = 0
@@ -301,7 +315,7 @@ def run(stage: int | None = None):
 
     try:
         # == Stage 1: reference tables + candidates + committees ===============
-        if run_all or stage == 1:
+        if run_all or 1 in _stages:
             ref_con = duckdb.connect(REF_DB)
             _build_ref_tables(ref_con)
 
@@ -386,7 +400,15 @@ def run(stage: int | None = None):
                         'CA'                          AS state,
                         fn.FILER_ID                   AS state_filer_id,
                         fn.committee_name             AS committee_name,
-                        fn.filer_type                 AS committee_type,
+                        -- Candidate committees register as "RECIPIENT COMMITTEE" in
+                        -- CAL-ACCESS (same as PACs). Use the presence of a C/P cover
+                        -- page (cd.cand_name populated) to reclassify them correctly.
+                        CASE WHEN cd.cand_name IS NOT NULL AND cd.cand_name != ''
+                             THEN 'Candidate Committee'
+                             ELSE fn.filer_type END             AS committee_type,
+                        -- Only candidate committees have a meaningful election cycle
+                        CASE WHEN cd.cand_name IS NOT NULL AND cd.cand_name != ''
+                             THEN ey.election_year ELSE NULL END AS election_year,
                         COALESCE(cd.cand_name, '')    AS candidate_name,
                         ''                            AS treasurer_name,
                         fn.city                       AS city,
@@ -394,6 +416,21 @@ def run(stage: int | None = None):
                         COALESCE(ft.active_ft, fn.active_fn) AS active
                     FROM filername fn
                     LEFT JOIN filer_types ft ON fn.FILER_ID = ft.FILER_ID
+                    LEFT JOIN (
+                        SELECT FILER_ID, {election_yr('ELECT_DATE')} AS election_year
+                        FROM (
+                            SELECT FILER_ID, ELECT_DATE,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY FILER_ID
+                                       ORDER BY TRY_CAST(FILING_ID AS BIGINT) DESC NULLS LAST
+                                   ) AS rn
+                            FROM cvr_dedup
+                            -- Only candidate committee types have a meaningful election cycle
+                            WHERE NULLIF(TRIM(ELECT_DATE), '') IS NOT NULL
+                              AND CMTTE_TYPE IN ('C', 'P')
+                        ) sub
+                        WHERE rn = 1
+                    ) ey ON fn.FILER_ID = ey.FILER_ID
                     LEFT JOIN (
                         SELECT FILER_ID, cand_name
                         FROM (
@@ -459,7 +496,7 @@ def run(stage: int | None = None):
         # == Stage 2: Contributions ============================================
         # Writes directly to california.db (DuckDB native format — much faster than
         # writing a multi-GB CSV to the mounted filesystem).
-        if run_all or stage == 2:
+        if run_all or 2 in _stages:
             con = open_main_with_ref()
             print(f"  contributions  RCPT_CD.tsv...", end=" ", flush=True)
             t2 = time.perf_counter()
@@ -513,7 +550,7 @@ def run(stage: int | None = None):
                 return
 
         # == Stage 3: Expenditures =============================================
-        if run_all or stage == 3:
+        if run_all or 3 in _stages:
             con = open_main_with_ref()
             print(f"  expenditures   EXPN_CD.tsv...", end=" ", flush=True)
             t3 = time.perf_counter()
@@ -581,7 +618,12 @@ def run(stage: int | None = None):
         log.file_parsed("candidates.csv",        "candidates",    n_cands,
                         role="output", bytes=_bytes("candidates.csv"))
 
-        print(f"\nCalifornia: stage {stage or 'all'} done.")
+        scope = "+".join(
+            ([" entities"] if 1 in _stages else []) +
+            (["contributions"] if 2 in _stages else []) +
+            (["expenditures"] if 3 in _stages else [])
+        ) or "all"
+        print(f"\nCalifornia: {scope} done.")
         _emit_completed(log, t0, n_cont, n_expn, n_cands, n_cmtes)
 
     except KeyboardInterrupt:
@@ -611,23 +653,20 @@ def _emit_completed(log, t0, n_cont, n_expn, n_cands, n_cmtes):
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser(
-        description="Parse California CAL-ACCESS TSVs into cleaned CSVs.",
-        epilog=(
-            "Run in stages to avoid timeout on large files:\n"
-            "  python3 california.py --stage 1   # ref tables + candidates + committees\n"
-            "  python3 california.py --stage 2   # contributions  (RCPT_CD.tsv)\n"
-            "  python3 california.py --stage 3   # expenditures   (EXPN_CD.tsv)\n"
-            "Or run all at once:\n"
-            "  python3 california.py             # all stages"
-        ),
+        description="Parse California CAL-ACCESS TSVs into cleaned CSVs."
     )
-    ap.add_argument(
-        "--stage", type=int, choices=[1, 2, 3],
-        help="Which stage to run. Omit to run all stages sequentially.",
-    )
-    args = ap.parse_args()
+    ap.add_argument("--entities",      action="store_true",
+                    help="entities only (ref tables + candidates + committees)")
+    ap.add_argument("--transactions",  action="store_true",
+                    help="contributions + expenditures")
+    ap.add_argument("--contributions", action="store_true",
+                    help="contributions only (RCPT_CD.tsv)")
+    ap.add_argument("--expenditures",  action="store_true",
+                    help="expenditures only (EXPN_CD.tsv)")
+    args, _ = ap.parse_known_args()
     try:
-        run(stage=args.stage)
+        run(entities=args.entities, contributions=args.contributions,
+            expenditures=args.expenditures, transactions=args.transactions)
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception:

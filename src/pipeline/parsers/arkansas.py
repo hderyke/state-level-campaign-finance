@@ -248,10 +248,16 @@ def run():
                     cmte_name  = clean(row.get("committeeName", "")) or filer_name
                     filer_type = clean(row.get("filerType", ""))
                     status     = clean(row.get("filerStatus", ""))
+                    # AR committees.csv contains only non-candidate entities (PACs,
+                    # party committees, IEs). electionYear from the API reflects
+                    # which election they're associated with, not that the committee
+                    # itself is cycle-specific — leave election_year blank.
+                    elec_year  = ""
 
                     entry = {
                         "committee_name": cmte_name,
                         "committee_type": filer_type,
+                        "election_year":  elec_year,
                         "active":         "1" if status == "Active" else ("0" if status else ""),
                     }
                     if fid:
@@ -262,6 +268,7 @@ def run():
                         "state_filer_id": fid,
                         "committee_name": cmte_name,
                         "committee_type": filer_type,
+                        "election_year":  elec_year,
                         "candidate_name": "",
                         "treasurer_name": "",
                         "city":           "",

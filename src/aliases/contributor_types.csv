@@ -66,3 +66,87 @@ CA,BNM,Organization
 CA,RCP,
 CA,OFF,
 CA,Com,PAC
+# == Connecticut ===============================================================
+# CT contributor_type is the Receipt Type field — no separate contributor category.
+CT,Itemized Contributions from Individuals,Individual
+CT,Total Contributions From Small Contributors,Individual
+CT,In Kind Contribution,Individual
+CT,In Kind NCC,Individual
+CT,In Kind NCC Associated with a House Party,Individual
+CT,Misc. Monetary NCC,Individual
+CT,Advertising Book Proceeds,Individual
+CT,Tag Sale Proceeds,Individual
+CT,Receipts from other Indiv or Other Committees,Individual
+CT,Contributions from Other Committees,Committee
+CT,Reimbursements and Distribution of Surplus,Committee
+CT,Transfer from Labor Union or Other Treasury,Organization
+CT,Non Monetary Receipts of Organization Expenditures,Organization
+CT,Transfer from Affiliated Business Treasury,Organization
+CT,Personal Funds of Candidate,Candidate
+CT,Expenses Paid by Candidate,Candidate
+CT,Public Grants,Government
+CT,Loans Received,
+CT,Interest from Authorized Accounts,
+CT,Anonymous Contributions,
+CT,Refund Telephone,
+# == Delaware ==================================================================
+DE,Individual,Individual
+DE,Self (Candidate),Individual
+DE,Business/Group/Organization,Organization
+DE,Corporation  Partnership  and Other Entity,Organization
+DE,Non-Profit Organization,Organization
+DE,Labor Union,Organization
+DE,PAC Committee,PAC
+DE,Political Action Committee,PAC
+DE,Candidate Committee,Candidate Committee
+DE,Political Committee,Party Committee
+DE,Out-of-State or Federal Committee,Other
+DE,Dem or Rep National Sub-Committees,Other
+DE,3rd Party Advertiser,Other
+DE,Total of Contributions not exceeding $100,Other
+DE,Total of Expenditures not exceeding $100,
+# == Georgia ===================================================================
+GA,Individual,Individual
+GA,Corporation / Business / Unregistered Committee,Organization
+GA,Non-Candidate Committee,PAC
+GA,Candidate / Candidate Committee,Candidate Committee
+GA,Self,Individual
+GA,Lobbyist,Individual
+GA,Spouse / Dependent Child,Individual
+# == Illinois ==================================================================
+IL,Individual,Individual
+IL,Organization,Organization
+# == Indiana ===================================================================
+# ContributorType from contributions_{YYYY}.csv. Creditor/Recipient/Borrower
+# are accounting roles (debt repayment), not donor categories — suppressed.
+IN,Individual,Individual
+IN,Other Organization,Organization
+IN,Political Action Committee,PAC
+IN,Corporation,Organization
+IN,Political Action,PAC
+IN,Labor Organization,Organization
+IN,Creditor,
+IN,Recipient,
+IN,Borrower,
+# == Colorado ==================================================================
+# ContributorType from contributions_{YYYY}.csv. Parser writes "Business" for
+# LLC members (ContributorType is the individual member name in those rows).
+CO,Individual,Individual
+CO,Business,Organization
+CO,Political Committee,PAC
+CO,Corporation,Organization
+CO,Small Donor Committee,PAC
+CO,Candidate,Candidate
+CO,Political Party Committee,Party Committee
+CO,Candidate Committee,Candidate Committee
+CO,527 Political Organization,PAC
+CO,Labor Union,Organization
+CO,Independent Expenditure Committee,PAC
+CO,Federal PAC,PAC
+CO,Other,
+CO,Unknown,
+# == Idaho =====================================================================
+# Parser hardcodes "Person"/"Company" for ES (electronic submission) records;
+# older "Contributor Type" raw values require data to enumerate fully.
+ID,Person,Individual
+ID,Company,Organization

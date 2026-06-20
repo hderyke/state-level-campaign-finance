@@ -59,7 +59,7 @@ STEMS = {
 GR_DETAIL_URL        = "https://aws.state.ak.us/apocreports/Common/View.aspx?ID={id}&ViewType=GR"
 GR_DETAILS_PATH      = RAW_DIR / "gr_details.csv"
 MIN_GR_ID            = 0
-MAX_CONSECUTIVE_BLANK = 2000   # stop if this many consecutive IDs return blank
+MAX_CONSECUTIVE_BLANK = 1000   # stop if this many consecutive IDs return blank
 
 GR_DETAILS_COLS = [
     "gr_id", "group_name", "abbreviation", "group_type", "purpose",
@@ -73,7 +73,7 @@ GR_DETAILS_COLS = [
 CR_DETAIL_URL        = "https://aws.state.ak.us/apocreports/Common/View.aspx?ID={id}&ViewType=CR"
 CR_DETAILS_PATH      = RAW_DIR / "cr_details.csv"
 MIN_CR_ID            = 0
-MAX_CONSECUTIVE_CR_BLANK = 2500
+MAX_CONSECUTIVE_CR_BLANK = 1500
 
 CR_DETAILS_COLS = [
     "cr_id", "candidate_display_name", "candidate_first", "candidate_last",
@@ -744,12 +744,39 @@ def download_year(page, context, relation_type: str, year: str, log) -> tuple[st
 
 
 # ============================ orchestrator ============================
-def run(force: bool = False, entities: bool = False, transactions: bool = False):
-    """Orchestrate download of transaction CSVs and/or candidate/group entities."""
+def run(
+    force: bool = False,
+    entities: bool = False,
+    transactions: bool = False,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    contributions: bool = False,
+    expenditures: bool = False,
+    candidates: bool = False,
+    committees: bool = False,
+):
+    """Orchestrate download of transaction CSVs and/or candidate/group entities.
+
+    Vertical scope (mutually exclusive):
+        force=True              — re-download all years, wipe relevant manifest entries
+        start_year / end_year   — restrict year-based downloads to this range
+
+    Horizontal scope:
+        No flags                — download everything
+        transactions            — income + expenditures only
+        entities                — candidates + groups + GR/CR details only
+        contributions           — income only (implies transactions)
+        expenditures            — expenditures only (implies transactions)
+        candidates              — CDCandidates + CR details only (implies entities)
+        committees              — groups + GR details only (implies entities)
+    """
     log = get_logger("alaska", "scrape")
     t0  = time.perf_counter()
     log.info("Starting Alaska scraper")
-    log._emit("scrape_started", force=force, entities=entities, transactions=transactions)
+    log._emit("scrape_started", force=force, entities=entities, transactions=transactions,
+              start_year=start_year, end_year=end_year,
+              contributions=contributions, expenditures=expenditures,
+              candidates=candidates, committees=committees)
 
     try:
         from playwright.sync_api import sync_playwright
@@ -760,37 +787,66 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                   error="playwright not installed")
         return
 
-    # Resolve scope
-    do_both         = not entities and not transactions
-    do_transactions = transactions or do_both
-    do_entities     = entities     or do_both
+    # ── Resolve granular scope ────────────────────────────────────────
+    # Any horizontal flag set → only the named types; none → everything.
+    no_horizontal = not (entities or transactions or contributions or
+                         expenditures or candidates or committees)
+
+    do_income        = no_horizontal or transactions or contributions
+    do_expend        = no_horizontal or transactions or expenditures
+    do_candidates_dl = no_horizontal or entities or candidates
+    do_groups_dl     = no_horizontal or entities or committees
+    do_gr_details    = no_horizontal or entities or committees
+    do_cr_details    = no_horizontal or entities or candidates
 
     files_ok = files_err = pages_ok = pages_err = 0
     current_year = str(datetime.today().year)
 
-    # Scoped manifest clearing
+    # ── Scoped manifest clearing ──────────────────────────────────────
     if force:
-        if do_both:
-            if MANIFEST.exists():
-                MANIFEST.unlink()
-            done, has_data = set(), set()
-        elif do_transactions:
-            strip_manifest(lambda r: r["relation_type"] not in TRANSACTION_RELATIONS)
-            done, has_data = load_manifest()
-        else:  # do_entities only
-            strip_manifest(lambda r: r["relation_type"] not in ENTITY_RELATIONS)
-            done, has_data = load_manifest()
-    else:
-        done, has_data = load_manifest()
+        relations_to_clear = set()
+        if do_income:        relations_to_clear.add("income")
+        if do_expend:        relations_to_clear.add("expenditures")
+        if do_candidates_dl: relations_to_clear.add("candidates")
+        if do_groups_dl:     relations_to_clear.add("groups")
+        strip_manifest(lambda r: r["relation_type"] not in relations_to_clear)
+        # Detail files are cleared inside their download functions when force=True
 
-    pages_to_run = (
-        set(PAGES.keys())   if do_both         else
-        TRANSACTION_RELATIONS if do_transactions else
-        ENTITY_RELATIONS
-    )
+    elif start_year is not None or end_year is not None:
+        # Year range — wipe manifest entries for year-based relations within the range
+        # so they get re-downloaded, not skipped as "already done".
+        year_based = set()
+        if do_income:    year_based.add("income")
+        if do_expend:    year_based.add("expenditures")
+        if do_groups_dl: year_based.add("groups")
+
+        def _outside_range(r: dict) -> bool:
+            """Keep rows that are NOT in the wipe zone."""
+            if r["relation_type"] not in year_based:
+                return True   # non-year-based entries always kept
+            try:
+                yr = int(r["year"])
+            except ValueError:
+                return True   # non-numeric year entries (e.g. "all") always kept
+            if start_year is not None and yr < start_year:
+                return True   # below range — keep
+            if end_year is not None and yr > end_year:
+                return True   # above range — keep
+            return False      # within range — wipe
+
+        strip_manifest(_outside_range)
+
+    done, has_data = load_manifest()
+
+    # ── Build pages_to_run for the Playwright loop ────────────────────
+    pages_to_run: set[str] = set()
+    if do_income:        pages_to_run.add("income")
+    if do_expend:        pages_to_run.add("expenditures")
+    if do_candidates_dl: pages_to_run.add("candidates")
+    if do_groups_dl:     pages_to_run.add("groups")
 
     try:
-        # Playwright: transaction CSVs + candidate/group exports
+        # ── Playwright: transaction CSVs + candidate/group exports ────
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=False)
             context = browser.new_context(accept_downloads=True)
@@ -802,7 +858,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
 
                 log.info(f"\nAlaska {relation_type}:")
 
-                # Candidates
+                # Candidates — single all-years export, no year filter applies
                 if relation_type == "candidates":
                     key = ("candidates", "all")
                     cand_file = RAW_DIR / "CDCandidates_all.csv"
@@ -837,7 +893,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                             done.add(key)
                     continue
 
-                # Transactional tables + groups
+                # Year-based relations (income, expenditures, groups)
                 page.goto(page_url, timeout=30_000)
                 page.wait_for_load_state("networkidle")
 
@@ -849,11 +905,28 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                 log.info(f"  Available years: {years[0]}–{years[-1]} ({len(years)} total)")
 
                 for year in years:
-                    key           = (relation_type, year)
+                    yr_int        = int(year)
                     expected_stem = f"{STEMS[relation_type]}_{year}.csv"
+
+                    # Year range filter — skip years outside requested window
+                    if start_year is not None and yr_int < start_year:
+                        log.file_download_skip(filename=expected_stem)
+                        continue
+                    if end_year is not None and yr_int > end_year:
+                        log.file_download_skip(filename=expected_stem)
+                        continue
+
+                    key           = (relation_type, year)
                     expected_file = RAW_DIR / expected_stem
-                    already_done  = key in done or (expected_file.exists() and
-                                                    expected_file.stat().st_size > 0)
+                    # When a year range is active the manifest was already wiped for
+                    # in-range entries — don't fall back to file existence or those
+                    # years will still be skipped even though the manifest was cleared.
+                    year_range_active = start_year is not None or end_year is not None
+                    already_done = key in done or (
+                        not year_range_active
+                        and expected_file.exists()
+                        and expected_file.stat().st_size > 0
+                    )
 
                     if already_done and year != current_year and not force:
                         log.file_download_skip(filename=expected_stem)
@@ -892,8 +965,8 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
 
             browser.close()
 
-        # GR + CR detail scrape (entities only)
-        if do_entities:
+        # ── GR + CR detail scrapes ────────────────────────────────────
+        if do_gr_details or do_cr_details:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=False)
                 context = browser.new_context(accept_downloads=True)
@@ -902,13 +975,15 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                 page.goto(PAGES["groups"])
                 page.wait_for_load_state("networkidle")
 
-                p_ok, p_err = download_gr_details(page, log, force=force)
-                pages_ok  += p_ok
-                pages_err += p_err
+                if do_gr_details:
+                    p_ok, p_err = download_gr_details(page, log, force=force)
+                    pages_ok  += p_ok
+                    pages_err += p_err
 
-                p_ok, p_err = download_cr_details(page, log, force=force)
-                pages_ok  += p_ok
-                pages_err += p_err
+                if do_cr_details:
+                    p_ok, p_err = download_cr_details(page, log, force=force)
+                    pages_ok  += p_ok
+                    pages_err += p_err
 
                 browser.close()
 
@@ -926,29 +1001,88 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                   pages_ok=pages_ok, pages_err=pages_err)
         raise
 
+    except Exception as e:
+        log._emit("scrape_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  files_ok=files_ok, files_err=files_err,
+                  pages_ok=pages_ok, pages_err=pages_err,
+                  error_type=type(e).__name__, error=str(e))
+        raise
+
+
 # ====== CLI ==================================
 if __name__ == "__main__":
-    # flag semantics
-    # --------------
-    # (no flags)              current-year transactions + any missing entities
-    # --transactions          transactions only (current-year always, past years if missing)
-    # --entities              entities only (GR/CR details incremental, candidates if missing)
-    # --force                 force-refresh everything
-    # --force --transactions  force-refresh all transaction years
-    # --force --entities      force-refresh all entities (GR/CR/candidates/groups)
+    # Vertical scope (mutually exclusive):
+    #   (no flag)                    incremental — current year + fill manifest gaps
+    #   --start-year / --end-year    year range only
+    #   --force                      all years, wipe manifest entries in scope
+    #
+    # Horizontal scope:
+    #   (no flag)         all types
+    #   --transactions    income + expenditures
+    #   --entities        candidates + groups + GR/CR details
+    #   --contributions   income only
+    #   --expenditures    expenditures only
+    #   --candidates      CDCandidates + CR details
+    #   --committees      groups + GR details
     import argparse
     ap = argparse.ArgumentParser(
-        description="Download Alaska APOC campaign finance data. "
-                    "Fetches transaction CSVs and/or candidate/group registration details."
+        description="Download Alaska APOC campaign finance data."
     )
-    ap.add_argument("--force",        action="store_true",
-                    help="force re-download (scope: all, or --transactions/--entities)")
+
+    # Vertical — mutually exclusive
+    vert = ap.add_mutually_exclusive_group()
+    vert.add_argument("--force",      action="store_true",
+                      help="re-download all years in scope, wipe relevant manifest entries")
+    vert.add_argument("--start-year", type=int, metavar="YYYY",
+                      help="earliest year to download (inclusive)")
+    ap.add_argument("--end-year", type=int, metavar="YYYY",
+                    help="latest year to download (inclusive, ≤ current year); "
+                         "use with or without --start-year")
+
+    # Horizontal — top level
     ap.add_argument("--transactions", action="store_true",
-                    help="transactions only")
+                    help="transactions only (income + expenditures)")
     ap.add_argument("--entities",     action="store_true",
-                    help="entities only (GR/CR details, candidates, groups)")
-    args = ap.parse_args()
+                    help="entities only (candidates, groups, GR/CR details)")
+
+    # Horizontal — second level
+    ap.add_argument("--contributions", action="store_true",
+                    help="income files only")
+    ap.add_argument("--expenditures",  action="store_true",
+                    help="expenditure files only")
+    ap.add_argument("--candidates",    action="store_true",
+                    help="CDCandidates export + CR details only")
+    ap.add_argument("--committees",    action="store_true",
+                    help="GRForms + GR details only")
+
+    args, _ = ap.parse_known_args()
+
+    # --end-year requires --start-year or stands alone; validate range
+    cy = datetime.today().year
+    if args.end_year:
+        if args.end_year > cy:
+            ap.error(f"--end-year cannot exceed current year ({cy})")
+        if args.start_year and args.start_year > args.end_year:
+            ap.error("--start-year cannot be greater than --end-year")
+    # --force is already mutually exclusive with --start-year via the group;
+    # also guard against --force + --end-year
+    if args.force and args.end_year:
+        ap.error("--force cannot be combined with --end-year")
+
     try:
-        run(force=args.force, entities=args.entities, transactions=args.transactions)
+        run(
+            force=args.force,
+            entities=args.entities,
+            transactions=args.transactions,
+            start_year=args.start_year,
+            end_year=args.end_year,
+            contributions=args.contributions,
+            expenditures=args.expenditures,
+            candidates=args.candidates,
+            committees=args.committees,
+        )
     except KeyboardInterrupt:
         sys.exit(130)
+    except Exception:
+        sys.exit(1)

@@ -46,7 +46,7 @@ from src.aliases import expand_nickname, fips_code
 
 
 def _make_person_id(state_abbr: str, base_id: int) -> int:
-    """Build a 14-digit globally unique person_id.
+    """Build a globally unique person_id (13 digits for FIPS < 10, 14 for FIPS ≥ 10).
 
     Format: {2-digit FIPS}{12-digit zero-padded base_id}
 
@@ -80,6 +80,18 @@ def clean_zip(val: str) -> str:
     if re.match(r"^\d{9}$", v):
         return f"{v[:5]}-{v[5:]}"
     return v
+
+
+def _numeric_id(fid: str) -> int:
+    """Coerce a state_filer_id to an int for person_id math.
+
+    Most states' filer IDs are already plain integers. A few (e.g. Hawaii's
+    "CC12091" / "NC20717" reg_no values) prefix the number with letters —
+    strip any non-digit characters before parsing. Raises ValueError if no
+    digits remain, same as int() would for a fully non-numeric string.
+    """
+    digits = re.sub(r"\D", "", fid or "")
+    return int(digits)
 
 
 def _normalize_name(name: str) -> str:
@@ -129,7 +141,7 @@ def assign_person_ids(candidates_path: Path, id_model: str = "committee") -> int
             state_abbr = row.get("state", "")
             fid        = row.get("state_filer_id", "")
             try:
-                row["person_id"] = str(_make_person_id(state_abbr, int(fid))) if fid else ""
+                row["person_id"] = str(_make_person_id(state_abbr, _numeric_id(fid))) if fid else ""
             except (ValueError, KeyError):
                 row["person_id"] = ""
 
@@ -159,7 +171,7 @@ def assign_person_ids(candidates_path: Path, id_model: str = "committee") -> int
                 continue
             # Compare as integers when possible so "673" sorts before "6247"
             try:
-                is_earlier = int(fid) < int(earliest[key])
+                is_earlier = _numeric_id(fid) < _numeric_id(earliest[key])
             except (ValueError, KeyError):
                 is_earlier = key not in earliest or fid < earliest[key]
             if is_earlier:
@@ -173,7 +185,7 @@ def assign_person_ids(candidates_path: Path, id_model: str = "committee") -> int
             key        = (state_abbr, norm, office, district)
             base_fid   = earliest.get(key, row.get("state_filer_id", ""))
             try:
-                row["person_id"] = str(_make_person_id(state_abbr, int(base_fid))) if base_fid else ""
+                row["person_id"] = str(_make_person_id(state_abbr, _numeric_id(base_fid))) if base_fid else ""
             except (ValueError, KeyError):
                 row["person_id"] = ""
 

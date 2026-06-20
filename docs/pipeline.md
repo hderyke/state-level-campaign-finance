@@ -24,7 +24,7 @@ Source code documentation for the state-level campaign finance pipeline. For CLI
 A full pipeline run flows through five sequential stages for each state, then merges all states into one aggregate database.
 
 ```
-python3 src/main.py update AL AK AZ
+python3 src/main.py sync AL AK AZ
          │
          ▼
       main.py  ──── parse flags, resolve command
@@ -87,11 +87,11 @@ The per-state `.db` files produced by `tabulate.py` use the full column lists in
 
 ### State registration
 
-States are registered in `src/aliases/states.csv` (columns: `abbr`, `name`). `orc.py` reads this at startup into `ABBR_TO_NAME`, a dict mapping two-letter abbreviations to lowercase state names. To add a new state to the orchestrator, add a row to `states.csv` — no code change needed. The orchestrator will then recognize the abbreviation and know where to look for scraper and parser files.
+States are registered in `src/aliases/states.csv` (columns: `abbr`, `name`, `fips`). `orc.py` reads this at startup into `ABBR_TO_NAME`, a dict mapping two-letter abbreviations to lowercase state names. To add a new state to the orchestrator, add a row to `states.csv` — no code change needed. The orchestrator will then recognize the abbreviation and know where to look for scraper and parser files.
 
 ### Run IDs
 
-Every managed run gets a unique `run_id` of the form `{YYYYMMDD_HHMMSS}_{command}_{states}`, e.g. `20250528_143012_update_AL-AK`. This is set as the `CF_RUN_ID` environment variable before any subprocesses are spawned, so it is inherited by every stage. All logging (JSONL events, HTML reports, validation reports) is scoped to this ID. See [Logging](#9-logging) for details.
+Every managed run gets a unique `run_id` of the form `{YYYYMMDD_HHMMSS}_{command}[_force]_{states}`, e.g. `20250528_143012_sync_AL-AK` or `20250528_143012_sync_force_AL-AK`. The `_force` suffix is appended when `--force` is active so log filenames are self-describing. This is set as the `CF_RUN_ID` environment variable before any subprocesses are spawned, so it is inherited by every stage. All logging (JSONL events, HTML reports, validation reports) is scoped to this ID. See [Logging](#9-logging) for details.
 
 ### Subprocess dispatch
 
@@ -105,19 +105,50 @@ Each stage — scraper, parser, validate, tabulate — is run via `subprocess.ru
 
 | Command | Stages |
 |---|---|
-| `update` | scrape → parse → validate → tabulate → aggregate |
-| `rescrape` | scrape `--force` → parse → validate → tabulate → aggregate |
+| `sync` | scrape → parse → validate → tabulate → aggregate |
 | `reparse` | *(skip scrape)* parse → validate → tabulate → aggregate |
-| `update-transactions` | scrape `--transactions` → parse → validate → tabulate → aggregate |
-| `update-entities` | scrape `--entities` → parse → validate → tabulate → aggregate |
-| `rescrape-transactions` | scrape `--force --transactions` → parse → validate → tabulate → aggregate |
-| `rescrape-entities` | scrape `--force --entities` → parse → validate → tabulate → aggregate |
 
 `reparse` is useful when the raw data is already current (e.g. a scrape just finished) and only the parser, alias mappings, or schema has changed.
 
 ### Scraper flags
 
-Different states use different CLI interfaces for their scrapers, so `_scraper_flags(state, mode)` translates a pipeline command (e.g. `update-entities`) into the correct flags for each state's scraper. Colorado uses `--update`/`--force`, Alabama and Alaska use `--entities`/`--transactions`, and most others use `--update-entities`/`--update-transactions`. This mapping lives entirely in `orc.py` and does not need to be touched when adding a new state that follows the standard flag convention.
+Scraper flags are passed after the state list and forwarded transparently by `orc.py` to each scraper subprocess. All flags are optional — scrapers use `parse_known_args` so unsupported flags are silently ignored.
+
+**Vertical scope** (controls which time period is downloaded — mutually exclusive):
+
+| Flag | Behavior |
+|---|---|
+| *(none)* | Incremental — fill manifest gaps, always refresh current year |
+| `--force` | Wipe manifest entries in scope and re-download everything |
+| `--start-year YYYY` | Wipe and re-download years ≥ YYYY |
+| `--end-year YYYY` | Wipe and re-download years ≤ YYYY (combine with `--start-year` for a range) |
+
+`--force` and `--start-year` are mutually exclusive. `--end-year` cannot exceed the current calendar year.
+
+**Horizontal scope** (controls which data types are downloaded — additive):
+
+| Flag | Scope |
+|---|---|
+| *(none)* | Everything |
+| `--transactions` | Contributions + expenditures |
+| `--entities` | Committees + candidates |
+| `--contributions` | Contributions only |
+| `--expenditures` | Expenditures only |
+| `--candidates` | Candidates only |
+| `--committees` | Committees only |
+
+Horizontal flags are additive — stacking them unions their scopes. Not every state supports every flag; unsupported flags are silently ignored. See `docs/contributing.md § CLI` for the full flag contract.
+
+**Example invocations:**
+
+```bash
+python3 src/main.py sync AK                               # incremental, all types
+python3 src/main.py sync AK --force                       # re-download everything
+python3 src/main.py sync AK --start-year 2023             # re-download 2023 onwards
+python3 src/main.py sync AK --force --transactions        # force-refresh transactions only
+python3 src/main.py sync AK --start-year 2022 --end-year 2024 --contributions
+python3 src/main.py reparse AL                            # re-parse without scraping
+```
 
 ### Aggregate gating
 
@@ -231,7 +262,7 @@ Matching proceeds in three passes, stopping at the first hit:
 
 ### Files
 
-**`states.csv`** (`abbr`, `name`) — maps two-letter abbreviations to lowercase state names. Read by `orc.py` to populate `ABBR_TO_NAME`. Adding a row here is the only step needed to register a new state with the orchestrator.
+**`states.csv`** (`abbr`, `name`, `fips`) — maps two-letter abbreviations to lowercase state names and two-digit FIPS codes. Read by `orc.py` to populate `ABBR_TO_NAME`; FIPS codes are used by `utils.py` when building globally unique `person_id` values. Adding a row here is the only step needed to register a new state with the orchestrator.
 
 **`contributor_types.csv`** (`state`, `raw`, `canonical`) — maps raw contributor type strings from each state's data to canonical labels. Used by `aggregate.py` to normalize `contributions.contributor_type`. A blank `canonical` value means the raw value is intentionally suppressed (e.g. Alaska's contributor type field is a registration status, not a donor category, so all its values map to `None`).
 
@@ -312,12 +343,18 @@ Every pipeline stage writes structured events to a JSONL log file. The logging s
 
 The `CF_RUN_ID` environment variable is the thread that ties an entire pipeline run together. It is set by `orc.py` before any subprocesses are spawned and inherited by every stage. Each stage's logger uses it to determine where to write its log:
 
-- **With `CF_RUN_ID`** (orc/cron mode): logs go to `logs/prod/{run_id}/{stage}.jsonl`
-- **Without `CF_RUN_ID`** (dev mode, running a component directly): logs go to `logs/dev/{timestamp}-{state}-{stage}.jsonl`
+- **With `CF_RUN_ID`** (orc/cron mode): all stages write to a single shared `logs/prod/{run_id}/log.jsonl`
+- **Without `CF_RUN_ID`** (dev mode, running a component directly): logs go to `logs/dev/{timestamp}-{state}-{operation}.jsonl`
 
 ### Event format
 
-Each log line is a JSON object with at minimum `ts` (ISO timestamp), `level` (`INFO`, `WARNING`, `ERROR`), `component` (e.g. `scraper`, `parser`, `tabulate`), and `event` (e.g. `table_loaded`, `validate_completed`). Additional fields are event-specific — for example, `table_loaded` carries `table`, `rows`, and `duration_s`.
+Each log line is a JSON object. Every event has four fixed fields: `ts` (ISO 8601 UTC timestamp), `state` (lowercase state name or null for state-less operations), `operation` (e.g. `scrape`, `parse`, `tabulate`, `aggregate`), and `type` (the event name, e.g. `file_download`, `page_scrape`, `file_parsed`). Additional fields are event-specific:
+
+```json
+{"ts": "2025-05-28T14:30:12+00:00", "state": "alabama", "operation": "scrape",
+ "type": "file_download", "status": "ok", "filename": "contributions_2024.csv",
+ "bytes": 1048576, "rows": 42301, "duration_s": 1.23}
+```
 
 ### HTML reports
 
@@ -331,21 +368,40 @@ To diagnose a failure, check `logs/prod/{run_id}/log.jsonl` for events with `lev
 
 ## 10. Error Handling
 
-`src/errors.py` provides a context manager, `pipeline_stage`, that controls how exceptions are handled depending on whether the pipeline is running in managed mode or dev mode.
+Error isolation in the pipeline comes from the subprocess architecture rather than a centralized error handler. Each stage (scraper, parser, validate, tabulate) runs as its own `subprocess.run()` call inside `orc.py`, so an unhandled exception in one stage cannot corrupt or crash the orchestrator.
+
+### Subprocess failure detection
+
+`orc.py`'s `_subprocess` helper runs each stage and checks the exit code:
+
+- **Exit 0** — stage succeeded; proceed to next stage
+- **Non-zero exit** — stage failed; `orc.py` marks the state as failed and skips remaining stages for that state (but continues with other states in the batch)
+
+When a subprocess exits non-zero, `orc.py` captures its stderr output (Python tracebacks, assertion errors, etc.), prints it to the terminal, and emits a `subprocess_error` JSONL event containing the label, exit code, and full stderr text. This means the run log always contains the actual exception, not just "exit 1".
+
+### Within scrapers and parsers
+
+Individual stages are responsible for their own exception handling. The pattern used across all scrapers and parsers:
 
 ```python
-from src.errors import pipeline_stage
+try:
+    # ... all work ...
+    log._emit("scrape_completed", status="completed", ...)
 
-with pipeline_stage(log, component="scraper"):
-    alabama.run()
+except KeyboardInterrupt:
+    log._emit("scrape_completed", status="interrupted", ...)
+    raise   # re-raise so sys.exit(130) fires in the CLI block
+
+except Exception as e:
+    log._emit("scrape_completed", status="error",
+              error_type=type(e).__name__, error=str(e), ...)
+    raise   # re-raise so sys.exit(1) fires in the CLI block
 ```
 
-### Dev mode (no `CF_RUN_ID`)
+Both paths re-raise — the CLI block at the bottom of each file catches them and exits with the correct code (130 for interrupt, 1 for error). `orc.py` reads this exit code to decide whether to proceed.
 
-`pipeline_stage` is a complete no-op — it yields immediately and does nothing else. Exceptions propagate to the terminal as normal, giving full stack traces. This is the behavior when running any component directly (`python3 src/pipeline/scrapers/alabama.py`).
+Individual file failures inside a download or parse loop are handled locally: catch the exception, log it with `file_download_error` or `file_parse_error`, and continue to the next file. Only truly unrecoverable errors (corrupted source format, lost connection, etc.) should bubble up to the top-level handler.
 
-### Orc / daemon mode (`CF_RUN_ID` set)
+### Dev vs. orc mode
 
-Exceptions are caught, logged to the state's JSONL with a full traceback (`pipeline_error` event), and swallowed. Control returns to `orc.py`, which records the state as failed and moves on to the next state in the batch. `KeyboardInterrupt` is always re-raised — Ctrl+C stops the whole run regardless of mode.
-
-The distinction exists because in a multi-state cron run you want one state's failure to be recorded and skipped rather than crashing the entire run, but in dev mode you want the raw error immediately.
+Error behavior is identical in both modes — the subprocess architecture applies either way. The difference is in log routing: in dev mode (no `CF_RUN_ID`), events go to `logs/dev/`. In orc mode, events go to the run's shared `log.jsonl`. The `subprocess_error` event is only emitted in orc mode since `orc.py` is what captures stderr.

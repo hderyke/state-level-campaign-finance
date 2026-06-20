@@ -10,12 +10,13 @@
 | **Source** | [CAL-ACCESS Bulk Export](https://campaignfinance.cdn.sos.ca.gov/dbwebexport.zip) — California Secretary of State |
 | **Access method** | HTTP Range requests — reads ZIP central directory, extracts only target tables without downloading the full archive |
 | **Coverage** | ~2000 – present (CAL-ACCESS history) |
+| **person_id model** | `committee` — new `FILER_ID` per registration cycle; `person_id` = min ID for a given `(candidate_name, office, district)` |
 
 ---
 
 ## Raw Data Structure
 
-Files live in `data/California/raw/`. All files are **tab-separated (TSV)** with **latin-1 (ISO-8859-1) encoding**. Extracted from a single daily-updated ZIP (~1.5 GB uncompressed) hosted by the CA Secretary of State.
+All files are **tab-separated (TSV)** with **latin-1 (ISO-8859-1) encoding**. Extracted from a single daily-updated ZIP (~1.5 GB uncompressed) hosted by the CA Secretary of State.
 
 ### Transaction Tables
 
@@ -150,16 +151,8 @@ Uses DuckDB for all heavy file I/O — multi-GB TSVs are processed in seconds ra
 - **FILER_TO_FILER_TYPE_CD numeric codes** — `FILER_TYPE` references a session-specific lookup table not included in the bulk export. Party and active status are extracted but the numeric type code itself is unusable.
 - **Duplicate contributor names** — some large donors appear under slightly different name formats across filings (e.g. "DaVita, Inc." vs "DaVita") with no deduplication in the parser. This is a source data issue.
 - **Scale** — RCPT_CD and EXPN_CD together are ~34M rows before amendment filtering.
-
----
-
-## Status
-
-- [x] Scraper complete
-- [x] Parser complete
-- [x] Loaded into DB
-- [x] Validated (tier 1 passing)
-- [x] QA'd via test queries
+- **`committee_type` composition (pre-aggregation)** — the per-state `committees` table stores the raw CAL-ACCESS `FILER_TYPE` verbatim. "TREASURER/RESPONSIBLE OFFICER" is the single largest value (~44%, ~152K of 344K rows) — these are individual treasurer/responsible-officer registrations (people, not committees), a normal part of CAL-ACCESS's filer registry, not a parser bug. "RECIPIENT COMMITTEE" (~35%) is the actual PAC/committee registration type. `src/aliases/committee_types.csv` already maps `TREASURER/RESPONSIBLE OFFICER` (along with `CLIENT`, `LOBBYIST`, `FIRM`, `EMPLOYER`, `PAYMENT TO INFLUENCE`, `PREPAID ACCOUNT`, `NOT DEFINED`, `INDIVIDUAL`, `SLATE MAILER ORGANIZATIONS`) to `"Other"` during `aggregate.py`, so the unified `state-level-cf.db` doesn't conflate these with PACs/candidate committees. A `COUNT(*)` on the per-state `california.db` `committees` table is **not** a count of CA political committees — query the aggregated DB's normalized `committee_type` instead.
+- **Candidate-controlled committees mapped as PAC** — CAL-ACCESS's `FILER_TYPE` gives candidate-controlled/primarily-formed committees the same value ("RECIPIENT COMMITTEE") as general-purpose PACs, both of which `committee_types.csv` maps to `"PAC"`. `aggregate.py` applies a follow-up override: any CA committee with `committee_type = 'PAC'` and a non-empty `candidate_name` (i.e. it filed a CMTTE_TYPE 'C' or 'P' cover page) is reclassified to `"Candidate Committee"`. ~5,941 committees affected, including "STEYER FOR GOVERNOR 2026" and "WHITMAN FOR GOVERNOR 2010, MEG" — these are the candidates' own committees, not independent Super PACs.
 
 ---
 
@@ -169,4 +162,3 @@ Uses DuckDB for all heavy file I/O — multi-GB TSVs are processed in seconds ra
 |---|---|
 | Scraper | 2026-05-29 |
 | Parser | 2026-05-29 |
-| Docs | 2026-05-29 |

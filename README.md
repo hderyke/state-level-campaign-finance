@@ -49,29 +49,58 @@ playwright install
 Run the full pipeline (scrape → parse → validate → tabulate → aggregate) for one or more states using two-letter abbreviations:
 
 ```bash
-python3 src/main.py update AL AK AZ
+python3 src/main.py sync AL AK AZ
 ```
 
 Or run all implemented states at once:
 
 ```bash
-python3 src/main.py update all
+python3 src/main.py sync all
 ```
 
 **Pipeline commands:**
-- `update <states>` — full pipeline run, skipping already-downloaded files from previous years
-- `rescrape <states>` — full pipeline run, re-downloading everything from scratch
-- `reparse <states>` — skip scrape; re-run parse → validate → tabulate → aggregate on existing raw data
-- `update-transactions <states>` — update transaction data only (contributions/expenditures)
-- `update-entities <states>` — update entity data only (committees/candidates)
-- `rescrape-transactions <states>` — force re-download of transaction data
-- `rescrape-entities <states>` — force re-download of entity data
 
-> **Note:** The exact behavior of pipeline commands varies by state depending on how each source structures its data, but all commands are implemented as faithfully as possible to their described function.
+| Command | What it does |
+|---|---|
+| `sync <states>` | Full pipeline — scrape → parse → validate → tabulate → aggregate |
+| `reparse <states>` | Skip scrape; re-run parse → validate → tabulate → aggregate on existing raw data |
 
-**Flags:**
+**Scraper flags** — passed after the state list, forwarded to each scraper. Not all states support every flag; unsupported flags are silently ignored.
+
+Vertical scope — controls *which years* are downloaded (mutually exclusive):
+
+```
+(no flag)              incremental — fill manifest gaps, always refresh current year
+--force                re-download everything in scope, wipe manifest
+--start-year YYYY      re-download years ≥ YYYY
+--end-year YYYY        re-download years ≤ YYYY  (combine with --start-year for a range)
+```
+
+Horizontal scope — controls *which data types* are downloaded (additive, stack freely):
+
+```
+(no flag)              everything
+--transactions         contributions + expenditures
+--entities             committees + candidates
+--contributions        contributions only
+--expenditures         expenditures only
+--candidates           candidates only
+--committees           committees only
+```
+
+**Global flags:**
 - `--daemon` — silent mode for scheduled/cron runs
 - `--no-report` — skip HTML report generation after run
+
+**Examples:**
+
+```bash
+python3 src/main.py sync AK --start-year 2023             # re-download AK from 2023 onwards
+python3 src/main.py sync AK --force --transactions        # force-refresh AK transactions only
+python3 src/main.py sync AL AK --start-year 2022 --end-year 2024 --contributions
+python3 src/main.py reparse AL                            # re-parse AL without scraping
+python3 src/main.py --daemon sync all                     # full run, silent mode
+```
 
 ### Cloudflare Data Sync
 
@@ -115,16 +144,10 @@ Each run also generates a log and HTML report under `logs/prod/{run_id}/`:
 Downloads raw campaign finance data from a state's disclosure website. Each state has a dedicated scraper that handles its unique source format. Downloaded files are written to `data/{State}/raw/` and tracked in `data/{State}/manifest.csv` to allow resumable downloads.
 
 ```bash
-python3 src/pipeline/scrapers/alabama.py
+python3 src/pipeline/scrapers/alabama.py [flags]
 ```
 
-**Flags:**
-- *(no flags)* — incremental update, skipping already-downloaded files
-- `--force` — re-download everything, ignoring the manifest
-- `--transactions` — transactions only
-- `--entities` — entities only (committees/candidates)
-
-Flags can be combined, e.g. `--force --transactions` to force-refresh transactions only.
+Scrapers accept the same vertical and horizontal flags as the `sync` command. See [Running the Pipeline](#running-the-pipeline) for the full flag reference. Not every state supports every flag — check `docs/states/{state}.md` for state-specific details.
 
 ### Parsers
 
@@ -182,14 +205,22 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 
 ## Progress
 
-| State | Scraper | Parser | Contributor(s) | Notes |
-|-------|---------|--------|----------------|-------|
-| Alabama (AL) | ✅ | ✅ | @hderyke       | |
-| Alaska (AK) | ✅ | ✅ | @hderyke       | |
-| Arizona (AZ) | ⚠️ | ⚠️ | @hderyke       | |
-| Arkansas (AR) | ✅ | ✅ | @hderyke       | |
-| California (CA) | ✅ | ✅ | @hderyke       | |
-| Colorado (CO) | ⚠️ | ⚠️ | @hderyke       | |
+| State | Scraper | Parser | Notes |
+|-------|---------|--------|-------|
+| Alabama (AL) | ✅ | ✅ | |
+| Alaska (AK) | ✅ | ✅ | Playwright required (WAF blocks datacenter IPs) |
+| Arizona (AZ) | ✅ | ✅ | Normal sync refreshes current calendar year only |
+| Arkansas (AR) | ✅ | ✅ | |
+| California (CA) | ✅ | ✅ | HTTP Range ZIP extraction; large files (~34M rows) |
+| Colorado (CO) | ✅ | ✅ | Candidate/committee entity sweep via SeqID probe |
+| Connecticut (CT) | ✅ | ✅ | |
+| Delaware (DE) | ✅ | ✅ | |
+| Florida (FL) | ✅ | ✅ | Playwright required; large files take time on first run |
+| Georgia (GA) | ✅ | ✅ | Three sources: Peachfile (2025+), legacy API (2006–2024), CSC bulk |
+| Hawaii (HI) | ✅ | ✅ | Socrata SODA API; 14 datasets |
+| Idaho (ID) | ✅ | ✅ | Three source eras (2020+ portal, ES bulk, legacy PDFs) |
+| Illinois (IL) | ✅ | ✅ | Full-history flat files updated nightly; large |
+| Indiana (IN) | ✅ | ✅ | Bulk ZIP by year; entity sweep via CommitteeDetail pages |
 
-**Key:** ✅ Done &nbsp; ⚠️ Partial / known issues &nbsp;  ❌ Broken
+**Key:** ✅ Done &nbsp; ⚠️ Partial / known issues &nbsp; ❌ Broken
 

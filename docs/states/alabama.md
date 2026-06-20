@@ -10,12 +10,13 @@
 | **Source** | [Alabama Secretary of State FCPA System](https://fcpa.alabamavotes.gov) |
 | **Access method** | Bulk CSV zip download (transactions) + JSON API & HTML scraping (committees) |
 | **Coverage** | 2013 – present |
+| **person_id model** | `committee` — new `CommitteeId` per registration cycle; `person_id` = min ID for a given `(candidate_name, office, district)` |
 
 ---
 
 ## Raw Data Structure
 
-Files live in `data/Alabama/raw/`. There are two categories: transaction files (one per year per type) and committee registry files (scraped separately).
+Two categories: transaction files (one per year per type) and committee registry files (scraped separately).
 
 ### Transaction Files
 

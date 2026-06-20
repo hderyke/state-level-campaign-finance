@@ -14,8 +14,12 @@ Key request structure (confirmed from browser network capture):
 
 The committee registry and detail pages are fetched via the same session.
 
-Downloaded files are tracked in manifest.csv — re-running skips already-fetched
-combinations. Current-year combinations are always re-fetched.
+Downloaded files are tracked in manifest.csv. A normal (no-flag) run refreshes
+only the current calendar year: transactions dated Jan 1 of this year onward are
+re-fetched and merged into the active cycle's file, preserving the previously
+downloaded prior-year portion (cycles are two-year, labeled by end year).
+Historical cycles are immutable and only re-fetched with --force or an explicit
+--start-year / --end-year range.
 
 Output CSV columns for Income/Expenditures files (TX_COLS):
   CommitteeID, CommitteeName, TransactionDate, Amount, TransactionName,
@@ -337,6 +341,18 @@ def parse_cycle_dates(cycle_id_str: str) -> tuple[str, str]:
     return start, end
 
 
+def cycle_is_current(cycle_id_str: str) -> bool:
+    """True if today's date falls inside the cycle's date range.
+
+    Date-based rather than label-based on purpose: AZ cycles are labeled by
+    their even end year (e.g. "2026" covers 1/1/2025–12/31/2026), so a naive
+    `current_year in cycle_label` check misses the active cycle in odd years.
+    """
+    start, end = parse_cycle_dates(cycle_id_str)
+    today = datetime.today().strftime("%Y-%m-%d")
+    return start <= today <= end   # ISO strings compare chronologically
+
+
 _DT_COLUMNS = [
     "TransactionDate", "CommitteeName", "Amount", "TransactionName",
     "TransactionType", "Occupation", "Employer", "City", "State", "ZipCode",
@@ -346,17 +362,23 @@ _DT_COLUMNS = [
 def fetch_transactions_page(session: req_lib.Session, cycle_id_str: str,
                              category_type: str, filer_type_id: str,
                              start: int = 0,
-                             length: int = TABLE_LENGTH) -> tuple[list[dict], int]:
+                             length: int = TABLE_LENGTH,
+                             start_date: str | None = None) -> tuple[list[dict], int]:
     """POST to AdvancedSearch and return (rows, total_records).
 
     Request structure (confirmed from browser network capture):
       - Search params go in the URL query string
       - POST body is DataTables format: draw, columns[N][data], start, length, order
       - Pagination: start=0 for first page, start+=length for each subsequent page
+
+    start_date (ISO date) narrows the search window within the cycle — used by
+    incremental runs to fetch only the current calendar year. Defaults to the
+    cycle's own start date.
     """
     from urllib.parse import urlencode
 
-    start_date, end_date = parse_cycle_dates(cycle_id_str)
+    cycle_start, end_date = parse_cycle_dates(cycle_id_str)
+    start_date = start_date or cycle_start
 
     query_params = {
         "CommiteeReportId": "",
@@ -450,26 +472,50 @@ def normalize_tx_row(raw: dict) -> dict:
 def download_one_api(log, session: req_lib.Session,
                      cycle_label: str, cycle_id_str: str,
                      filer_type_id: str, filer_type_label: str,
-                     category_type: str) -> tuple[str, int] | None:
-    """Download one cycle/filer/category via JSON API. Returns (filename, row_count) or None."""
+                     category_type: str,
+                     year_floor: str | None = None) -> tuple[str, int] | None:
+    """Download one cycle/filer/category via JSON API. Returns (filename, row_count) or None.
+
+    year_floor (ISO date, e.g. "2026-01-01") — fetch only transactions dated on
+    or after this date and merge them with the existing file's earlier rows.
+    Used by normal incremental runs to refresh just the current calendar year
+    without re-downloading (or losing) the prior year of the two-year cycle.
+    """
     filename = f"{category_type}_{cycle_label}_{filer_type_label}.csv"
     out_path = RAW_DIR / filename
+    tmp_path = out_path.with_name(out_path.name + ".tmp")
     t0 = time.perf_counter()
     log.file_download_start(filename=filename)
 
-    total_rows = 0
+    if year_floor and not out_path.exists():
+        year_floor = None   # nothing to merge with — fetch the full cycle
+
+    # Rows from the existing file that predate the refresh window — kept as-is
+    preserved = []
+    if year_floor:
+        with open(out_path, newline="", encoding="utf-8") as fh:
+            preserved = [r for r in csv.DictReader(fh)
+                         if (r.get("TransactionDate") or "") < year_floor]
+
+    new_rows = 0   # rows written from this fetch
+    fetched  = 0   # raw rows returned by the API (drives pagination)
     start = 0
     worker_session = session
     try:
-        with open(out_path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=TX_COLS, extrasaction="ignore")
+        # Write to a temp file and replace on success so a mid-download failure
+        # can't truncate an existing good file (matters for the merge path).
+        with open(tmp_path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=TX_COLS,
+                                    extrasaction="ignore", restval="")
             writer.writeheader()
+            writer.writerows(preserved)
 
             while True:
                 try:
                     rows, total = fetch_transactions_page(worker_session, cycle_id_str,
                                                           category_type, filer_type_id,
-                                                          start, TABLE_LENGTH)
+                                                          start, TABLE_LENGTH,
+                                                          start_date=year_floor)
                 except RuntimeError as e:
                     if "empty response" in str(e):
                         # Session likely expired — rebuild and retry this page once
@@ -478,7 +524,8 @@ def download_one_api(log, session: req_lib.Session,
                         time.sleep(10)
                         rows, total = fetch_transactions_page(worker_session, cycle_id_str,
                                                               category_type, filer_type_id,
-                                                              start, TABLE_LENGTH)
+                                                              start, TABLE_LENGTH,
+                                                              start_date=year_floor)
                     else:
                         raise
 
@@ -486,26 +533,37 @@ def download_one_api(log, session: req_lib.Session,
                     break
 
                 for raw in rows:
-                    writer.writerow(normalize_tx_row(raw))
-                total_rows += len(rows)
+                    rec = normalize_tx_row(raw)
+                    # Client-side guard — don't trust the server to honor
+                    # StartDate; without this a merge could duplicate rows
+                    # already preserved from the existing file.
+                    if year_floor and rec["TransactionDate"] < year_floor:
+                        continue
+                    writer.writerow(rec)
+                    new_rows += 1
+                fetched += len(rows)
 
                 if start == 0:
                     log.info(f"    {filename}: {total:,} total records")
 
-                if total_rows >= total or len(rows) < TABLE_LENGTH:
+                if fetched >= total or len(rows) < TABLE_LENGTH:
                     break   # last page
 
                 start += TABLE_LENGTH
                 time.sleep(0.1)
 
     except Exception as e:
+        tmp_path.unlink(missing_ok=True)
         log.file_download_error(filename=filename, error=str(e))
         return None
 
+    total_rows = len(preserved) + new_rows
     if total_rows == 0:
+        tmp_path.unlink(missing_ok=True)
         log.info(f"  {filename}: no records, skipping")
         return filename, 0
 
+    tmp_path.replace(out_path)
     log.file_download_ok(filename=filename,
                          bytes=out_path.stat().st_size,
                          rows=total_rows,
@@ -552,25 +610,59 @@ PARALLEL_WORKERS = 4   # concurrent download threads; raise if server doesn't ra
 
 
 def download_transactions(log, session: req_lib.Session, done: set,
-                          current_only: bool = False,
+                          force: bool = False,
+                          start_year: int | None = None,
+                          end_year: int | None = None,
+                          categories: list[str] | None = None,
                           _counts: list | None = None) -> tuple[int, int]:
-    """Download transaction CSVs for all cycles via JSON API. Returns (ok, err).
+    """Download transaction CSVs via JSON API. Returns (ok, err).
 
     Downloads PARALLEL_WORKERS combinations simultaneously; each thread gets its
     own session so there are no shared-state issues.  Manifest writes are
     serialised with a lock.
-    """
-    current_year = str(datetime.today().year)
-    cycles = [(lbl, cid) for lbl, cid in CYCLES
-              if not current_only or current_year in lbl]
 
-    # Build the full work list, skipping already-done entries
+    Scope:
+      - Normal run (no force, no year range): only the cycle(s) covering
+        today's date, restricted to transactions from Jan 1 of the current
+        year onward (merged into the existing cycle file). Historical cycles
+        are immutable and never touched.
+      - force: every cycle, full date range.
+      - start_year / end_year: numeric cycle labels in range, full date range.
+        Non-numeric cycles (e.g. Recall_Fann) are skipped when a range is active.
+
+    categories filters which category types to download (e.g. ["Income"]).
+    """
+    active_categories = categories or CATEGORY_TYPES
+
+    year_range_active = start_year is not None or end_year is not None
+    incremental = not force and not year_range_active
+    # Date floor for incremental refresh — only current-calendar-year rows are
+    # re-fetched; the prior year of the cycle is preserved from the file on disk.
+    year_floor = f"{datetime.today().year}-01-01" if incremental else None
+
+    cycles = []
+    for lbl, cid in CYCLES:
+        if year_range_active:
+            try:
+                cycle_year = int(lbl)
+            except ValueError:
+                continue   # skip Recall_Fann etc. when year range is active
+            if start_year is not None and cycle_year < start_year:
+                continue
+            if end_year is not None and cycle_year > end_year:
+                continue
+        elif incremental and not cycle_is_current(cid):
+            continue   # normal run — historical cycles never re-fetched
+        cycles.append((lbl, cid))
+
+    # Build the full work list. Current cycles are never skipped via the
+    # manifest — their files are updated in place by the source.
     tasks = []
     for cycle_label, cycle_id_str in cycles:
         for filer_type_id, filer_type_label in FILER_TYPES:
-            for category_type in CATEGORY_TYPES:
+            for category_type in active_categories:
                 key = (cycle_label, filer_type_label, category_type)
-                if key in done and current_year not in cycle_label:
+                if key in done and not cycle_is_current(cycle_id_str):
                     log.file_download_skip(
                         filename=f"{category_type}_{cycle_label}_{filer_type_label}.csv")
                 else:
@@ -584,7 +676,8 @@ def download_transactions(log, session: req_lib.Session, done: set,
         cycle_label, cycle_id_str, filer_type_id, filer_type_label, category_type = task
         worker_session = build_session()   # each thread owns its session
         return download_one_api(log, worker_session, cycle_label, cycle_id_str,
-                                filer_type_id, filer_type_label, category_type)
+                                filer_type_id, filer_type_label, category_type,
+                                year_floor=year_floor)
 
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as pool:
         futures = {pool.submit(_run_one, t): t for t in tasks}
@@ -731,36 +824,89 @@ def download_committee_details(log, session: req_lib.Session,
 
 # ============================= orchestrator ===========================
 
-def run(force: bool = False, entities: bool = False, transactions: bool = False):
-    """Download Arizona campaign finance data from SeeTheMoney."""
+def run(
+    force: bool = False,
+    entities: bool = False,
+    transactions: bool = False,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    contributions: bool = False,
+    expenditures: bool = False,
+    candidates: bool = False,
+    committees: bool = False,
+):
+    """Download Arizona campaign finance data from SeeTheMoney.
+
+    Vertical scope (mutually exclusive):
+        No flags                — current calendar year only: re-fetch this
+                                  year's transactions and merge into the active
+                                  cycle's file; historical cycles untouched
+        force=True              — re-download everything, wipe manifest
+        start_year / end_year   — restrict cycle downloads to this range
+                                  (non-numeric cycles like Recall_Fann skipped when active)
+
+    Horizontal scope:
+        No flags                — download everything
+        transactions            — all cycle files (Income + Expenditures)
+        entities                — registry + committee details
+        contributions           — Income cycle files only
+        expenditures            — Expenditures cycle files only
+        candidates              — registry only (no committee details sweep)
+        committees              — registry + committee details
+    """
     log = get_logger("arizona", "scrape")
     t0  = time.perf_counter()
-    log._emit("scrape_started", force=force, entities=entities, transactions=transactions)
+    log._emit("scrape_started", force=force, entities=entities, transactions=transactions,
+              start_year=start_year, end_year=end_year,
+              contributions=contributions, expenditures=expenditures,
+              candidates=candidates, committees=committees)
 
-    # Resolve scope: if neither flag is set, run both
-    do_both         = not entities and not transactions
-    do_transactions = transactions or do_both
-    do_entities     = entities     or do_both
+    # ── Resolve granular scope ────────────────────────────────────────
+    no_horizontal = not (entities or transactions or contributions or
+                         expenditures or candidates or committees)
+
+    do_transactions = no_horizontal or transactions or contributions or expenditures
+    do_registry     = no_horizontal or entities or candidates or committees
+    do_details      = no_horizontal or entities or committees
+
+    # Category filter for transactions
+    if contributions and not expenditures:
+        active_categories = ["Income"]
+    elif expenditures and not contributions:
+        active_categories = ["Expenditures"]
+    else:
+        active_categories = None   # all
 
     files_ok = files_err = pages_ok = pages_err = 0
     _tx_counts = [0, 0]
 
     try:
-        current_year = str(datetime.today().year)
+        if force and do_transactions and MANIFEST.exists():
+            MANIFEST.unlink()
 
-        if force:
-            if MANIFEST.exists():
-                MANIFEST.unlink()
-            done = set()
-        elif do_transactions and not do_entities:
-            strip_manifest(lambda r: current_year not in r.get("cycle_label", ""))
-            done = load_manifest()
-        else:
-            done = load_manifest()
+        elif (start_year is not None or end_year is not None) and do_transactions:
+            # Year range — wipe manifest entries within the range so they re-download.
+            # Non-numeric cycles (Recall_Fann etc.) are left untouched.
+            def _outside_range(r: dict) -> bool:
+                """Keep rows that are NOT in the wipe zone."""
+                try:
+                    cycle_year = int(r["cycle_label"])
+                except (ValueError, KeyError):
+                    return True   # non-numeric cycle — always keep
+                if start_year is not None and cycle_year < start_year:
+                    return True   # below range — keep
+                if end_year is not None and cycle_year > end_year:
+                    return True   # above range — keep
+                if active_categories and r.get("category_type") not in active_categories:
+                    return True   # different category scope — keep
+                return False      # within range and in scope — wipe
 
+            strip_manifest(_outside_range)
+
+        done = load_manifest()
         session = build_session()
 
-        if do_entities:
+        if do_registry:
             log.info("Downloading registry...")
             ok, err = download_registry(log, session)
             pages_ok += ok; pages_err += err
@@ -768,11 +914,14 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
         if do_transactions:
             log.info("Downloading transactions...")
             ok, err = download_transactions(log, session, done,
-                                            current_only=(not force and not do_both),
+                                            force=force,
+                                            start_year=start_year,
+                                            end_year=end_year,
+                                            categories=active_categories,
                                             _counts=_tx_counts)
             files_ok += ok; files_err += err
 
-        if do_entities:
+        if do_details:
             log.info("Downloading committee details...")
             ok, err = download_committee_details(log, session, force=force)
             pages_ok += ok; pages_err += err
@@ -1024,28 +1173,91 @@ def run_diagnostic():
 
 # ================================= CLI ================================
 if __name__ == "__main__":
+    # Vertical scope (mutually exclusive):
+    #   (no flag)                    current calendar year only — re-fetch this year's
+    #                                transactions, merge into the active cycle file;
+    #                                historical cycles untouched
+    #   --start-year / --end-year    restrict to this cycle range (non-numeric cycles skipped)
+    #   --force                      wipe manifest, re-download all in scope
+    #
+    # Horizontal scope:
+    #   (no flag)         all types
+    #   --transactions    Income + Expenditures cycle files
+    #   --entities        registry + committee details
+    #   --contributions   Income only
+    #   --expenditures    Expenditures only
+    #   --candidates      registry only (no committee details)
+    #   --committees      registry + committee details
     ap = argparse.ArgumentParser(
         description="Download Arizona campaign finance data from SeeTheMoney."
     )
-    ap.add_argument("--force",        action="store_true",
-                    help="re-download everything, ignoring the manifest")
+
+    # Vertical — mutually exclusive
+    vert = ap.add_mutually_exclusive_group()
+    vert.add_argument("--force",      action="store_true",
+                      help="re-download everything in scope, wipe manifest")
+    vert.add_argument("--start-year", type=int, metavar="YYYY",
+                      help="earliest cycle year to download (inclusive). "
+                           "Arizona uses 2-year election cycles labeled by their end year "
+                           "(e.g. '2016' covers Nov 2014 – Nov 2016), so odd years will "
+                           "match no cycle — use the even end-year of the cycle you want.")
+
+    ap.add_argument("--end-year", type=int, metavar="YYYY",
+                    help="latest cycle year to download (inclusive, ≤ current year). "
+                         "See --start-year note on cycle labeling.")
+
+    # Horizontal — top level
     ap.add_argument("--transactions", action="store_true",
-                    help="transactions only")
+                    help="transactions only (Income + Expenditures)")
     ap.add_argument("--entities",     action="store_true",
                     help="entities only (registry + committee details)")
+
+    # Horizontal — second level
+    ap.add_argument("--contributions", action="store_true",
+                    help="Income cycle files only")
+    ap.add_argument("--expenditures",  action="store_true",
+                    help="Expenditures cycle files only")
+    ap.add_argument("--candidates",    action="store_true",
+                    help="registry only (no committee details sweep)")
+    ap.add_argument("--committees",    action="store_true",
+                    help="registry + committee details")
+
+    # Dev/diagnostic flags
     ap.add_argument("--diag",          action="store_true",
-                    help="run diagnostic: capture page traffic and test API call, then exit")
+                    help="capture page traffic and test API, then exit")
     ap.add_argument("--test-requests", action="store_true",
-                    help="test whether plain requests (no browser) can reach the API")
-    args = ap.parse_args()
+                    help="test whether plain requests can reach the API")
+
+    args, _ = ap.parse_known_args()
+
     if args.diag:
         run_diagnostic()
         sys.exit(0)
     if args.test_requests:
         test_requests_only()
         sys.exit(0)
+
+    cy = datetime.today().year
+    if args.end_year:
+        if args.end_year > cy:
+            ap.error(f"--end-year cannot exceed current year ({cy})")
+        if args.start_year and args.start_year > args.end_year:
+            ap.error("--start-year cannot be greater than --end-year")
+    if args.force and args.end_year:
+        ap.error("--force cannot be combined with --end-year")
+
     try:
-        run(force=args.force, entities=args.entities, transactions=args.transactions)
+        run(
+            force=args.force,
+            entities=args.entities,
+            transactions=args.transactions,
+            start_year=args.start_year,
+            end_year=args.end_year,
+            contributions=args.contributions,
+            expenditures=args.expenditures,
+            candidates=args.candidates,
+            committees=args.committees,
+        )
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception:

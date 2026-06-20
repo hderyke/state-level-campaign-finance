@@ -69,6 +69,20 @@ REQUIRED_COLS = {
     "expenditures":  ["state", "committee_name", "amount", "date", "raw_file", "row_num"],
 }
 
+# States whose parsers use id_model="name_hash" (see utils.assign_person_ids):
+# person_id is derived purely from MD5(state + candidate_name), so state_filer_id
+# is not load-bearing for identity resolution in these states. Keep this set in
+# sync with each parser's assign_person_ids(id_model=...) call.
+NAME_HASH_STATES = {"alaska", "idaho"}
+
+# Per-table columns that get downgraded from a tier-1 failure to a tier-2 warning
+# for states in NAME_HASH_STATES — these are columns where REQUIRED_COLS demands
+# a fill rate that the source data structurally can't provide for those states.
+TIER1_OPTIONAL_FOR_NAME_HASH = {
+    "candidates": {"state_filer_id"},
+    "committees": {"state_filer_id"},
+}
+
 # Tables that have amount fields
 AMOUNT_TABLES = {
     "contributions": "amount",
@@ -450,6 +464,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
             pass
 
     tables = ["candidates", "committees", "contributions", "expenditures"]
+    is_name_hash  = state_lower in NAME_HASH_STATES
     all_rows      = {}
     row_counts    = {}
     sampled_tables = {}   # table → total row count when sampling was applied
@@ -487,7 +502,20 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
         for col in REQUIRED_COLS.get(table, []):
             if col == "state":
                 continue
-            checks.append((f"fill:{col}", check_required_filled(table, rows, col)))
+            fill_errors = check_required_filled(table, rows, col)
+            if (fill_errors and is_name_hash
+                    and col in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set())):
+                # Documented structural gap for name_hash states (person_id does
+                # not depend on this column) — downgrade to a tier-2 warning.
+                for e in fill_errors:
+                    tier2_warnings.append({
+                        "table":   table,
+                        "warning": f"{e} — expected for id_model=name_hash "
+                                   f"(person_id does not depend on state_filer_id; "
+                                   f"see docs/states/{state_lower}.md)",
+                    })
+            else:
+                checks.append((f"fill:{col}", fill_errors))
 
         checks.append(("row_num", check_row_num(table, rows)))
 
@@ -582,10 +610,19 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
             print(f"  {table.capitalize()} (sampled {len(rows):,} of {total_for_table:,} rows)")
         else:
             print(f"  {table.capitalize()} ({len(rows):,} rows)")
+        any_downgraded = False
         for field in required:
-            rate  = rates[field]
-            ok    = "✓" if rate >= TIER1_PASS_RATE * 100 else "✗"
+            rate       = rates[field]
+            downgraded = (is_name_hash and rate < TIER1_PASS_RATE * 100
+                          and field in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set()))
+            if downgraded:
+                ok = "↓"
+                any_downgraded = True
+            else:
+                ok = "✓" if rate >= TIER1_PASS_RATE * 100 else "✗"
             print(f"    {field:<25} {_bar(rate)}  {rate:5.1f}%  {ok}")
+        if any_downgraded:
+            print(f"    ↓ = tier-2 (id_model=name_hash; see docs/states/{state_lower}.md)")
         print()
 
 

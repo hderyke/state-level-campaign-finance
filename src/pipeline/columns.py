@@ -23,6 +23,8 @@ COMMITTEES = [
                         # NULL for PACs and other non-candidate committees
     "committee_name",
     "committee_type",
+    "election_year",    # year the committee was registered/active for; sparse — only written
+                        # by states where committees are cycle-specific (e.g. CT, FL, AR)
     "candidate_name",
     "treasurer_name",
     "city",

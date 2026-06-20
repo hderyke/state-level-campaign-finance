@@ -45,8 +45,8 @@ TRANSACTION_TYPES = {
     "TEXP": "expenditures",
 }
 
-# Years available on the downloads page — update annually
-YEARS = ["2022", "2023", "2024", "2025", "2026"]
+# Earliest year available on the portal — auto-extended to current year at runtime
+START_YEAR = 2022
 
 # Entity filer type codes — SFIFILER is personal financial disclosure, not campaign finance
 CANDIDATE_CODES = {"CAN"}
@@ -121,13 +121,21 @@ def _decode_response(content: bytes) -> str:
 
 # ============================ entities ==============================
 
-def download_entities(log, session: requests.Session) -> tuple[int, int] | None:
+def download_entities(log, session: requests.Session,
+                      write_candidates: bool = True,
+                      write_committees: bool = True) -> tuple[int, int] | None:
     """
     Fetch all campaign finance filers from the public registry API.
-    Splits results into candidates.csv and committees.csv.
+    Always fetches the full result (single API call — no server-side filtering).
+    Splits results into candidates.csv and/or committees.csv based on write_* flags.
     Returns (candidate_count, committee_count) or None on failure.
     """
-    log.file_download_start(filename="entities (candidates + committees)")
+    label = (
+        "candidates.csv + committees.csv" if (write_candidates and write_committees)
+        else "candidates.csv" if write_candidates
+        else "committees.csv"
+    )
+    log.file_download_start(filename=label)
     t0 = time.perf_counter()
 
     payload = {
@@ -146,13 +154,17 @@ def download_entities(log, session: requests.Session) -> tuple[int, int] | None:
         resp.raise_for_status()
         items = resp.json()["data"]["items"]
     except Exception as e:
-        log.file_download_error(filename="entities", error=str(e))
+        log.file_download_error(filename=label, error=str(e))
         return None
 
     candidates = [r for r in items if r.get("filerTypeCode") in CANDIDATE_CODES]
     committees = [r for r in items if r.get("filerTypeCode") in COMMITTEE_CODES]
 
-    for filename, rows in [("candidates.csv", candidates), ("committees.csv", committees)]:
+    to_write = []
+    if write_candidates: to_write.append(("candidates.csv", candidates))
+    if write_committees: to_write.append(("committees.csv", committees))
+
+    for filename, rows in to_write:
         out_path = RAW_DIR / filename
         with open(out_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=ENTITY_FIELDS, extrasaction="ignore")
@@ -161,8 +173,8 @@ def download_entities(log, session: requests.Session) -> tuple[int, int] | None:
 
     total = len(candidates) + len(committees)
     log.file_download_ok(
-        filename="candidates.csv + committees.csv",
-        bytes=resp.content.__len__(),
+        filename=label,
+        bytes=len(resp.content),
         rows=total,
         duration_s=round(time.perf_counter() - t0, 2),
     )
@@ -212,18 +224,69 @@ def download_transaction(log, transaction_type: str, year: str,
 
 # ============================== run =================================
 
-def run(force: bool = False, entities: bool = False, transactions: bool = False):
-    """Orchestrate download of transaction files and/or entity registry."""
+def run(
+    force: bool = False,
+    entities: bool = False,
+    transactions: bool = False,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    contributions: bool = False,
+    expenditures: bool = False,
+    candidates: bool = False,
+    committees: bool = False,
+):
+    """Orchestrate download of transaction files and/or entity registry.
+
+    Vertical scope (mutually exclusive):
+        force=True              — re-download all years in scope, wipe manifest
+        start_year / end_year   — restrict transaction downloads to this year range
+
+    Horizontal scope:
+        No flags                — download everything
+        transactions            — contributions + expenditures
+        entities                — candidates + committees registry
+        contributions           — contributions only
+        expenditures            — expenditures only
+        candidates              — candidates registry only
+        committees              — committees registry only
+
+    Note: entities are a single API call regardless of candidate/committee split —
+    both are always fetched; write_* flags only control which files are written.
+    Year flags do not apply to entities (no year param on the registry endpoint).
+    """
     log = get_logger("arkansas", "scrape")
     t0  = time.perf_counter()
-    log._emit("scrape_started", force=force, entities=entities, transactions=transactions)
+    log._emit("scrape_started", force=force, entities=entities, transactions=transactions,
+              start_year=start_year, end_year=end_year,
+              contributions=contributions, expenditures=expenditures,
+              candidates=candidates, committees=committees)
 
-    # If neither flag is set, do both
-    do_both         = not entities and not transactions
-    do_transactions = transactions or do_both
-    do_entities     = entities     or do_both
+    # ── Resolve granular scope ────────────────────────────────────────
+    no_horizontal = not (entities or transactions or contributions or
+                         expenditures or candidates or committees)
 
-    current_year = str(datetime.today().year)
+    do_transactions    = no_horizontal or transactions or contributions or expenditures
+    do_entities        = no_horizontal or entities or candidates or committees
+    write_candidates   = no_horizontal or entities or candidates
+    write_committees   = no_horizontal or entities or committees
+
+    # Transaction type filter
+    if contributions and not expenditures:
+        active_tx_types = {k: v for k, v in TRANSACTION_TYPES.items() if v == "contributions"}
+    elif expenditures and not contributions:
+        active_tx_types = {k: v for k, v in TRANSACTION_TYPES.items() if v == "expenditures"}
+    else:
+        active_tx_types = TRANSACTION_TYPES
+
+    # Year range — from start_year (or START_YEAR floor) to current year
+    current_year = datetime.today().year
+    range_start  = start_year if start_year is not None else START_YEAR
+    years = [
+        str(y) for y in range(range_start, current_year + 1)
+        if (end_year is None or y <= end_year)
+    ]
+    current_year_str = str(current_year)
+
     files_ok = files_err = 0
 
     try:
@@ -231,20 +294,22 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
 
         # ── Entities ──────────────────────────────────────────────────
         if do_entities:
-            if force:
-                strip_manifest(lambda r: r["transaction_type"] != "entities")
-            result = download_entities(log, session)
+            result = download_entities(log, session,
+                                       write_candidates=write_candidates,
+                                       write_committees=write_committees)
             if result:
                 cand_count, comm_count = result
                 log.info(f"  candidates: {cand_count:,}  committees: {comm_count:,}")
                 today = datetime.today().strftime("%Y-%m-%d")
                 strip_manifest(lambda r: r["transaction_type"] != "entities")
-                append_manifest({"transaction_type": "entities", "year": "candidates",
-                                 "filename": "candidates.csv", "downloaded_at": today,
-                                 "row_count": cand_count})
-                append_manifest({"transaction_type": "entities", "year": "committees",
-                                 "filename": "committees.csv", "downloaded_at": today,
-                                 "row_count": comm_count})
+                if write_candidates:
+                    append_manifest({"transaction_type": "entities", "year": "candidates",
+                                     "filename": "candidates.csv", "downloaded_at": today,
+                                     "row_count": cand_count})
+                if write_committees:
+                    append_manifest({"transaction_type": "entities", "year": "committees",
+                                     "filename": "committees.csv", "downloaded_at": today,
+                                     "row_count": comm_count})
                 files_ok += 1
             else:
                 files_err += 1
@@ -252,15 +317,18 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
         # ── Transactions ──────────────────────────────────────────────
         if do_transactions:
             if force:
-                strip_manifest(lambda r: r["transaction_type"] in TRANSACTION_TYPES)
+                strip_manifest(lambda r: r["transaction_type"] in active_tx_types)
                 done = set()
             else:
                 done = load_manifest()
 
-            for transaction_type, label in TRANSACTION_TYPES.items():
-                for year in YEARS:
+            # When a year range is explicitly requested, re-download all years in scope.
+            # Otherwise (incremental), skip already-fetched years except the current one.
+            year_range_explicit = start_year is not None or end_year is not None
+            for transaction_type, label in active_tx_types.items():
+                for year in years:
                     key = (transaction_type, year)
-                    if key in done and year != current_year:
+                    if key in done and year != current_year_str and not year_range_explicit:
                         log.file_download_skip(filename=f"{label}_{year}.csv")
                         continue
 
@@ -305,18 +373,68 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
 
 if __name__ == "__main__":
     import argparse
+    # Vertical scope (mutually exclusive):
+    #   (no flag)                    incremental — fill gaps, always refresh current year
+    #   --start-year / --end-year    restrict to this year range
+    #   --force                      wipe manifest entries in scope, re-download all
+    #
+    # Horizontal scope:
+    #   (no flag)         all types
+    #   --transactions    contributions + expenditures
+    #   --entities        candidates + committees registry
+    #   --contributions   contributions only
+    #   --expenditures    expenditures only
+    #   --candidates      candidates registry only
+    #   --committees      committees registry only
     ap = argparse.ArgumentParser(
         description="Download Arkansas campaign finance data from the Ethics Commission API."
     )
-    ap.add_argument("--force",        action="store_true",
-                    help="re-download everything, ignoring the manifest")
+
+    vert = ap.add_mutually_exclusive_group()
+    vert.add_argument("--force",      action="store_true",
+                      help="re-download everything in scope, wipe manifest")
+    vert.add_argument("--start-year", type=int, metavar="YYYY",
+                      help="earliest year to download (inclusive)")
+
+    ap.add_argument("--end-year",     type=int, metavar="YYYY",
+                    help="latest year to download (inclusive, ≤ current year)")
+
     ap.add_argument("--transactions", action="store_true",
                     help="transactions only")
     ap.add_argument("--entities",     action="store_true",
-                    help="entities only (candidates, committees)")
-    args = ap.parse_args()
+                    help="entities only (candidates + committees registry)")
+    ap.add_argument("--contributions", action="store_true",
+                    help="contributions only")
+    ap.add_argument("--expenditures",  action="store_true",
+                    help="expenditures only")
+    ap.add_argument("--candidates",    action="store_true",
+                    help="candidates registry only")
+    ap.add_argument("--committees",    action="store_true",
+                    help="committees registry only")
+
+    args, _ = ap.parse_known_args()
+
+    cy = datetime.today().year
+    if args.end_year:
+        if args.end_year > cy:
+            ap.error(f"--end-year cannot exceed current year ({cy})")
+        if args.start_year and args.start_year > args.end_year:
+            ap.error("--start-year cannot be greater than --end-year")
+    if args.force and args.end_year:
+        ap.error("--force cannot be combined with --end-year")
+
     try:
-        run(force=args.force, entities=args.entities, transactions=args.transactions)
+        run(
+            force=args.force,
+            entities=args.entities,
+            transactions=args.transactions,
+            start_year=args.start_year,
+            end_year=args.end_year,
+            contributions=args.contributions,
+            expenditures=args.expenditures,
+            candidates=args.candidates,
+            committees=args.committees,
+        )
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception:

@@ -44,19 +44,17 @@ MANIFEST_COLS = ["filename", "server_last_modified", "downloaded_at", "row_count
 TARGET_TABLES = {
     "CalAccess/DATA/RCPT_CD.TSV":                    "RCPT_CD.tsv",
     "CalAccess/DATA/EXPN_CD.TSV":                    "EXPN_CD.tsv",
-    "CalAccess/DATA/DEBT_CD.TSV":                    "DEBT_CD.tsv",
-    "CalAccess/DATA/LOAN_CD.TSV":                    "LOAN_CD.tsv",
     "CalAccess/DATA/FILERNAME_CD.TSV":               "FILERNAME_CD.tsv",
     "CalAccess/DATA/CVR_CAMPAIGN_DISCLOSURE_CD.TSV": "CVR_CAMPAIGN_DISCLOSURE_CD.tsv",
     "CalAccess/DATA/FILER_TO_FILER_TYPE_CD.TSV":     "FILER_TO_FILER_TYPE_CD.tsv",
 }
 
 # Transactions change daily; entity/registry files change less often.
-# --update-transactions pulls RCPT, EXPN, DEBT, LOAN.
-# --update-entities pulls FILERNAME, CVR, FILER_TO_FILER_TYPE.
-TRANSACTION_TABLES = {"RCPT_CD.tsv", "EXPN_CD.tsv", "DEBT_CD.tsv", "LOAN_CD.tsv"}
-ENTITY_TABLES      = {"FILERNAME_CD.tsv", "CVR_CAMPAIGN_DISCLOSURE_CD.tsv",
-                      "FILER_TO_FILER_TYPE_CD.tsv"}
+CONTRIBUTION_TABLES  = {"RCPT_CD.tsv"}
+EXPENDITURE_TABLES   = {"EXPN_CD.tsv"}
+TRANSACTION_TABLES   = CONTRIBUTION_TABLES | EXPENDITURE_TABLES
+ENTITY_TABLES        = {"FILERNAME_CD.tsv", "CVR_CAMPAIGN_DISCLOSURE_CD.tsv",
+                        "FILER_TO_FILER_TYPE_CD.tsv"}
 
 
 # == Manifest helpers ==========================================================
@@ -307,12 +305,42 @@ def extract_entry(session: requests.Session, entry: dict, zip_path: str,
 
 
 # == Main runner ===============================================================
-def run(force: bool = False, update_transactions: bool = False,
-        update_entities: bool = False):
+def run(force: bool = False, entities: bool = False, transactions: bool = False,
+        contributions: bool = False, expenditures: bool = False):
+    """Download California CAL-ACCESS tables via HTTP Range requests.
+
+    Horizontal scope:
+        No flags        — all tables (RCPT, EXPN, registry)
+        transactions    — RCPT + EXPN
+        entities        — registry tables (FILERNAME, CVR, FILER_TO_FILER_TYPE)
+        contributions   — RCPT only
+        expenditures    — EXPN only
+
+    No year flags — CAL-ACCESS is a single full-history ZIP with no year splitting.
+    Loans/debts tables (DEBT_CD, LOAN_CD) are excluded — not used by the parser.
+    """
     log = get_logger("california", "scrape")
     t0  = time.perf_counter()
-    log._emit("scrape_started", force=force,
-              entities=update_entities, transactions=update_transactions)
+    log._emit("scrape_started", force=force, entities=entities, transactions=transactions,
+              contributions=contributions, expenditures=expenditures)
+
+    # ── Resolve scope ─────────────────────────────────────────────────
+    no_horizontal   = not (entities or transactions or contributions or expenditures)
+    do_transactions = no_horizontal or transactions or contributions or expenditures
+    do_entities     = no_horizontal or entities
+
+    if contributions and not expenditures:
+        active_tx = CONTRIBUTION_TABLES
+    elif expenditures and not contributions:
+        active_tx = EXPENDITURE_TABLES
+    else:
+        active_tx = TRANSACTION_TABLES
+
+    targets = {}
+    if do_transactions:
+        targets.update({k: v for k, v in TARGET_TABLES.items() if v in active_tx})
+    if do_entities:
+        targets.update({k: v for k, v in TARGET_TABLES.items() if v in ENTITY_TABLES})
 
     files_ok = files_err = 0
 
@@ -330,16 +358,8 @@ def run(force: bool = False, update_transactions: bool = False,
 
         done = {} if force else load_manifest()
 
-        # Determine which tables to pull
-        if update_transactions:
-            targets = {k: v for k, v in TARGET_TABLES.items() if v in TRANSACTION_TABLES}
-        elif update_entities:
-            targets = {k: v for k, v in TARGET_TABLES.items() if v in ENTITY_TABLES}
-        else:
-            targets = TARGET_TABLES
-
-        # For update_* modes, ignore Last-Modified check (force re-pull of selected tables)
-        force_selected = force or update_transactions or update_entities
+        # Any explicit scope flag → ignore Last-Modified check for selected tables
+        force_selected = force or not no_horizontal
 
         if not force_selected and all(done.get(n) == server_last_mod for n in targets.values()):
             print("California: selected files current — skipping.")
@@ -415,17 +435,20 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(
         description="Download California CAL-ACCESS campaign finance tables."
     )
-    ap.add_argument("--force",               action="store_true",
+    ap.add_argument("--force",         action="store_true",
                     help="re-download everything, ignoring the manifest")
-    ap.add_argument("--update-transactions", action="store_true",
-                    help="transactions only (RCPT, EXPN, DEBT, LOAN)")
-    ap.add_argument("--update-entities",     action="store_true",
-                    help="entities only (FILERNAME, CVR, FILER_TO_FILER_TYPE)")
-    args = ap.parse_args()
+    ap.add_argument("--transactions",  action="store_true",
+                    help="transaction tables only (RCPT + EXPN)")
+    ap.add_argument("--entities",      action="store_true",
+                    help="entity/registry tables only (FILERNAME, CVR, FILER_TO_FILER_TYPE)")
+    ap.add_argument("--contributions", action="store_true",
+                    help="RCPT_CD only")
+    ap.add_argument("--expenditures",  action="store_true",
+                    help="EXPN_CD only")
+    args, _ = ap.parse_known_args()
     try:
-        run(force=args.force,
-            update_transactions=args.update_transactions,
-            update_entities=args.update_entities)
+        run(force=args.force, entities=args.entities, transactions=args.transactions,
+            contributions=args.contributions, expenditures=args.expenditures)
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception:

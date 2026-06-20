@@ -8,14 +8,15 @@
 |---|---|
 | **State** | Arizona (AZ) |
 | **Source** | [Arizona Secretary of State SeeTheMoney](https://seethemoney.az.gov/Reporting/AdvancedSearch/) |
-| **Access method** | Plain `requests` session — no browser required |
+| **Access method** | `requests` session — no browser required |
 | **Coverage** | 1998 – present |
+| **person_id model** | `committee` — new `entity_id` per registration cycle; `person_id` = min ID for a given `(candidate_name, office, district)` |
 
 ---
 
 ## Raw Data Structure
 
-Files live in `data/Arizona/raw/`. Three categories: transaction files (one per cycle × filer type × category), a committee registry, and committee detail records.
+Three categories: transaction files (one per cycle × filer type × category), a committee registry, and committee detail records.
 
 ### Transaction Files
 
@@ -96,7 +97,9 @@ Categories: `Income` (contributions received), `Expenditures` (spending)
 
 **Committee details:** Fetched via `POST /Reporting/GetDetailedInformation` per entity ID, with a 0.15s sleep between requests.
 
-**Manifest:** `manifest.csv` tracks completed cycle × filer type × category combinations. Current-year combinations are always re-fetched.
+**Manifest:** `manifest.csv` tracks completed cycle × filer type × category combinations.
+
+**Incremental scope:** a normal (no-flag) run touches only the current calendar year — it fetches transactions dated Jan 1 of this year onward (via the API's `StartDate` parameter, with a client-side date guard) and merges them into the active cycle's file, preserving the prior-year rows already on disk. Cycles are two-year and labeled by their even end year, so the active cycle is detected by date range, not label. Historical cycles are immutable and only re-fetched with `--force` or `--start-year`/`--end-year`. If the active cycle's file is missing, the full cycle is fetched instead. Note this means amendments to prior-year transactions are not picked up by a normal run — use `--start-year` to refresh the full cycle.
 
 **Limitations:**
 - Must be run locally — the site blocks datacenter IPs. `build_session()` uses a real browser User-Agent and `Sec-Fetch-*` headers to avoid WAF fingerprinting.
@@ -151,5 +154,5 @@ Arizona is a **registry-joined state**: transaction files contain `FilerName` as
 
 | Component | Date |
 |---|---|
-| Scraper | 2026-05-29 |
+| Scraper | 2026-06-10 |
 | Parser | 2026-05-29 |

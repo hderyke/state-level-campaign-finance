@@ -150,33 +150,79 @@ def check_manifest(state_dir: Path) -> tuple[int, int]:
 
 # ================================ Push ===============================
 
-def _worker_intent(files: list[dict]) -> dict[str, dict]:
-    """Call /push/intent, return results keyed by remote key."""
-    resp = requests.post(
-        f"{_worker_url()}/push/intent",
-        headers=_worker_headers(),
-        json={"files": files},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return {r["key"]: r for r in resp.json()["files"]}
+def _worker_intent(files: list[dict], max_retries: int = 4) -> dict[str, dict]:
+    """Call /push/intent, return results keyed by remote key.
 
-def _worker_confirm(pusher: str, files: list[dict]) -> None:
+    Retries up to max_retries times with exponential backoff on network errors
+    (connection resets, timeouts, DNS failures) so a transient Worker outage
+    doesn't abort the entire push.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        if attempt > 0:
+            time.sleep(2 ** attempt)   # 2, 4, 8 seconds
+        try:
+            resp = requests.post(
+                f"{_worker_url()}/push/intent",
+                headers=_worker_headers(),
+                json={"files": files},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return {r["key"]: r for r in resp.json()["files"]}
+        except Exception as e:
+            last_exc = e
+            continue
+    raise last_exc
+
+def _worker_confirm(pusher: str, files: list[dict], max_retries: int = 4) -> None:
     """Call /push/confirm to record manifest entry."""
-    resp = requests.post(
-        f"{_worker_url()}/push/confirm",
-        headers=_worker_headers(),
-        json={"pusher": pusher, "files": files},
-        timeout=30,
-    )
-    resp.raise_for_status()
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        if attempt > 0:
+            time.sleep(2 ** attempt)
+        try:
+            resp = requests.post(
+                f"{_worker_url()}/push/confirm",
+                headers=_worker_headers(),
+                json={"pusher": pusher, "files": files},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return
+        except Exception as e:
+            last_exc = e
+            continue
+    raise last_exc
 
 
-def _upload_presigned(upload_url: str, local_path: Path) -> None:
-    """PUT a file directly to R2 via pre-signed URL (streams, no size limit)."""
-    with open(local_path, "rb") as f:
-        resp = requests.put(upload_url, data=f, timeout=600)
-    resp.raise_for_status()
+def _upload_presigned(upload_url: str, local_path: Path,
+                      max_retries: int = 3) -> None:
+    """PUT a file directly to R2 via pre-signed URL (streams, no size limit).
+
+    Retries on 5xx responses and connection errors; does not retry on 4xx
+    (expired URL, permission denied) since those won't self-heal.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        if attempt > 0:
+            time.sleep(2 ** attempt)
+        try:
+            with open(local_path, "rb") as f:
+                resp = requests.put(upload_url, data=f, timeout=600)
+            if resp.status_code >= 500:
+                last_exc = requests.HTTPError(
+                    f"{resp.status_code} Server Error", response=resp
+                )
+                continue   # retry on 5xx
+            resp.raise_for_status()
+            return
+        except requests.HTTPError:
+            raise   # 4xx — not retriable
+        except Exception as e:
+            last_exc = e
+            continue
+    raise last_exc
 
 
 def _delete_r2_keys(key_sizes: dict[str, int], log) -> tuple[int, int, list[dict]]:
@@ -277,27 +323,35 @@ def push_file(local_path: Path, remote_key: str) -> None:
 
 def _push_files(file_meta: list[dict], log, t0: float, pusher: str,
                 deleted_files: list[dict] | None = None) -> tuple[int, int]:
-    """Shared logic for push_state and push_all — intent, upload loop, confirm."""
-    try:
-        intent = _worker_intent([{
-            "key":  m["remote_key"],
-            "size": m["local_path"].stat().st_size,
-            "hash": _file_hash(m["local_path"]),
-        } for m in file_meta])
-    except Exception as e:
-        log._emit("push_completed", status="error",
-                  duration_s=round(time.perf_counter() - t0, 1),
-                  files_ok=0, files_err=len(file_meta), error=f"intent failed: {e}")
-        raise
+    """Shared logic for push_state and push_all — intent, upload loop, confirm.
 
+    Presigned URLs are fetched per-file (right before upload) to avoid expiry
+    on large batches that take longer than the URL TTL to complete.
+    """
     files_ok = files_err = 0
     confirmed: list[dict] = list(deleted_files or [])   # deletions go first
     try:
         for m in file_meta:
             local_path = m["local_path"]
             remote_key = m["remote_key"]
+            ft = time.perf_counter()
+
+            try:
+                intent = _worker_intent([{
+                    "key":  remote_key,
+                    "size": local_path.stat().st_size,
+                    "hash": _file_hash(local_path),
+                }])
+            except Exception as e:
+                log._emit("file_pushed", status="error", filename=local_path.name,
+                          remote_key=remote_key, rows=None, delta_mb=None,
+                          duration_s=round(time.perf_counter() - ft, 2),
+                          error=f"intent failed: {e}")
+                print(f"  ✗ {remote_key}: intent failed: {e}")
+                files_err += 1
+                continue
+
             info = intent[remote_key]
-            ft   = time.perf_counter()
 
             if info["action"] == "noop":
                 print(f"  – {remote_key} (unchanged)")
@@ -473,11 +527,10 @@ def pull_state(state_name: str, project_root: Path) -> None:
     prefix   = f"data/{state_name}/"
     data_dir = project_root / "data"
 
-    response = client.list_objects_v2(Bucket=_bucket(), Prefix=prefix)
-    objects  = response.get("Contents", [])
-    log._emit("pull_started", target="state", file_count=len(objects))
+    r2_objects = _r2_listing(prefix)   # paginates automatically
+    log._emit("pull_started", target="state", file_count=len(r2_objects))
 
-    if not objects:
+    if not r2_objects:
         print(f"  [!] No files found in R2 under {prefix}")
         log._emit("pull_completed", status="error", duration_s=0.0,
                   files_ok=0, files_err=0, error="no files found in R2")
@@ -485,8 +538,8 @@ def pull_state(state_name: str, project_root: Path) -> None:
 
     files_ok = files_err = 0
     try:
-        for obj in objects:
-            remote_key = obj["Key"]
+        for rel_key in r2_objects:
+            remote_key = f"{prefix}{rel_key}"
             local_path = data_dir / remote_key.removeprefix("data/")
             ft = time.perf_counter()
             try:
@@ -518,28 +571,26 @@ def pull_all(project_root: Path) -> None:
     """Download the entire data/ directory from R2. Requires confirmation."""
     log      = get_logger(None, "pull")
     t0       = time.perf_counter()
-    client   = _client()
-    response = client.list_objects_v2(Bucket=_bucket(), Prefix="data/")
-    objects  = response.get("Contents", [])
+    r2_objects = _r2_listing("data/")   # paginates automatically; {rel_key: size_bytes}
 
-    if not objects:
+    if not r2_objects:
         print("[!] No files found in R2 under data/")
         return
 
-    total_mb = sum(obj["Size"] for obj in objects) / 1_000_000
-    print(f"\n  About to pull {len(objects):,} files ({total_mb:.1f} MB) from R2.")
+    total_mb = sum(r2_objects.values()) / 1_000_000
+    print(f"\n  About to pull {len(r2_objects):,} files ({total_mb:.1f} MB) from R2.")
     print("  This will overwrite any existing local files at the same paths.")
     if input("\n  Type 'yes' to continue: ").strip().lower() != "yes":
         print("  Aborted.")
         return
 
-    log._emit("pull_started", target="all", file_count=len(objects),
+    log._emit("pull_started", target="all", file_count=len(r2_objects),
               total_mb=round(total_mb, 1))
     data_dir = project_root / "data"
     files_ok = files_err = 0
     try:
-        for obj in objects:
-            remote_key = obj["Key"]
+        for rel_key in r2_objects:
+            remote_key = f"data/{rel_key}"
             local_path = data_dir / remote_key.removeprefix("data/")
             ft = time.perf_counter()
             try:

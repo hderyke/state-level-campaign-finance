@@ -9,13 +9,14 @@
 | **State** | Arkansas (AR) |
 | **Source** | [Arkansas Secretary of State Ethics Disclosures](https://ethics-disclosures.sos.arkansas.gov) |
 | **Access method** | JSON API (POST requests) for both transactions and entity registry |
-| **Coverage** | 2022 – present (2022 is sparse — see Data Quirks) |
+| **Coverage** | 2022 – present (2022 is sparse — see Data Notes) |
+| **person_id model** | `person` — `filerEntityID` is a stable person-level ID that persists across election cycles; `person_id` set directly |
 
 ---
 
 ## Raw Data Structure
 
-Files live in `data/Arkansas/raw/`. Two transaction files per year plus two static entity registry files.
+Two transaction files per year plus two static entity registry files.
 
 ### Transaction Files
 
@@ -144,7 +145,7 @@ Arkansas has a proper entity registry, so committees and candidates are loaded f
 
 ---
 
-## Data Quirks
+## Data Notes
 
 - **No loans data** — the Arkansas ethics portal does not export loan/debt transactions. `loans_debts.csv` exists but is always empty.
 - **2022 data is sparse** — only covers November–December 2022, and candidates only (no committee data for that year). Included as-is but not representative of a full year.

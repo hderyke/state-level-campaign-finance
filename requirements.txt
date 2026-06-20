@@ -1,7 +1,9 @@
 beautifulsoup4==4.14.3
 boto3==1.43.10
 duckdb==1.5.2
+openpyxl==3.1.5
 playwright==1.59.0
 python-dotenv==1.2.2
 requests==2.33.1
 tqdm==4.67.1
+xlrd==2.0.1

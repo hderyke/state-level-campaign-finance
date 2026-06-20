@@ -69,3 +69,87 @@ CA,T,Transfer
 CA,F,Other
 CA,M,Other
 CA,0,
+# == Connecticut ===============================================================
+# CT transaction_type is the Receipt Type field.
+CT,Itemized Contributions from Individuals,Monetary
+CT,Total Contributions From Small Contributors,Monetary
+CT,Advertising Book Proceeds,Monetary
+CT,Contributions from Other Committees,Monetary
+CT,Misc. Monetary NCC,Monetary
+CT,Tag Sale Proceeds,Monetary
+CT,Personal Funds of Candidate,Monetary
+CT,Expenses Paid by Candidate,Monetary
+CT,Anonymous Contributions,Monetary
+CT,Receipts from other Indiv or Other Committees,Monetary
+CT,Public Grants,Monetary
+CT,Transfer from Labor Union or Other Treasury,Transfer
+CT,Transfer from Affiliated Business Treasury,Transfer
+CT,Reimbursements and Distribution of Surplus,Refund
+CT,In Kind Contribution,In-Kind
+CT,In Kind NCC,In-Kind
+CT,In Kind NCC Associated with a House Party,In-Kind
+CT,Non Monetary Receipts of Organization Expenditures,In-Kind
+CT,Loans Received,Loan
+CT,Interest from Authorized Accounts,Other
+CT,Refund Telephone,Refund
+# == Delaware ==================================================================
+DE,Check,Monetary
+DE,Credit Card,Monetary
+DE,Cash,Monetary
+DE,Electronic Fund Transfer,Monetary
+DE,Electronic Payment Service,Monetary
+DE,Payroll Deductions,Monetary
+DE,Data Conversion,Monetary
+DE,Ticket Purchases Check,Monetary
+DE,Ticket Purchases Credit Card,Monetary
+DE,Ticket Purchases Cash,Monetary
+DE,Transfer,Monetary
+DE,In-Kind,In-Kind
+DE,Coordinated In-Kind,In-Kind
+DE,Other Income,Other
+DE,Expense Reimbursement,Refund
+DE,Refund/Rebate,Refund
+DE,Forgiven,Other
+DE,Total of Contributions not exceeding $100,Monetary
+# == Georgia ===================================================================
+# transaction_type is stored as "Type – Sub Type" e.g. "Contribution – Itemized Contribution"
+GA,Contribution – Itemized Contribution,Monetary
+GA,Contribution – Unitemized Contribution,Monetary
+GA,Contribution – Anonymous Contribution,Monetary
+GA,Contribution – In-Kind Contribution,In-Kind
+GA,Return Contribution – Itemized Contribution,Refund
+GA,Return Contribution – Unitemized Contribution,Refund
+GA,Return Contribution,Refund
+GA,Interest Earned (Non-Investment Account),Other
+# Legacy (media.ethics.ga.gov, 2006-2024) — transaction_type is "Contribution – Type"
+# where Type is just "Monetary" or "In-Kind" (no itemization-level sub type).
+GA,Contribution – Monetary,Monetary
+GA,Contribution – In-Kind,In-Kind
+# == Illinois ==================================================================
+# D2Part codes (Schedule A "part" of ISBE's contribution form). 3A (loans
+# received) is diverted to loans_debts.csv and not included here.
+IL,1A,Monetary
+IL,2A,Monetary
+IL,4A,Other
+IL,5A,In-Kind
+# == Indiana ===================================================================
+# transaction_type comes from the Type field in contributions_{YYYY}.csv.
+# Loan/Debt rows are diverted to loans_debts.csv and not included here.
+IN,Direct,Monetary
+IN,Unitemized,Monetary
+IN,In-Kind,In-Kind
+IN,Interest,Other
+IN,Misc,
+IN,Missing,
+# == Colorado ==================================================================
+# transaction_type comes from ContributionType in contributions_{YYYY}.csv.
+# LLC rows had "Monetary (Itemized) - LLC Contribution (Total Amount: X.XX)" —
+# the parser strips the " - LLC Contribution..." suffix before writing.
+CO,Monetary (Itemized),Monetary
+CO,Monetary (Non-Itemized),Monetary
+CO,Non-Monetary (Itemized),In-Kind
+CO,Non-Monetary (Non-Itemized),In-Kind
+CO,Non-Monetary (Coordinated),In-Kind
+CO,Returned Contributions,Refund
+CO,Other Receipts,
+CO,Non-Aggregated Receipts,

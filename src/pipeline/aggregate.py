@@ -214,6 +214,8 @@ def run():
                         WHERE committee_type IS NOT NULL
                     """)
 
+
+
                 if table == "contributions":
                     # contributor_type → canonical (keep raw for unmapped values)
                     con.execute(f"""
