@@ -11,9 +11,9 @@ AL,Returned (Cash Only),
 AL,In-Kind (Itemized),
 # == Alaska ====================================================================
 # Alaska contributor_type is an APOC registration status, not a contributor category.
-# "Candidate" = any registered APOC entity (individuals, PACs, campaign committees, self-funders)
-# "Group" = unregistered/small contributors (individuals and orgs under reporting threshold)
-# "Entity" = large donors acting through a business entity
+# Candidate = any registered APOC entity (individuals, PACs, campaign committees, self-funders)
+# Group = unregistered/small contributors (individuals and orgs under reporting threshold)
+# Entity = large donors acting through a business entity
 # None map cleanly to canonical categories — all suppressed in aggregate.
 AK,Group,
 AK,Candidate,
