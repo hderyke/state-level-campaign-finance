@@ -221,7 +221,7 @@ GA,Expenditure – Credit Card,Monetary
 GA,Expenditure – In-Kind Expenditure,In-Kind
 GA,Return Expenditure – Itemized Expenditure,Refund
 GA,Return Expenditure – Unitemized Expenditure,Refund
-# Legacy (media.ethics.ga.gov, 2006-2024) — transaction_type is "Expenditure – Type"
+# Legacy (media.ethics.ga.gov, 2006-2024) — transaction_type is Expenditure – Type
 # where Type is "Expenditure" or "In-Kind" (Reimbursement/Credit Card already
 # match the rows above).
 GA,Expenditure – Expenditure,Monetary
