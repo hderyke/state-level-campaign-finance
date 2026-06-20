@@ -222,12 +222,12 @@ GA,Expenditure – In-Kind Expenditure,In-Kind
 GA,Return Expenditure – Itemized Expenditure,Refund
 GA,Return Expenditure – Unitemized Expenditure,Refund
 # Legacy (media.ethics.ga.gov, 2006-2024) — transaction_type is Expenditure – Type
-# where Type is "Expenditure" or "In-Kind" (Reimbursement/Credit Card already
+# where Type is Expenditure or In-Kind (Reimbursement/Credit Card already
 # match the rows above).
 GA,Expenditure – Expenditure,Monetary
 GA,Expenditure – In-Kind,In-Kind
 # == Illinois ==================================================================
-# D2Part codes (Schedule B "part" of ISBE's expenditure form). 7B (loans made)
+# D2Part codes (Schedule B 'part' of ISBE's expenditure form). 7B (loans made)
 # is diverted to loans_debts.csv and not included here.
 IL,6B,Monetary
 IL,8B,Monetary
