@@ -125,6 +125,11 @@ GA,Interest Earned (Non-Investment Account),Other
 # where Type is just "Monetary" or "In-Kind" (no itemization-level sub type).
 GA,Contribution – Monetary,Monetary
 GA,Contribution – In-Kind,In-Kind
+# == Iowa ======================================================================
+# Iowa parser hard-codes transaction_type: "Monetary" for Sch-A cash contributions
+# and "In-Kind" for Sch-E in-kind contributions. No raw values from the source.
+IA,Monetary,Monetary
+IA,In-Kind,In-Kind
 # == Illinois ==================================================================
 # D2Part codes (Schedule A "part" of ISBE's contribution form). 3A (loans
 # received) is diverted to loans_debts.csv and not included here.

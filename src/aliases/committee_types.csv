@@ -123,6 +123,19 @@ GA,Recall Election - Name of Public Officer & Office Held,Other
 GA,Political Party,Party Committee
 GA,Individual,Other
 GA,Corporation,Other
+# == Iowa ======================================================================
+# committee_type comes from the PDF header "Committee Type:" field.
+IA,State House,Candidate Committee
+IA,State Senate,Candidate Committee
+IA,Statewide,Candidate Committee
+IA,County,Candidate Committee
+IA,City,Candidate Committee
+IA,School,Candidate Committee
+IA,Judicial,Candidate Committee
+IA,Iowa PAC,PAC
+IA,PAC,PAC
+IA,Political Party,Party Committee
+IA,Candidate,Candidate Committee
 # == Illinois ==================================================================
 # TypeOfCommittee is often blank; the parser infers "Candidate" for ~13K
 # blank rows that ARE linked to a candidate via CmteCandidateLinks.txt. The

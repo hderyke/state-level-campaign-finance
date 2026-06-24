@@ -226,6 +226,9 @@ GA,Return Expenditure – Unitemized Expenditure,Refund
 # match the rows above).
 GA,Expenditure – Expenditure,Monetary
 GA,Expenditure – In-Kind,In-Kind
+# == Iowa ======================================================================
+# Iowa parser hard-codes transaction_type: "Monetary" for all Sch-B expenditures.
+IA,Monetary,Monetary
 # == Illinois ==================================================================
 # D2Part codes (Schedule B 'part' of ISBE's expenditure form). 7B (loans made)
 # is diverted to loans_debts.csv and not included here.

@@ -113,6 +113,9 @@ GA,Candidate / Candidate Committee,Candidate Committee
 GA,Self,Individual
 GA,Lobbyist,Individual
 GA,Spouse / Dependent Child,Individual
+# == Iowa ======================================================================
+# Iowa Sch-A has no contributor_type column — contributor_type is left blank.
+# No alias entries needed.
 # == Illinois ==================================================================
 IL,Individual,Individual
 IL,Organization,Organization
