@@ -221,6 +221,7 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 | Idaho (ID) | ✅ | ✅ | Three source eras (2020+ portal, ES bulk, legacy PDFs) |
 | Illinois (IL) | ✅ | ✅ | Full-history flat files updated nightly; large |
 | Indiana (IN) | ✅ | ✅ | Bulk ZIP by year; entity sweep via CommitteeDetail pages |
+| Iowa (IA) | ✅ | ✅ | Downloads and parses tens of thousands of PDF reports |
 
 **Key:** ✅ Done &nbsp; ⚠️ Partial / known issues &nbsp; ❌ Broken
 
