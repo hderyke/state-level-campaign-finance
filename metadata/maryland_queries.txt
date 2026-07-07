@@ -1,0 +1,235 @@
+
+================================================================================
+  TOP 20 CONTRIBUTORS — total donated & top recipient committee  [MARYLAND]
+================================================================================
+  Contributor                                    Txns   Total Donated  Top Recipient                                       To Top
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  Geosor Corporation                                2  $   62,000,000  Democracy PAC                               $   62,000,000
+  Fund for Policy Reform                            2  $   60,000,000  Democracy PAC                               $   60,000,000
+  NA, NA                                          879  $   35,416,229  VoteVets PAC                                $   22,485,190
+  League of Conservation Voters, Inc.               6  $   19,000,000  LCV Victory Fund                            $   19,000,000
+  Everytown For Gun Safety Action Fund Inc          3  $   12,500,000  Everytown for Gun Safety Victory Fund       $   12,500,000
+  Smith, Brian                                     28  $    8,253,828  American Future                             $    8,250,000
+  Bloomberg, Michael                                4  $    7,100,000  LCV Victory Fund                            $    7,100,000
+  YOUNG AMERICANS FOR LIBERTY, INC.                20  $    6,701,258  Make Liberty Win                            $    6,701,258
+  Brouillard, Michael                              11  $    6,513,750  Everytown for Gun Safety Victory Fund       $    6,500,000
+  MOORE, WESTLEY WATENDE OMARI                     60  $    4,890,322  Moore Miller For Maryland Slate             $    4,664,000
+  Franchot, Peter                                  34  $    3,653,250  Franchot Anderson-Walker for Maryland Sla…  $    3,640,000
+  Vachon, Michael                                   2  $    3,500,000  Working Families Party PAC                  $    3,500,000
+  Democracy PAC                                     3  $    3,200,000  Working Families Party PAC                  $    3,200,000
+  CASA in Action                                   14  $    3,151,390  Casa in Action PAC                          $    3,151,390
+  America Votes                                     3  $    2,500,000  LCV Victory Fund                            $    2,500,000
+  CASCIANI, CHERYL A                              130  $    2,421,709  Gile, Dawn Committee to Elect               $      621,301
+  Movement Voter PAC                               26  $    2,296,500  Working Families Party PAC                  $    2,296,500
+  PEREZ, THOMAS EDWARD                             44  $    2,248,321  Perez and Sneed for Maryland Slate          $    2,218,578
+  MILLER, ARUNA                                    31  $    2,247,449  Moore Miller For Maryland Slate             $    2,225,600
+  Environmental Defense Fund Action                 1  $    2,000,000  LCV Victory Fund                            $    2,000,000
+
+================================================================================
+  TOP 20 RECIPIENT CANDIDATES — total contributions received  [MARYLAND]
+================================================================================
+  Candidate                                   St    Office                      Party            Txns  Total Received
+  ------------------------------------------  ----  --------------------------  ------------  -------  --------------
+  MOORE, WESTLEY WATENDE OMARI                MD    Governor/Lieutenant Gover…  Democrat      126,388  $   30,271,247
+  LIERMAN, BROOKE ELIZABETH                   MD                                Democrat       20,394  $    7,342,811
+  MILLER, ARUNA                               MD    Governor/Lieutenant Gover…  Democrat        1,916  $    4,161,385
+  BROWN, ANTHONY GREGORY                      MD    Attorney General            Democrat        6,841  $    3,715,429
+  Franchot, Peter                             MD    Governor                    Democrat        3,650  $    3,398,045
+  FERGUSON, WILLIAM CLAIBORNE                 MD    State Senator               Democrat        3,327  $    3,288,356
+  KING, JOHN B                                MD    Governor                    Democrat       11,535  $    3,067,798
+  FRIEDSON, ANDREW MARK                       MD    County Executive            Democrat        4,639  $    2,993,868
+  SCOTT, BRANDON MAURICE                      MD    Lieutenant Governor         Democrat        4,290  $    2,498,386
+  OLSZEWSKI, JOHN ANTHONY                     MD                                                3,138  $    2,379,916
+  BRAVEBOY, AISHA                             MD    County Executive            Democrat        4,096  $    2,261,619
+  JONES, ADRIENNE ALEASE                      MD    House of Delegates          Democrat        2,994  $    2,073,730
+  JONES, JULIAN EARL                          MD    County Executive            Democrat        3,266  $    1,993,151
+  ALSOBROOKS, ANGELA DENEECE                  MD    County Executive            Democrat        3,659  $    1,925,577
+  GUZZONE, GUY JOSEPH                         MD    State Senator               Democrat        2,671  $    1,783,667
+  CASSILLY, ROBERT GABRIEL                    MD    County Executive            Republican      3,498  $    1,764,761
+  PATOKA, ISRAEL CHAIM                        MD    County Executive            Democrat        3,738  $    1,759,906
+  BALL, CALVIN B                              MD    County Executive            Democrat        2,921  $    1,740,272
+  OMALLEY, CATHERINE CURRAN                   MD    Attorney General            Democrat        2,858  $    1,693,801
+  COX, DANIEL LEWIS                           MD    House of Delegates          Republican      6,484  $    1,692,254
+
+================================================================================
+  TOP 20 NON-CANDIDATE COMMITTEES — total contributions received  [MARYLAND]
+================================================================================
+  St    Committee                                   Type                             Txns  Total Received
+  ----  ------------------------------------------  ----------------------------  -------  --------------
+  MD    Democracy PAC                               Participating Organizations…        4  $  122,000,000
+  MD    LCV Victory Fund                                                              301  $   45,181,799
+  MD    VoteVets PAC                                                                1,510  $   36,482,656
+  MD    Coalition for Community Solar Access        Participating Organizations…    1,131  $   24,263,422
+  MD    Everytown for Gun Safety Victory Fund       Participating Organizations…       11  $   19,635,000
+  MD    Working Families Party PAC                  Independent Expenditure           184  $   16,595,296
+  MD    Service Employees International Union COPE                                     99  $   10,454,183
+  MD    Casa in Action PAC                          Super Political Action Comm…      654  $    8,380,477
+  MD    American Future                             Independent Expenditure             5  $    8,250,000
+  MD    Make Liberty Win                                                               34  $    7,579,361
+  MD    Moore Miller For Maryland Slate             Slate Committee                    51  $    6,941,309
+  MD    Democratic Senate Caucus Committee, Maryl…  Legislative Caucus Committee    1,039  $    6,411,435
+  MD    MSEA's Fund For Children And Public Educa…  Political Action Committee …  1,633,768  $    5,954,920
+  MD    Franchot Anderson-Walker for Maryland Sla…                                     76  $    4,363,650
+  MD    House Democratic Caucus Committee, Maryla…  Legislative Caucus Committee      574  $    4,261,400
+  MD    Laborers' Int'l Union of North America PA…                                     49  $    3,944,671
+  MD    Perez, Tom for Maryland                                                     7,992  $    3,932,821
+  MD    Democratic State Central Committee Of Mar…  Party Central Committee         1,577  $    3,750,587
+  MD    Perez and Sneed for Maryland Slate                                             57  $    3,124,018
+  MD    Schulz, Kelly For Governor                                                  5,967  $    2,786,695
+
+================================================================================
+  TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client  [MARYLAND]
+================================================================================
+  Payee                                          Txns  Total Received  Largest Client                                 From Client
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  Sway                                            138  $   17,873,288  American Future                             $   17,822,163
+  SKDK                                            106  $    8,507,088  Moore Miller For Maryland Slate             $    6,130,080
+  SMITH, MARY                                      57  $    7,036,109  Moore, Wes For Maryland                     $    4,949,000
+  Screen Strategies Media                          61  $    6,754,176  Brooke Lierman for Delgate                  $    2,291,443
+  Donohoe Partners, Inc.                           17  $    4,955,544  Greater Capital Area Association of REALT…  $    4,955,544
+  BRENNAN, THOMAS                                  19  $    4,287,500  Franchot, Peter Friends Of                  $    3,640,000
+  Base Builder                                    365  $    3,523,245  Casa in Action PAC                          $    3,413,866
+  Berlin Rosen                                    276  $    3,279,891  Maryland Justice & Public Safety PAC        $    1,422,143
+  Paychex                                         920  $    2,994,358  David Blair for Montgomery                  $    2,002,864
+  Mosaic Communications                            38  $    2,717,199  Adams, Tim(Timothy) Friends of              $    2,085,275
+
+================================================================================
+  ACTIVITY BY YEAR — contribution and expenditure row counts and totals  [MARYLAND]
+================================================================================
+    Year      Cont N        Cont Total      Expn N        Expn Total
+  ------  ----------  ----------------  ----------  ----------------
+    2005           0    $            0           1    $           72
+    2006           1    $        1,500           1    $        1,000
+    2010           1    $          250           0    $            0
+    2014           1    $          500          21    $        1,547
+    2015           2    $           71          59    $        3,060
+    2016         364    $       38,006          45    $       34,681
+    2017       1,249    $      131,554          75    $        6,515
+    2018       1,271    $    1,235,085         227    $    1,117,061
+    2019       2,258    $      631,967         349    $       50,983
+    2020     313,337    $   50,779,502      12,794    $    5,794,969
+    2021     517,996    $   78,788,406      37,426    $   26,001,306
+    2022     604,976    $  170,321,930      99,325    $  180,913,278
+    2023     443,628    $   43,756,293      30,228    $   18,959,066
+    2024     562,995    $   67,409,388      42,995    $   36,279,087
+    2025     550,182    $   63,538,141      41,341    $   26,539,178
+    2026     351,675    $  180,043,272      45,526    $   73,955,697
+
+================================================================================
+  CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total  [MARYLAND]
+================================================================================
+  Contributor Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Individual                       3,205,512    $  225,874,891      95.7%
+  Business/Group/Organization        109,120    $  189,047,198       3.3%
+  Political Action Committee          11,060    $    9,367,563       0.3%
+  Candidate Committee                  7,021    $   33,868,473       0.2%
+  Self                                 4,176    $    4,463,502       0.1%
+  Political Club                       3,503    $    3,119,346       0.1%
+  Labor Union                          3,056    $    6,126,345       0.1%
+  Federal Committee                    2,330    $   64,994,407       0.1%
+  Non-Profit Organization                830    $   99,695,993       0.0%
+  Registered Out-of-State (Non-…         598    $    1,166,292       0.0%
+  Unregistered Out-of-State (No…         521    $      889,977       0.0%
+  Participating Organization Co…         477    $    3,217,324       0.0%
+  Spouse                                 469    $      282,767       0.0%
+  (blank)                                374    $    5,995,092       0.0%
+  Party Central Committee                363    $      325,781       0.0%
+  Slate Committee                        215    $      534,775       0.0%
+  Legislative Party Caucus Comm…         163    $    2,778,115       0.0%
+  Person Responsible                     127    $    4,895,824       0.0%
+  Accredited Financial Institut…          11    $          840       0.0%
+  Ballot Issue Committee                  10    $       31,361       0.0%
+
+================================================================================
+  TOP 10 CONTRIBUTOR STATES — where the money comes from  [MARYLAND]
+================================================================================
+  State                        N             Total    % rows
+  ------------------  ----------  ----------------  --------
+  MD                   2,970,340    $  272,254,354      88.7%
+  PA                      79,273    $    5,798,347       2.4%
+  DC                      59,409    $   73,807,896       1.8%
+  VA                      54,787    $   19,160,231       1.6%
+  WV                      21,623    $      320,111       0.6%
+  NY                      19,667    $  121,830,283       0.6%
+  CA                      18,396    $   16,908,119       0.5%
+  NJ                      17,329    $    7,207,461       0.5%
+  DE                      13,956    $   61,094,484       0.4%
+  FL                      13,066    $    5,330,544       0.4%
+
+================================================================================
+  EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total  [MARYLAND]
+================================================================================
+  Transaction Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Expenditure                        302,027    $  316,025,194      97.3%
+  Independent Expenditure / Ele…       3,874    $   47,967,478       1.2%
+  Outstanding Obligation               2,244    $    2,712,579       0.7%
+  Outstanding Obligation Payment       1,556    $    2,357,292       0.5%
+  Outstanding Obligation Forgiv…         476    $      357,390       0.2%
+  Return Expenditure                     238    $      237,567       0.1%
+
+================================================================================
+  10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check  [MARYLAND]
+================================================================================
+  Date          Contributor                         Type    Committee                                       Amount
+  ------------  ----------------------------------  ------  ------------------------------------  ----------------
+  2026-06-02    Geosor Corporation                  Busin…  Democracy PAC                           $   52,000,000
+  2026-06-02    Fund for Policy Reform              Non-P…  Democracy PAC                           $   50,000,000
+  2021-12-15    League of Conservation Voters, In…  Non-P…  LCV Victory Fund                        $   12,000,000
+  2026-06-02    Fund for Policy Reform              Non-P…  Democracy PAC                           $   10,000,000
+  2026-06-02    Geosor Corporation                  Busin…  Democracy PAC                           $   10,000,000
+  2023-12-20    Everytown For Gun Safety Action F…  Busin…  Everytown for Gun Safety Victory Fu…    $    7,000,000
+  2024-08-22    Brouillard, Michael                 Feder…  Everytown for Gun Safety Victory Fu…    $    5,000,000
+  2022-09-16    Bloomberg, Michael                  Indiv…  LCV Victory Fund                        $    5,000,000
+  2020-02-06    NA, NA                              Feder…  VoteVets PAC                            $    3,298,000
+  2024-10-07    Everytown For Gun Safety Action F…  Busin…  Everytown for Gun Safety Victory Fu…    $    3,000,000
+
+================================================================================
+  10 RANDOM CONTRIBUTION ROWS — raw data spot check  [MARYLAND]
+================================================================================
+  Date          Contributor                   T            Amount  Committee                       City                St    Employer                Occupation          
+  ------------  ----------------------------  -----  ------------  ------------------------------  ------------------  ----  ----------------------  --------------------
+  2020-03-12    MOLNAR, BETH ANN              Indi…  $            3  MSEA's Fund For Children And …  Frederick           MD                                                
+  2020-03-12    HARRIS, TONI                  Indi…  $            1  MSEA's Fund For Children And …  Raleigh             NC                                                
+  2020-04-08    PECSON, MARILYN NICOLE        Indi…  $            2  MSEA's Fund For Children And …  Frederick           MD                                                
+  2020-06-05    PASSALAQUA, MARION DEON       Indi…  $            5  MSEA's Fund For Children And …  Landover            MD                                                
+  2020-07-22    Concentra Health Services I…  Busi…  $          250  Feldman, Brian Citizens For     Mechanicsburg       PA                                                
+  2020-12-03    SHEKU, WANAKEE                Indi…  $            5  MSEA's Fund For Children And …  Beltsville          MD                                                
+  2021-12-21    Carrington, Carl C            Indi…  $           10  Greater Capital Area Politica…  Gaithersburg        MD                                                
+  2022-08-23    Hollenkamp, Mary              Indi…  $           25  Cox, Dan for Governor           South Saint Paul    MN                                                
+  2022-10-05    Riemer, Hans                  Indi…  $           50  Moore, Wes For Maryland         Takoma Park         MD                                                
+  2022-10-06    Farmer, Yvette                Indi…  $           25  Ball, Calvin Team, The          Ellicott City       MD                                                
+
+================================================================================
+  10 MOST RECENT CONTRIBUTIONS — data freshness check  [MARYLAND]
+================================================================================
+  Date          Contributor                       Type            Amount  Committee                         
+  ------------  --------------------------------  ------  --------------  ----------------------------------
+  2026-06-25    Maryland State Board of Electio…  Busin…  $        2,774  Sneed, Shannon For Maryland       
+  2026-06-23    Shockley, Virgil Lee              Spouse  $          420  Shockley, Virgil Campaign Fund    
+  2026-06-18    Bazelon, Tricia Norman            Indiv…  $          300  Walsh, Liz (Elizabeth) Friends of 
+  2026-06-17    Smith, Brian                      Feder…  $    2,500,000  American Future                   
+  2026-06-15    Heverling, Dan Norman             Indiv…  $           20  Walsh, Liz (Elizabeth) Friends of 
+  2026-06-15    ElHaggan, Ahmed Norman            Indiv…  $          100  Walsh, Liz (Elizabeth) Friends of 
+  2026-06-15    Martinez, Alicia Norman           Indiv…  $            5  Walsh, Liz (Elizabeth) Friends of 
+  2026-06-15    Sorauf, Nicholas Norman           Indiv…  $           50  Walsh, Liz (Elizabeth) Friends of 
+  2026-06-15    Karas, Michael                    Indiv…  $          150  Walsh, Liz (Elizabeth) Friends of 
+  2026-06-15    State of Maryland Comptroller     Busin…  $        1,222  Bratt, Jonathan Friends of        
+
+================================================================================
+  10 MOST RECENT EXPENDITURES — data freshness check  [MARYLAND]
+================================================================================
+  Date          Payee                                     Amount  Committee                     Type                  
+  ------------  --------------------------------  --------------  ----------------------------  ----------------------
+  2026-07-01                                      $      100,000  National Association of REA…  Expenditure           
+  2026-07-01    Charm City Sings                  $        4,399  Expanding Opportunities Mar…  Expenditure           
+  2026-06-30    GOP Compliance                    $          190  Change Annapolis Victory PAC  Expenditure           
+  2026-06-29    Amalgamated Bank                  $           32  Expanding Opportunities Mar…  Expenditure           
+  2026-06-26    Milanytch, Alexa                  $        5,000  Expanding Opportunities Mar…  Expenditure           
+  2026-06-25    Heartland Compliance              $       10,000  Expanding Opportunities Mar…  Expenditure           
+  2026-06-24    Char Hope Foundation              $          841  Evans, Jay (Jason) Friends …  Expenditure           
+  2026-06-24    Ace Printing and Mailing          $          661  Shockley, Virgil Campaign F…  Expenditure           
+  2026-06-23    Fieldworks LLC                    $        3,965  American Future               Independent Expenditu…
+  2026-06-23    Fieldworks LLC                    $        3,965  American Future               Independent Expenditu…
+

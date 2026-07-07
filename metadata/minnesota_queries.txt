@@ -1,0 +1,193 @@
+
+================================================================================
+  TOP 20 CONTRIBUTORS — total donated & top recipient committee  [MINNESOTA]
+================================================================================
+  Contributor                                    Txns   Total Donated  Top Recipient                                       To Top
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  Education Minnesota                             248  $   26,319,833  Education Minn PAC                          $   26,319,833
+  MN DFL Senate Caucus                            840  $   23,659,054  Minn DFL State Central Committee            $   23,568,347
+  House DFL Caucus                                758  $   18,034,835  Minn DFL State Central Committee            $   18,032,658
+  Education Minn PAC                            1,348  $   13,456,755  Minn DFL State Central Committee            $    4,902,925
+  AFSCME                                           73  $   12,732,185  AFSCME                                      $    4,003,704
+  WIN Minnesota Political Action Fund              38  $   12,390,407  Alliance for a Better Minnesota Action Fu…  $   11,620,807
+  Laborers' District Council MN & ND              119  $   10,331,565  Laborers District Council of Minn & ND Po…  $   10,331,565
+  Messinger, Alida                                121  $   10,271,237  Minn DFL State Central Committee            $    3,470,000
+  2022 Fund (fka 2018 Fund)                        19  $    8,492,000  Alliance for a Better Minnesota Action Fu…  $    6,434,000
+  AFSCME Council 5                                 94  $    8,270,158  AFSCME Council 5 PEOPLE Fund                $    7,012,000
+  SEIU International                               27  $    8,040,848  SEIU Minn State Council Political Fund      $    6,917,550
+  DLCC Victory Fund                                82  $    7,364,733  DFL House Caucus                            $    3,867,144
+  DGA Action                                       13  $    7,150,000  Alliance for a Better Minnesota Action Fu…  $    7,150,000
+  Laborers District Council of Minn & ND Po…      710  $    6,995,021  Minn DFL State Central Committee            $    3,267,871
+  WIN MINNESOTA                                    67  $    6,700,366  WIN Minnesota Political Action Fund         $    4,354,870
+  MN DFL State Central Committee                  834  $    6,506,984  Minnesota Victory PAC                       $    2,789,316
+  SEIU Minn State Council Political Fund          308  $    6,492,241  2024 Fund                                   $    2,425,000
+  State Victory Action                             13  $    5,897,932  2024 Fund                                   $    4,119,500
+  2018 Fund                                        18  $    5,687,886  Alliance for a Better Minnesota Action Fu…  $    5,687,886
+  Shakopee Mdewakanton Sioux Community             56  $    5,240,170  Shakopee Mdewakanton Sioux                  $    4,717,170
+
+================================================================================
+  TOP 20 RECIPIENT CANDIDATES — total contributions received  [MINNESOTA]
+================================================================================
+  Candidate                                   St    Office                      Party            Txns  Total Received
+  ------------------------------------------  ----  --------------------------  ------------  -------  --------------
+  Walz, Tim                                   MN    Governor                    DFL            68,616  $   16,358,411
+  Klobuchar, Amy                              MN    Governor                    DFL             8,137  $    4,674,573
+  Jensen, Scott, Dr                           MN    Governor                    RPM            10,569  $    3,641,043
+  Ellison, Keith                              MN    Attorney General            DFL            11,121  $    3,258,894
+  Simon, Steve                                MN    Secretary of State          DFL             7,584  $    2,128,597
+  Pawlenty, Timothy J                         MN    Governor                    RPM             1,560  $    2,083,288
+  Johnson, Jeff R                             MN    Governor                    RPM             3,167  $    1,956,611
+  Murphy, Erin                                MN    Senate                      DFL             4,721  $    1,356,853
+  Schultz, James                              MN    Attorney General            RPM             1,752  $    1,103,864
+  Qualls, Kendall                             MN    Governor                    RPM             1,972  $      998,795
+  Swanson, Lori                               MN    Attorney General            DFL             1,421  $      864,984
+  Demuth, Lisa                                MN    Governor                    RPM               887  $      855,811
+  Fowke, Kathleen                             MN    Senate                      RPM               429  $      848,849
+  Gazelka, Paul                               MN    Governor                    RPM               687  $      847,323
+  Wardlow, Doug                               MN    Attorney General            RPM             2,078  $      797,261
+  Coleman, Christopher B                      MN    Governor                    DFL               956  $      765,328
+  Lindell, Mike                               MN    Governor                    RPM               765  $      606,236
+  Madel, Chris                                MN    Governor                    RPM               180  $      587,621
+  Morrison, Kelly                             MN    Senate                      DFL             1,132  $      567,930
+  Thissen, Paul                               MN    Supreme Court               N/A               788  $      526,407
+
+================================================================================
+  TOP 20 NON-CANDIDATE COMMITTEES — total contributions received  [MINNESOTA]
+================================================================================
+  St    Committee                                   Type                             Txns  Total Received
+  ----  ------------------------------------------  ----------------------------  -------  --------------
+  MN    Minn DFL State Central Committee            Party Committee                 7,639  $   97,181,137
+  MN    DGA Victory Fund                            PAC                             3,522  $   50,385,160
+  MN    Alliance for a Better Minnesota Action Fu…  PAC                               231  $   42,209,719
+  MN    DFL House Caucus                            Party Committee                11,159  $   42,138,677
+  MN    DFL Senate Caucus                           Party Committee                 8,759  $   31,295,002
+  MN    Education Minn PAC                          PAC                               288  $   28,892,714
+  MN    2024 Fund                                   PAC                               137  $   20,644,250
+  MN    HRCC                                        Party Committee                 8,139  $   17,771,419
+  MN    WIN Minnesota Political Action Fund         PAC                               231  $   15,796,801
+  MN    Senate Victory Fund (SVF)                   Party Committee                 5,398  $   15,099,598
+  MN    Laborers District Council of Minn & ND Po…  PAC                               137  $   10,824,691
+  MN    DLCC Victory Fund                           PAC                             2,682  $   10,565,994
+  MN    SEIU Minn State Council Political Fund      PAC                               107  $    9,807,329
+  MN    Republican Party of Minn                    Party Committee                 2,715  $    9,281,270
+  MN    Pro Jobs Majority                           PAC                               189  $    8,469,357
+  MN    IBEW - COPE                                 PAC                             8,358  $    7,918,434
+  MN    Planned Parenthood of Minn Pol Action Fund  PAC                               136  $    7,766,405
+  MN    AFSCME Council 5 PEOPLE Fund                PAC                                80  $    7,276,317
+  MN    Minn Jobs Coalition Legislative Fund        PAC                               158  $    7,264,892
+  MN    Advance Minnesota Independent Expenditure…  PAC                               120  $    6,928,754
+
+================================================================================
+  TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client  [MINNESOTA]
+================================================================================
+  Payee                                          Txns  Total Received  Largest Client                                 From Client
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  MN DFL State Central Committee                4,294  $   59,921,411  DFL Senate Caucus                           $   16,457,407
+  MN DFL House Caucus                           4,074  $   33,301,012  DLCC Victory Fund                           $    3,867,144
+  Alliance for a Better Minnesota Action Fu…       91  $   30,560,082  2024 Fund                                   $   18,065,786
+  Drake Bank Federal                            2,090  $   26,229,032  Minn DFL State Central Committee            $   26,212,282
+  MN DFL Senate Caucus                          3,644  $   25,580,329  DLCC Victory Fund                           $    3,341,589
+  Democratic Governors Association                110  $   25,274,310  DGA Victory Fund                            $   25,148,383
+  Clarify Agency                                  717  $   20,012,267  Alliance for a Better Minnesota Action Fu…  $   15,543,973
+  Great American Media                             34  $   17,844,533  Alliance for a Better Minnesota Action Fu…  $   15,184,833
+  House Republican Campaign Committee (HRCC)    3,704  $   10,790,667  Shakopee Mdewakanton Sioux                  $      660,150
+  MINNESOTA DEMOCRATIC-FARMER-LABOR PARTY         425  $    9,648,675  DFL House Caucus                            $    9,646,820
+
+================================================================================
+  ACTIVITY BY YEAR — contribution and expenditure row counts and totals  [MINNESOTA]
+================================================================================
+    Year      Cont N        Cont Total      Expn N        Expn Total
+  ------  ----------  ----------------  ----------  ----------------
+    2015      30,908    $   25,136,267      16,877    $   23,626,871
+    2016      34,318    $   68,844,551      46,704    $   85,800,390
+    2017      30,008    $   25,100,933      19,580    $   20,944,653
+    2018      56,064    $  114,325,160      57,388    $  138,119,266
+    2019      29,036    $   29,110,209      20,597    $   25,970,418
+    2020      45,734    $   87,976,744      49,846    $  111,564,071
+    2021      41,746    $   38,024,491      18,671    $   26,891,340
+    2022      95,438    $  164,403,726      62,539    $  211,068,083
+    2023      34,840    $   37,234,190      20,533    $   32,355,781
+    2024      57,981    $   93,343,408      51,253    $  116,343,887
+    2025      71,933    $   50,274,742      30,868    $   48,851,453
+    2026      22,459    $   33,661,305       7,554    $   24,770,097
+
+================================================================================
+  CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total  [MINNESOTA]
+================================================================================
+  Contributor Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Individual                         443,844    $  242,723,107      80.6%
+  Political Committee/Fund            41,035    $  179,795,261       7.5%
+  Lobbyist                            21,780    $    7,448,974       4.0%
+  Other                               19,056    $  229,064,739       3.5%
+  Party Unit                          10,929    $   67,541,186       2.0%
+  Candidate Committee                  8,104    $   17,697,173       1.5%
+  Self                                 3,966    $    5,102,355       0.7%
+  (blank)                                967    $    2,528,882       0.2%
+  Unknown/Null                           556    $   15,359,439       0.1%
+  Registered with Hennepin Coun…         228    $      174,608       0.0%
+
+================================================================================
+  TOP 10 CONTRIBUTOR STATES — where the money comes from  [MINNESOTA]
+================================================================================
+  State                        N             Total    % rows
+  ------------------  ----------  ----------------  --------
+  MN                     447,408    $  535,178,947      81.3%
+  CA                      13,451    $   20,157,246       2.4%
+  CO                       7,285    $    3,557,143       1.3%
+  NY                       5,876    $   27,936,369       1.1%
+  FL                       5,749    $    5,630,625       1.0%
+  MI                       5,128    $    1,390,235       0.9%
+  IL                       4,781    $   11,350,420       0.9%
+  TX                       4,275    $    3,497,260       0.8%
+  DC                       4,138    $   87,725,009       0.8%
+  WI                       3,965    $    1,722,818       0.7%
+
+================================================================================
+  EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total  [MINNESOTA]
+================================================================================
+  Transaction Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  General Expenditure                128,494    $  276,812,803      31.9%
+  Campaign Expenditure               118,283    $  122,030,742      29.4%
+  Contribution                        58,534    $  258,223,575      14.5%
+  Non-Campaign Disbursement           32,933    $   10,997,769       8.2%
+  Independent Expenditure For         30,549    $   80,472,205       7.6%
+  In-Kind                             21,448    $   18,039,290       5.3%
+  Independent Expenditure Again…       9,335    $   96,289,418       2.3%
+  In-Kind IE                           1,065    $      858,554       0.3%
+  Other Disbursement                     918    $      905,290       0.2%
+  Ballot Question Expenditure            851    $    1,676,665       0.2%
+
+================================================================================
+  10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check  [MINNESOTA]
+================================================================================
+  Date          Contributor                         Type    Committee                                       Amount
+  ------------  ----------------------------------  ------  ------------------------------------  ----------------
+  2023-10-30    Pritzker, J B                       Indiv…  DGA Victory Fund                        $    2,000,000
+  2022-07-15    Pritzker, Jay                       Indiv…  DGA Victory Fund                        $    2,000,000
+  2024-01-02    HDR Inc Employee Owners PAC         Other   HDR, Inc Employee Owners PAC            $    1,525,156
+  2022-10-31    MN DFL Senate Caucus                Party…  Minn DFL State Central Committee        $    1,524,785
+  2022-10-21    MN DFL Senate Caucus                Party…  Minn DFL State Central Committee        $    1,513,405
+  2024-05-31    Munger, Barry                       Indiv…  The PAC for Minnesota's Future          $    1,500,000
+  2020-10-06    2020 Fund (fka 2018 Fund)           Polit…  Alliance for a Better Minnesota Act…    $    1,500,000
+  2020-08-12    SEIU International                  Other   SEIU Minn State Council Political F…    $    1,490,000
+  2022-07-19    WIN Minnesota Political Action Fu…  Polit…  Alliance for a Better Minnesota Act…    $    1,450,000
+  2016-09-02    WIN Minnesota Political Action Fu…  Polit…  Alliance for a Better Minnesota Act…    $    1,223,600
+
+================================================================================
+  10 RANDOM CONTRIBUTION ROWS — raw data spot check  [MINNESOTA]
+================================================================================
+  Date          Contributor                   T            Amount  Committee                       City                St    Employer                Occupation          
+  ------------  ----------------------------  -----  ------------  ------------------------------  ------------------  ----  ----------------------  --------------------
+  2016-07-27    Anderson, Paul                Indi…  $           50  Carnahan (Jennifer) for Senate                      MN    Hubbard Broadcasting                        
+  2017-05-10    Buttrick, Stuart R            Indi…  $          270  Faegre Drinker State Politica…                      MN    Faegre Baker Daniels …                      
+  2018-10-31    Novachek, Frank J             Indi…  $           28  Xcel Energy Employees PAC                           CO    Xcel Energy                                 
+  2018-11-09    Fitzgerald, Daniel L          Indi…  $            5  MAPE-PAC                                            MN    State of MN                                 
+  2020-01-15    MN State Patrol Troopers As…  Poli…  $          250  Poppe (Jeanne) for the People…                      MN                                                
+  2020-06-21    Pedersen, Lee                 Indi…  $          100  DFL House Caucus                                    MN    Retired                                     
+  2021-06-04    Kelly, Thomas O               Indi…  $           87  Dorsey Political Fund                               MN    Self employed Partner…                      
+  2022-07-17    Mattison, Thomas              Indi…  $          250  Steve Cwodzinski for State Se…                      MN    Sun Country Airlines                        
+  2022-11-27    Maravelas, Gregory            Indi…  $            5  Tim Walz for Governor                               MA    Not Employed                                
+  2026-02-28    Ryan, Patricia                Indi…  $           50  Minnesotans for Klobuchar (Am…                      VT    Not Employed                                
+

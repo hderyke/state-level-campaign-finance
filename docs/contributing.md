@@ -798,10 +798,10 @@ python3 src/pipeline/scrapers/{state}.py
 python3 src/pipeline/parsers/{state}.py
 
 # Validator — checks cleaned CSVs
-python3 tests/validate.py {state}
+python3 src/pipeline/validate.py {state}
 
 # Spot-check queries — run after tabulate
-python3 tests/test_queries.py {state}
+python3 src/pipeline/queries.py {state}
 ```
 
 Once both pass individually, run the full pipeline:

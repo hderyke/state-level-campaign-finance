@@ -1,0 +1,235 @@
+
+================================================================================
+  TOP 20 CONTRIBUTORS — total donated & top recipient committee  [MASSACHUSETTS]
+================================================================================
+  Contributor                                    Txns   Total Donated  Top Recipient                                       To Top
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  Massachusetts Teachers Association              510  $   60,137,834  FAIR SHARE MASSACHUSETTS                    $   19,562,715
+  Massachusetts Health & Hospital Associati…      304  $   25,752,488  COALITION TO PROTECT PATIENT SAFETY         $   25,705,949
+  Lyft, Inc.                                       30  $   18,426,517  FLEXIBILITY AND BENEFITS FOR MASSACHUSETT…  $   14,629,222
+  REPUBLICAN GOVERNORS ASSOCIATION                 18  $   17,375,000  COMMONWEALTH FUTURE INDEPENDENT EXPENDITU…  $   17,375,000
+  Families For Excellent Schools Advocacy, …       73  $   16,349,809  GREAT SCHOOLS MASSACHUSETTS                 $   16,349,809
+  Minogue, Michael                                 39  $   14,527,540  MINOGUE COMMITTEE                           $   14,500,000
+  Maplebear Inc. D/b/a Instacart                   12  $   13,585,560  FLEXIBILITY AND BENEFITS FOR MASSACHUSETT…  $   13,585,560
+  Massachusetts Nurses Association                273  $   12,616,905  COMMITTEE TO ENSURE SAFE PATIENT CARE       $   11,562,434
+  Uber Technologies, Inc.                          37  $   12,110,845  FLEXIBILITY AND BENEFITS FOR MASSACHUSETT…  $    6,612,416
+  Healey, Kerry                                    85  $   11,191,265  HEALEY COMMITTEE                            $   11,165,000
+  Republican Governors Association                 10  $   10,735,000  COMMONWEALTH FUTURE INDEPENDENT EXPENDITU…  $   10,500,000
+  National Education Association                   14  $   10,600,980  FAIR SHARE MASSACHUSETTS                    $    7,225,980
+  Gabrieli, Christopher                           107  $    9,368,750  GABRIELI COMMITTEE                          $    9,303,600
+  Liss Riordan, Shannon                            12  $    9,300,500  LISS-RIORDAN COMMITTEE                      $    9,300,000
+  Penn National Gaming, Inc.                       20  $    8,987,522  COALITION TO PROTECT MASS JOBS (NO ON 3 C…  $    8,987,522
+  AMERICAN BEVERAGE ASSOCIATION                    14  $    8,262,364  NO ON QUESTION 2: STOP FORCED DEPOSITS      $    8,262,364
+  DoorDash, Inc.                                   34  $    8,045,817  FLEXIBILITY AND BENEFITS FOR MASSACHUSETT…  $    4,324,878
+  Baker Committee                                   8  $    7,867,959  BAKER COMMITTEE                             $    7,687,129
+  DoorDash, Inc. (Loan)                             2  $    7,337,797  FLEXIBILITY AND BENEFITS FOR MASSACHUSETT…  $    7,337,797
+  Uber Technologies, Inc. (loan)                    1  $    6,787,797  FLEXIBILITY AND BENEFITS FOR MASSACHUSETT…  $    6,787,797
+
+================================================================================
+  TOP 20 RECIPIENT CANDIDATES — total contributions received  [MASSACHUSETTS]
+================================================================================
+  Candidate                                   St    Office                      Party            Txns  Total Received
+  ------------------------------------------  ----  --------------------------  ------------  -------  --------------
+  BAKER, CHARLES                              MA    Statewide                   Republican     95,415  $   42,000,338
+  HEALEY, MAURA T.                            MA    Statewide                   Democratic     84,358  $   23,739,211
+  PATRICK, DEVAL L.                           MA    Statewide                   Democratic     76,348  $   22,799,682
+  HEALEY, KERRY MURPHY                        MA    Statewide                   Republican     27,179  $   18,668,736
+  POLITO, KARYN E.                            MA    Statewide                   Republican     36,392  $   17,084,129
+  ROMNEY, MITT                                MA    Statewide                   Republican     44,647  $   16,957,410
+  WALSH, MARTIN J.                            MA    Mayoral                     Democratic     47,201  $   16,615,676
+  GABRIELI, CHRISTOPHER                       MA    Statewide                   Democratic      4,432  $   16,507,202
+  MINOGUE, MICHAEL                            MA    Statewide                   Republican      2,463  $   15,992,515
+  REILLY, THOMAS F.                           MA    Statewide                   Democratic     19,454  $   12,344,468
+  WU, MICHELLE                                MA    Mayoral                     Democratic     68,012  $   11,348,781
+  MURRAY, TIMOTHY P.                          MA    Statewide                   Democratic     33,605  $   10,419,704
+  LISS-RIORDAN, SHANNON                       MA    Statewide                   Democratic      1,317  $    9,821,953
+  COAKLEY, MARTHA                             MA    Statewide                   Democratic     31,543  $    9,687,368
+  CAHILL, TIMOTHY                             MA    Statewide                                  22,389  $    9,271,496
+  GOLDBERG, DEBORAH                           MA    Statewide                   Democratic     10,599  $    8,451,925
+  GROSSMAN, STEVEN                            MA    Statewide                   Democratic     16,166  $    8,386,171
+  CAMPBELL, ANDREA JOY                        MA    Statewide                   Democratic     31,107  $    8,192,916
+  MENINO, THOMAS                              MA    Mayoral                     Democratic     25,543  $    7,876,696
+  DELEO, ROBERT A.                            MA    House                       Democratic     27,624  $    6,344,442
+
+================================================================================
+  TOP 20 NON-CANDIDATE COMMITTEES — total contributions received  [MASSACHUSETTS]
+================================================================================
+  St    Committee                                   Type                             Txns  Total Received
+  ----  ------------------------------------------  ----------------------------  -------  --------------
+  MA    FLEXIBILITY AND BENEFITS FOR MASSACHUSETT…  Ballot Measure                     68  $   39,636,545
+  MA    FLEXIBILITY AND BENEFITS FOR MASSACHUSETT…  Ballot Measure                     72  $   34,230,263
+  MA    FAIR SHARE MASSACHUSETTS                    Ballot Measure                  1,093  $   33,864,659
+  MA    COMMONWEALTH FUTURE INDEPENDENT EXPENDITU…  Independent Expenditure            48  $   33,261,851
+  MA    COALITION TO PROTECT PATIENT SAFETY         Ballot Measure                    497  $   27,915,008
+  MA    COALITION FOR SAFE AND SECURE DATA          Ballot Measure                     50  $   26,949,519
+  MA    MASSACHUSETTS RIGHT TO REPAIR COMMITTEE     Ballot Measure                    241  $   26,646,832
+  MA    DEMOCRATIC STATE COMMITTEE                  Party Committee                18,262  $   26,487,154
+  MA    GREAT SCHOOLS MASSACHUSETTS                 Ballot Measure                    373  $   25,444,782
+  MA    REPUBLICAN STATE COMMITTEE                  Party Committee                34,461  $   20,396,766
+  MA    FAMILIES FOR EXCELLENT SCHOOLS - ADVOCACY…  Ballot Measure                     87  $   19,779,127
+  MA    COMMITTEE FOR HIGH STANDARDS NOT HIGH STA…  Ballot Measure                     84  $   19,556,959
+  MA    SAVE OUR PUBLIC SCHOOLS                     Ballot Measure                    500  $   19,468,239
+  MA    COALITION TO PROTECT MASS JOBS (NO ON 3 C…  Ballot Measure                     46  $   19,432,763
+  MA    COALITION TO STOP THE TAX HIKE AMENDMENT    Ballot Measure                    487  $   15,187,637
+  MA    MASS INDEPENDENT EXPENDITURE POLITICAL AC…  Independent Expenditure            75  $   13,826,971
+  MA    COMMITTEE TO ENSURE SAFE PATIENT CARE       Ballot Measure                  1,023  $   13,694,016
+  MA    1199 SEIU MA PAC                            PAC                           875,758  $   12,617,529
+  MA    RANKED CHOICE VOTING 2020 COMMITTEE         Ballot Measure                  4,188  $   10,537,432
+  MA    NO ON QUESTION 2: STOP FORCED DEPOSITS      Ballot Measure                     42  $    9,537,569
+
+================================================================================
+  TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client  [MASSACHUSETTS]
+================================================================================
+  Payee                                          Txns  Total Received  Largest Client                                 From Client
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  Citizens Bank                                12,097  $   26,084,730  PATRICK COMMITTEE                           $    5,816,437
+  GRAY MEDIA                                       64  $   19,587,510  MASSACHUSETTS RIGHT TO REPAIR COMMITTEE     $   19,373,584
+  GMMB, Inc.                                       38  $   19,294,793  COALITION TO PROTECT PATIENT SAFETY         $   18,571,802
+  Srcp Media Inc.                                  19  $   18,728,929  GREAT SCHOOLS MASSACHUSETTS                 $   18,728,929
+  Buying Time, LLC                                 18  $   18,386,487  COALITION FOR SAFE AND SECURE DATA          $   18,088,987
+  MENTZER MEDIA                                    14  $   17,736,302  COMMONWEALTH FUTURE INDEPENDENT EXPENDITU…  $   17,736,302
+  Bank of America                               8,075  $   17,413,499  HEALEY COMMITTEE                            $    8,937,645
+  Pier 91 Media                                    22  $   15,310,536  FLEXIBILITY AND BENEFITS FOR MASSACHUSETT…  $    5,560,000
+  Great Schools Massachusetts Ballot Questi…       34  $   15,099,500  FAMILIES FOR EXCELLENT SCHOOLS - ADVOCACY…  $   15,099,500
+  The New Media Firm, Inc.                         46  $   15,037,008  RANKED CHOICE VOTING 2020 COMMITTEE         $    5,651,998
+
+================================================================================
+  ACTIVITY BY YEAR — contribution and expenditure row counts and totals  [MASSACHUSETTS]
+================================================================================
+    Year      Cont N        Cont Total      Expn N        Expn Total
+  ------  ----------  ----------------  ----------  ----------------
+    2000           1    $           40           1    $          516
+    2001          25    $        5,391           2    $          300
+    2002     167,615    $   60,385,076      54,588    $   68,007,575
+    2003      67,985    $   14,290,313      28,115    $   13,107,687
+    2004     134,580    $   29,406,923      51,921    $   31,439,219
+    2005     136,581    $   33,528,989      44,679    $   30,508,572
+    2006     202,508    $   99,575,600      61,194    $   98,399,283
+    2007     109,463    $   23,999,948      41,520    $   21,358,753
+    2008     126,275    $   36,823,961      51,161    $   36,129,751
+    2009     124,237    $   31,456,349      45,522    $   27,566,579
+    2010     232,838    $   76,334,842      79,283    $   77,042,395
+    2011     121,274    $   23,784,087      49,704    $   22,732,735
+    2012     137,234    $   36,438,687      57,989    $   34,998,846
+    2013     175,089    $   44,282,732      57,144    $   41,963,321
+    2014     235,661    $  152,247,004      75,802    $  145,918,769
+    2015     165,708    $   35,871,057      59,116    $   28,889,679
+    2016     210,790    $  127,490,729      68,071    $  112,658,243
+    2017     229,790    $   40,053,225      69,661    $   36,281,552
+    2018     279,962    $  112,619,433      82,786    $  121,161,991
+    2019     291,908    $   37,170,551      66,297    $   32,165,416
+    2020     370,241    $   89,165,382      58,507    $   95,436,000
+    2021     460,902    $   81,056,880      72,177    $   61,732,954
+    2022     478,547    $  173,173,994      87,267    $  163,516,981
+    2023     412,791    $   51,476,722      75,452    $   48,954,528
+    2024     417,247    $  107,796,790      78,237    $   68,602,842
+    2025     471,621    $   67,437,822      85,815    $   59,920,954
+    2026     202,821    $   32,837,572      38,654    $   25,884,875
+
+================================================================================
+  CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total  [MASSACHUSETTS]
+================================================================================
+  Contributor Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Individual                       5,759,069    $1,034,201,176      96.6%
+  Committee                          134,792    $  129,828,996       2.3%
+  Union/Association                   57,965    $  247,765,655       1.0%
+  Other                               10,293    $   46,005,371       0.2%
+  Business/Corporation                 1,576    $  160,909,150       0.0%
+
+================================================================================
+  TOP 10 CONTRIBUTOR STATES — where the money comes from  [MASSACHUSETTS]
+================================================================================
+  State                        N             Total    % rows
+  ------------------  ----------  ----------------  --------
+  MA                   5,161,293    $1,168,838,969      86.5%
+  (blank)                435,840    $   16,989,760       7.3%
+  NH                      67,914    $    7,660,917       1.1%
+  NY                      42,385    $   66,836,026       0.7%
+  RI                      39,180    $    6,188,768       0.7%
+  CA                      30,182    $   93,631,670       0.5%
+  CT                      25,422    $    8,884,430       0.4%
+  FL                      20,174    $   11,248,601       0.3%
+  DC                      14,705    $   96,272,579       0.2%
+  MD                       9,676    $   17,643,658       0.2%
+
+================================================================================
+  EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total  [MASSACHUSETTS]
+================================================================================
+  Transaction Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Bank-Reported Expenditure          758,057    $  743,751,607      49.2%
+  Expenditure                        632,233    $  649,899,123      41.0%
+  Merchant Provider Fee               94,443    $    4,509,878       6.1%
+  Contribution to Registered Co…      33,086    $   32,459,074       2.1%
+  Reimbursement                       10,945    $    5,169,022       0.7%
+  Independent Expenditure              5,832    $   57,053,921       0.4%
+  Administrative Expense               2,747    $    6,783,140       0.2%
+  Credit Card Payment                  1,968    $    4,131,619       0.1%
+  Out-of-Pocket Candidate Expen…       1,352    $      396,335       0.1%
+  Vendor Payment                          32    $      228,254       0.0%
+
+================================================================================
+  10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check  [MASSACHUSETTS]
+================================================================================
+  Date          Contributor                         Type    Committee                                       Amount
+  ------------  ----------------------------------  ------  ------------------------------------  ----------------
+  2022-01-28    Maplebear Inc. D/b/a Instacart      Busin…  FLEXIBILITY AND BENEFITS FOR MASSAC…    $   13,290,000
+  2021-12-30    Lyft, Inc.                          Busin…  FLEXIBILITY AND BENEFITS FOR MASSAC…    $   13,000,000
+  2018-07-11    Baker Committee                     Other   BAKER COMMITTEE                         $    7,687,129
+  2024-06-21    DoorDash, Inc. (Loan)               Busin…  FLEXIBILITY AND BENEFITS FOR MASSAC…    $    6,787,797
+  2024-06-10    Uber Technologies, Inc. (loan)      Busin…  FLEXIBILITY AND BENEFITS FOR MASSAC…    $    6,787,797
+  2022-09-15    Massachusetts Teachers Association  Union…  FAIR SHARE MASSACHUSETTS                $    6,000,000
+  2020-08-24    General Motors                      Busin…  COALITION FOR SAFE AND SECURE DATA      $    5,147,424
+  2022-05-09    Uber Technologies, Inc.             Busin…  FLEXIBILITY AND BENEFITS FOR MASSAC…    $    4,500,000
+  2020-07-15    Toyota Motor North America, Inc     Busin…  COALITION FOR SAFE AND SECURE DATA      $    4,262,874
+  2020-07-23    Ford Motor Company                  Busin…  COALITION FOR SAFE AND SECURE DATA      $    4,190,830
+
+================================================================================
+  10 RANDOM CONTRIBUTION ROWS — raw data spot check  [MASSACHUSETTS]
+================================================================================
+  Date          Contributor                   T            Amount  Committee                       City                St    Employer                Occupation          
+  ------------  ----------------------------  -----  ------------  ------------------------------  ------------------  ----  ----------------------  --------------------
+  2002-01-14    Schlauch, Robert              Indi…  $           25  PINES COMMITTEE (CLEAN ELECTI…  Needham             MA                                                
+  2002-02-10    Haines, Sekyo                 Indi…  $           50  REICH COMMITTEE                 Cambridge           MA                                                
+  2002-04-16    Perkins, Katherine            Indi…  $          100  CHANDLER COMMITTEE              Worcester           MA                                                
+  2002-10-23    Eldred, Mary Ann              Indi…  $          100  GEORGE COMMITTEE                East Dennis         MA                            At Home             
+  2005-04-30    Sullivan, Joseph              Indi…  $          250  REILLY COMMITTEE                Waltham             MA    JJ Sullivan             Owner               
+  2005-05-19    MCCLURE, DOUGLAS              Indi…  $          500  O'MALLEY COMMITTEE              BOSTON              MA    SELF                    REALTOR             
+  2005-05-25    Richie, Charlotte             Indi…  $           50  MENINO COMMITTEE                Dorchester          MA    City of Boston          Department Head     
+  2005-05-31    Mallory, Elizabeth            Indi…  $          500  LEONE COMMITTEE                 Ramsey              NJ    Heritage Financial Se…  President           
+  2005-06-13    MATTHEWS, ROBERT              Indi…  $          500  COUGHLIN COMMITTEE              BLACKSTONE          MA    REQUEST INFO            REQUEST INFO        
+  2005-09-07    GRIESINGER, DAVID             Indi…  $          500  WOLF COMMITTEE                  CAMBRIDGE           MA    LEXICON INC.            PHYSICIST           
+
+================================================================================
+  10 MOST RECENT CONTRIBUTIONS — data freshness check  [MASSACHUSETTS]
+================================================================================
+  Date          Contributor                       Type            Amount  Committee                         
+  ------------  --------------------------------  ------  --------------  ----------------------------------
+  2026-07-04    Shelton, William                  Indiv…  $          100  MBAH COMMITTEE                    
+  2026-07-04    Mannion, Liam                     Indiv…  $          200  MBAH COMMITTEE                    
+  2026-07-04    Ferrara, Louis                    Indiv…  $          100  MBAH COMMITTEE                    
+  2026-07-04    Parsloe, Steven                   Indiv…  $          125  MELVILLE COMMITTEE                
+  2026-07-04    Lyne, Emmett                      Indiv…  $          100  MELVILLE COMMITTEE                
+  2026-07-04    Vortherms, Rebecca                Indiv…  $          100  MELVILLE COMMITTEE                
+  2026-07-04    Alice Hanlon Peisch Committee     Commi…  $          100  BROWNSBERGER COMMITTEE            
+  2026-07-04    Carney, Jw                        Indiv…  $        1,000  BROWNSBERGER COMMITTEE            
+  2026-07-04    Parisi-trone, Robert              Indiv…  $        1,000  BROWNSBERGER COMMITTEE            
+  2026-07-04    Miles, Marc                       Indiv…  $          150  BROWNSBERGER COMMITTEE            
+
+================================================================================
+  10 MOST RECENT EXPENDITURES — data freshness check  [MASSACHUSETTS]
+================================================================================
+  Date          Payee                                     Amount  Committee                     Type                  
+  ------------  --------------------------------  --------------  ----------------------------  ----------------------
+  2026-07-04    Act Blue                          $            5  MELVILLE COMMITTEE            Merchant Provider Fee 
+  2026-07-04    Act Blue                          $            4  MELVILLE COMMITTEE            Merchant Provider Fee 
+  2026-07-04    Act Blue                          $            4  MELVILLE COMMITTEE            Merchant Provider Fee 
+  2026-07-04    Winred                            $            4  TERNULLO COMMITTEE            Merchant Provider Fee 
+  2026-07-04    Winred                            $           10  TERNULLO COMMITTEE            Merchant Provider Fee 
+  2026-07-03    Actblue                           $            8  CUSACK COMMITTEE              Merchant Provider Fee 
+  2026-07-03    Act Blue                          $          126  YU COMMITTEE                  Merchant Provider Fee 
+  2026-07-03    Actblue                           $            0  RUSEAU COMMITTEE              Merchant Provider Fee 
+  2026-07-03    ActBlue                           $            4  WORRELL COMMITTEE             Merchant Provider Fee 
+  2026-07-03    ActBlue of MA                     $           78  KASSNER COMMITTEE             Merchant Provider Fee 
+

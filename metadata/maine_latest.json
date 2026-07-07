@@ -1,0 +1,128 @@
+{
+  "state": "ME",
+  "run_at": "2026-07-05T18:34:47.885899",
+  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/maine/cleaned",
+  "passed": true,
+  "row_counts": {
+    "candidates": 2875,
+    "committees": 3696,
+    "contributions": 393493,
+    "expenditures": 120980
+  },
+  "sampled_tables": {},
+  "tier1_failures": [],
+  "tier1_fill_rates": {
+    "candidates": {
+      "_total": 2875,
+      "state": 100.0,
+      "person_id": 100.0,
+      "state_filer_id": 100.0,
+      "candidate_name": 100.0
+    },
+    "committees": {
+      "_total": 3696,
+      "state": 100.0,
+      "state_filer_id": 100.0
+    },
+    "contributions": {
+      "_total": 393493,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    },
+    "expenditures": {
+      "_total": 120980,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    }
+  },
+  "tier2_warnings": [
+    {
+      "table": "contributions",
+      "warning": "31 non-empty 'contributor_state' values are not recognised US state/territory codes (0.0%) \u2014 e.g. ['AA', 'AE', 'AP', 'BC', 'ON']"
+    },
+    {
+      "table": "contributions",
+      "warning": "7,491 non-empty 'contributor_zip' values don't match ZIP format (1.9%) \u2014 e.g. ['00000 -4074', '00000 -4101', '00000 -4104', '00000 -4212', '00000 -4332']"
+    }
+  ],
+  "tier2_enrichment": {
+    "candidates": {
+      "total": 2875,
+      "candidate_first": 100.0,
+      "candidate_last": 100.0,
+      "office": 100.0,
+      "district": 0.0,
+      "jurisdiction": 0.0,
+      "party": 100.0,
+      "election_year": 0.0,
+      "incumbent": 0.0
+    },
+    "committees": {
+      "total": 3696,
+      "committee_type": 100.0,
+      "committee_name": 100.0,
+      "candidate_name": 77.8,
+      "treasurer_name": 85.1,
+      "city": 0.0,
+      "zip": 0.0
+    },
+    "contributions": {
+      "total": 393493,
+      "contributor_name": 100.0,
+      "contributor_type": 96.5,
+      "contributor_city": 95.9,
+      "contributor_state": 95.9,
+      "contributor_zip": 95.9,
+      "employer": 92.0,
+      "occupation": 92.0,
+      "candidate_name": 0.0,
+      "office": 0.0,
+      "election_year": 0.0
+    },
+    "expenditures": {
+      "total": 120980,
+      "payee_name": 100.0,
+      "transaction_type": 100.0,
+      "purpose": 0.9,
+      "category": 0.0,
+      "payee_city": 0.0,
+      "payee_state": 0.0,
+      "payee_zip": 0.0,
+      "candidate_name": 0.0,
+      "office": 0.0,
+      "election_year": 0.0
+    }
+  },
+  "tier2_breakdowns": {
+    "committees": {
+      "committee_type": {
+        "Candidate": 2875,
+        "Political Action Committee": 280,
+        "Legislative Personal Filer": 211,
+        "Personal Financial Disclosure Filer - Executive": 145,
+        "Party Committee": 117,
+        "Ballot Question Committee": 68
+      },
+      "active": {
+        "0": 2540,
+        "1": 1156
+      }
+    }
+  },
+  "drift_warnings": [
+    {
+      "table": "contributions",
+      "previous": 445754,
+      "current": 393493,
+      "drop_pct": 11.7
+    }
+  ]
+}

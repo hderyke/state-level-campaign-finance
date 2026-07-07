@@ -158,3 +158,63 @@ CO,Non-Monetary (Coordinated),In-Kind
 CO,Returned Contributions,Refund
 CO,Other Receipts,
 CO,Non-Aggregated Receipts,
+# == Maine =====================================================================
+# transaction_type values from the /public/activities list view display strings
+ME,Monetary Contribution,Monetary
+ME,In-Kind Contribution,In-Kind
+ME,Transfer from Previous Campaign,Other
+# Public Funding = Maine Clean Elections Act disbursements to the candidate
+ME,Public Funding,Other
+# Returned expenditures/loans received — categorized as Other (not new money in)
+ME,Returned Expenditure,Other
+ME,Returned Independent Expenditure,Other
+ME,Loan,Other
+ME,Loan Forgiveness,Other
+# == Louisiana =================================================================
+# ContributionType from contributions CSVs. CONTRIB = standard monetary
+# contribution. Other values TBD after first parse run.
+LA,CONTRIB,Monetary
+LA,INKIND,In-Kind
+# == Maryland ==================================================================
+# Transaction Type from TCON files. Loan* types are routed to loans_debts by the
+# parser and won't appear in contributions — mapped here for completeness.
+MD,Contribution,Monetary
+MD,Return Contribution,Refund
+MD,Loan Received,
+MD,Loan Forgiven,
+MD,Loan Payment,
+# == Massachusetts ==============================================================
+# transaction_type in contributions = Record_Type_ID description from the parser.
+MA,Individual Contribution,Monetary
+MA,Committee Contribution,Monetary
+MA,Union/Association Contribution,Monetary
+MA,Business/Corporation Contribution,Monetary
+MA,Voluntary Payroll Deduction,Monetary
+MA,Non-Contribution Receipt,Other
+MA,Individual In-Kind Contribution,In-Kind
+MA,Committee In-Kind Contribution,In-Kind
+MA,Union/Association In-Kind Contribution,In-Kind
+MA,Corporate In-Kind Contribution,In-Kind
+# == Michigan ==================================================================
+# contribtype in contribution files (payment type, not donor type)
+MI,Direct Contributions,Monetary
+MI,Direct Contributions - Private Funds,Monetary
+# Loan rows are diverted to loans_debts at parse time — suppress here to avoid
+# any residual rows in contributions that might slip through
+MI,Direct Contributions - Loan,
+# receipttype values from receipt files
+MI,Goods/Services Purchased,In-Kind
+MI,Transfer,Monetary
+MI,Other,Monetary
+# == Minnesota =================================================================
+# "Receipt type" from mn_contributions.csv — parser sets transaction_type from this field.
+# "Loan Payable" rows are diverted to loans_debts at parse time; suppress residuals.
+# In-Kind rows: parser overwrites transaction_type to "In-Kind" when "In kind?" == Y.
+# Confirm exact strings after first parse run; common values listed here.
+MN,Donation,Monetary
+MN,In-Kind,In-Kind
+MN,Non-Itemized,Monetary
+MN,Interest Income,Other
+MN,Loan Payable,
+MN,Return Excess Contribution,Refund
+MN,Other Receipt,Other

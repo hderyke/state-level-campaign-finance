@@ -1,0 +1,199 @@
+
+================================================================================
+  TOP 20 CONTRIBUTORS — total donated & top recipient committee  [ILLINOIS]
+================================================================================
+  Contributor                                    Txns   Total Donated  Top Recipient                                       To Top
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  JB PRITZKER                                      61  $  432,415,245  JB FOR GOVERNOR                             $  374,050,035
+  KENNETH GRIFFIN                                 202  $  176,535,465  COALITION TO STOP THE PROPOSED TAX HIKE A…  $   53,750,000
+  BRUCE RAUNER                                    239  $  102,784,585  CITIZENS FOR RAUNER, INC                    $   95,276,000
+  DEMOCRATIC PARTY OF ILLINOIS                 16,775  $   93,671,368  JB FOR GOVERNOR                             $    8,680,001
+  RICHARD UIHLEIN                                 506  $   91,256,453  PEOPLE WHO PLAY BY THE RULES PAC            $   42,018,000
+  ILLINOIS REPUBLICAN PARTY                     3,771  $   76,067,167  HOUSE REPUBLICAN ORGANIZATION               $   19,342,999
+  MIDWEST OPERATING ENGINEERS CONSTRUCTION …      189  $   74,346,817  CHICAGOLAND OPERATORS JOINT LABOR-MANAGEM…  $   74,346,817
+  JB FOR GOVERNOR                                 593  $   68,952,731  DEMOCRATIC PARTY OF ILLINOIS                $   20,030,000
+  LABORERS' DISTRICT COUNCIL - WORK DUES FU…      183  $   55,202,608  LIUNA CHICAGO LABORERS DISTRICT COUNCIL     $   55,202,608
+  HOUSE REPUBLICAN ORGANIZATION                 8,509  $   51,009,115  ILLINOIS REPUBLICAN PARTY                   $   10,681,791
+  INTERNATIONAL UNION OF OPERATING ENGINEERS      363  $   42,801,360  INTL UNION OF OPERATING ENGINEERS/ENGINEE…  $   40,035,394
+  CITIZENS FOR RAUNER, INC.                        79  $   37,109,671  ILLINOIS REPUBLICAN PARTY                   $   36,838,571
+  CITIZENS FOR DURKIN                           1,074  $   35,849,671  HOUSE REPUBLICAN ORGANIZATION               $   21,853,050
+  GREAT LAKES REGION ORGANIZING COMMITTEE         175  $   31,564,118  LABORERS' POLITICAL LEAGUE - GREAT LAKES …  $   29,974,168
+  DEMOCRATS FOR THE ILLINOIS HOUSE              1,823  $   31,440,902  FRIENDS TO ELECT HARRY BENTON               $    2,428,404
+  THE PEOPLE FOR EMANUEL "CHRIS" WELCH            119  $   31,423,809  DEMOCRATS FOR THE ILLINOIS HOUSE            $   19,760,344
+  CHICAGO LAND OPERATORS JOINT LABOR-MANAGE…    3,034  $   31,229,630  PEOPLE FOR EMANUEL CHRIS WELCH              $    6,153,800
+  FRIENDS OF DON HARMON FOR STATE SENATE          105  $   29,618,194  ISDF, NFP                                   $   28,000,000
+  DEMOCRATIC MAJORITY                           6,258  $   28,207,487  DEMOCRATIC PARTY OF ILLINOIS                $    2,500,000
+  ILLINOIS FEDERATION OF TEACHERS COPE          4,371  $   27,547,748  AMERICAN FEDERATION OF TEACHERS LOCAL 604…  $    3,217,267
+
+================================================================================
+  TOP 20 RECIPIENT CANDIDATES — total contributions received  [ILLINOIS]
+================================================================================
+  Candidate                                   St    Office                      Party            Txns  Total Received
+  ------------------------------------------  ----  --------------------------  ------------  -------  --------------
+  JB PRITZKER                                 IL    GOVERNOR                    DEMOCRATIC      1,095  $  387,437,146
+  BRUCE V RAUNER                              IL    GOVERNOR                    REPUBLICAN     15,087  $  175,114,481
+  MICHAEL J MADIGAN                           IL    STATE REPRESENTATIVE        DEMOCRATIC     15,962  $   80,080,054
+  DON HARMON                                  IL    STATE SENATOR               DEMOCRATIC      9,892  $   62,092,603
+  ROD R BLAGOJEVICH                           IL    STATE REPRESENTATIVE        DEMOCRATIC     20,451  $   60,715,003
+  EMANUEL "CHRIS" WELCH                       IL    MEMBER                      NON PARTISAN    6,831  $   53,964,653
+  RICHARD IRVIN                               IL    GOVERNOR                    REPUBLICAN      1,619  $   53,230,722
+  RAHM EMANUEL                                IL    MAYOR                       DEMOCRATIC      8,708  $   48,771,511
+  PAT QUINN                                   IL    ATTORNEY GENERAL            DEMOCRATIC     12,667  $   46,556,257
+  JIM DURKIN                                  IL    STATE REPRESENTATIVE        REPUBLICAN      8,092  $   42,611,960
+  ALEXI GIANNOULIAS                           IL    SECRETARY OF STATE          DEMOCRATIC      7,188  $   33,192,004
+  JASON PLUMMER                               IL    LIEUTENANT GOVERNOR         REPUBLICAN     14,061  $   30,418,758
+  TONI PRECKWINKLE                            IL    ALDERPERSON                 NON PARTISAN   18,389  $   27,284,046
+  LISA MADIGAN                                IL    STATE SENATOR               DEMOCRATIC     29,018  $   27,049,170
+  GEORGE H RYAN                               IL    GOVERNOR                    REPUBLICAN     31,290  $   24,438,469
+  JIM RYAN                                    IL    JUDGE                       DEMOCRATIC     18,977  $   23,665,785
+  EDWARD M BURKE                              IL    COMMITTEE PERSON            DEMOCRATIC     15,963  $   23,161,025
+  PAUL VALLAS                                 IL    MAYOR                       NON PARTISAN    4,435  $   22,975,387
+  JOHN J CULLERTON                            IL    STATE SENATOR               DEMOCRATIC      7,006  $   22,515,327
+  KWAME RAOUL                                 IL    ALDERPERSON                 NON PARTISAN    6,732  $   22,089,029
+
+================================================================================
+  TOP 20 NON-CANDIDATE COMMITTEES — total contributions received  [ILLINOIS]
+================================================================================
+  St    Committee                                   Type                             Txns  Total Received
+  ----  ------------------------------------------  ----------------------------  -------  --------------
+  IL    DEMOCRATIC PARTY OF ILLINOIS                Political Party                11,379  $  140,936,738
+  IL    ILLINOIS REPUBLICAN PARTY                   Political Party                 3,920  $  103,835,480
+  IL    HOUSE REPUBLICAN ORGANIZATION               Political Action                7,944  $   82,297,095
+  IL    CHICAGOLAND OPERATORS JOINT LABOR-MANAGEM…  Political Action                  280  $   75,670,472
+  IL    ILLINOIS FEDERATION OF TEACHERS COPE        Political Action               31,852  $   69,011,498
+  IL    COALITION TO STOP THE PROPOSED TAX HIKE A…  Ballot Initiative                 134  $   59,764,358
+  IL    VOTE YES FOR FAIRNESS                       Ballot Initiative                  18  $   58,116,603
+  IL    LIUNA CHICAGO LABORERS DISTRICT COUNCIL     Political Action                  548  $   55,919,870
+  IL    ILLINOIS DEMOCRATIC VICTORY PAC             Political Action                7,136  $   48,458,967
+  IL    ISDF, NFP                                   Political Party                 1,486  $   43,868,371
+  IL    REPUBLICAN STATE SENATE CAMPAIGN COMMITTEE  Political Action               10,322  $   42,131,799
+  IL    PEOPLE WHO PLAY BY THE RULES PAC            Independent Expenditure            13  $   42,019,948
+  IL    DEMOCRATS FOR THE ILLINOIS HOUSE            Political Party                 1,217  $   41,403,623
+  IL    INTL UNION OF OPERATING ENGINEERS/ENGINEE…  Political Action                  270  $   40,583,550
+  IL    ILLINOIS LABORERS' LEGISLATIVE COMMITTEE    Political Action                8,065  $   37,340,153
+  IL    DEMOCRATIC MAJORITY                         Political Party                 3,966  $   34,833,953
+  IL    SEIU ILLINOIS COUNCIL PAC                   Political Action                  335  $   34,201,286
+  IL    LABORERS' POLITICAL LEAGUE - GREAT LAKES …  Political Action                  240  $   30,241,079
+  IL    PERSONAL PAC INC                            Political Action               27,603  $   28,855,278
+  IL    SEIU HEALTHCARE ILLINOIS INDIANA PAC        Political Action                  328  $   28,754,790
+
+================================================================================
+  TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client  [ILLINOIS]
+================================================================================
+  Payee                                          Txns  Total Received  Largest Client                                 From Client
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  DEMOCRATIC PARTY OF ILLINOIS                  4,931  $   94,416,231  FRIENDS OF MICHAEL J MADIGAN                $   20,826,491
+  GRASSROOTS MEDIA LLC                             65  $   75,229,621  JB FOR GOVERNOR                             $   52,877,690
+  ILLINOIS REPUBLICAN PARTY                     1,593  $   73,697,586  CITIZENS FOR RAUNER, INC                    $   36,838,571
+  HOUSE REPUBLICAN ORGANIZATION                 3,973  $   70,733,629  CITIZENS FOR DURKIN                         $   21,851,050
+  SHORR, JOHNSON, MAGNUS STRATEGIC MEDIA          115  $   62,616,090  JB FOR GOVERNOR                             $   62,616,090
+  ADELSTEIN & ASSOCIATES                          514  $   50,202,676  RAOUL FOR ILLINOIS                          $   12,161,346
+  WINNER & MANDABACH CAMPAIGNS                     21  $   42,723,363  COALITION TO STOP THE PROPOSED TAX HIKE A…  $   42,723,363
+  ADELSTEIN & ASSOCIATES LLC                      319  $   41,596,346  VOTE YES FOR WORKERS RIGHTS                 $   11,956,952
+  DEMOCRATS FOR THE ILLINOIS HOUSE                333  $   37,950,328  PEOPLE FOR EMANUEL CHRIS WELCH              $   19,760,344
+  STRATEGIC MEDIA SERVICES, INC.                   82  $   36,055,117  IRVIN FOR ILLINOIS                          $   33,834,707
+
+================================================================================
+  ACTIVITY BY YEAR — contribution and expenditure row counts and totals  [ILLINOIS]
+================================================================================
+    Year      Cont N        Cont Total      Expn N        Expn Total
+  ------  ----------  ----------------  ----------  ----------------
+    1994      38,665    $   37,910,720           2    $        2,200
+    1995      32,210    $   18,181,957          18    $       87,700
+    1996      54,426    $   53,590,542          48    $       13,525
+    1997      39,366    $   24,059,120          56    $       22,900
+    1998      69,737    $   62,012,363         225    $      178,844
+    1999      57,466    $   37,649,823      39,842    $   31,455,030
+    2000     124,857    $  125,905,382     106,309    $  130,182,521
+    2001     115,955    $   85,730,602      85,945    $   75,479,064
+    2002     175,481    $  177,507,540     148,268    $  226,385,952
+    2003     118,566    $   83,793,639      90,370    $   73,896,587
+    2004     137,206    $  135,102,982     125,695    $  140,291,494
+    2005     131,448    $  102,674,696     107,543    $   94,574,384
+    2006     166,998    $  189,386,388     151,433    $  236,893,529
+    2007     132,986    $  110,774,042     113,486    $  105,324,164
+    2008     140,798    $  143,124,930     133,399    $  161,672,974
+    2009     127,519    $  106,746,075     115,477    $  116,118,886
+    2010     154,247    $  251,625,333     151,409    $  268,968,173
+    2011     112,745    $  100,469,135     102,270    $  105,554,772
+    2012     135,065    $  163,121,598     141,295    $  188,244,509
+    2013     116,726    $  116,595,766     101,123    $   97,274,458
+    2014     149,851    $  329,680,098     152,927    $  342,265,226
+    2015     118,309    $  172,929,704     107,991    $  153,426,901
+    2016     135,974    $  406,906,000     142,634    $  403,958,878
+    2017     127,289    $  235,965,607     114,724    $  184,365,596
+    2018     161,313    $  559,400,473     198,869    $  638,798,498
+    2019     127,040    $  195,531,704     127,672    $  196,827,254
+    2020     103,174    $  380,571,305     112,865    $  406,639,031
+    2021     106,042    $  219,690,564      93,291    $  157,487,272
+    2022     151,526    $  689,764,044     165,261    $  760,757,620
+    2023     126,596    $  235,889,627     124,126    $  227,927,632
+    2024     128,329    $  300,315,244     137,832    $  315,426,382
+    2025     119,802    $  208,558,641     121,940    $  157,807,277
+    2026      40,074    $   98,838,412      36,712    $  102,435,900
+
+================================================================================
+  CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total  [ILLINOIS]
+================================================================================
+  Contributor Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Organization                     2,125,179    $4,287,709,471      56.3%
+  Individual                       1,652,609    $1,872,304,585      43.7%
+
+================================================================================
+  TOP 10 CONTRIBUTOR STATES — where the money comes from  [ILLINOIS]
+================================================================================
+  State                        N             Total    % rows
+  ------------------  ----------  ----------------  --------
+  IL                   3,468,348    $5,434,765,244      91.8%
+  MO                      35,279    $   37,237,374       0.9%
+  DC                      33,358    $  305,619,025       0.9%
+  (blank)                 22,853    $   31,111,133       0.6%
+  TX                      17,342    $   26,174,870       0.5%
+  CA                      17,004    $   47,720,661       0.5%
+  IN                      16,872    $   19,439,958       0.4%
+  FL                      14,224    $   25,814,851       0.4%
+  WI                      11,565    $   16,972,571       0.3%
+  NY                      11,548    $   27,279,779       0.3%
+
+================================================================================
+  EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total  [ILLINOIS]
+================================================================================
+  Transaction Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  8B                               2,751,729    $4,133,419,916      82.1%
+  6B                                 579,831    $1,801,749,640      17.3%
+  9B                                  19,518    $  165,587,508       0.6%
+
+================================================================================
+  10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check  [ILLINOIS]
+================================================================================
+  Date          Contributor                         Type    Committee                                       Amount
+  ------------  ----------------------------------  ------  ------------------------------------  ----------------
+  2022-01-14    JB PRITZKER                         Indiv…  JB FOR GOVERNOR                         $   90,000,000
+  2020-06-26    JB PRITZKER                         Indiv…  VOTE YES FOR FAIRNESS                   $   51,500,000
+  2016-12-20    BRUCE RAUNER                        Indiv…  CITIZENS FOR RAUNER, INC                $   50,000,000
+  2021-03-12    JB PRITZKER                         Indiv…  JB FOR GOVERNOR                         $   35,000,000
+  2020-09-30    KENNETH GRIFFIN                     Indiv…  COALITION TO STOP THE PROPOSED TAX …    $   26,750,000
+  2025-11-13    JB PRITZKER                         Indiv…  JB FOR GOVERNOR                         $   25,000,000
+  2022-05-02    KENNETH GRIFFIN                     Indiv…  IRVIN FOR ILLINOIS                      $   25,000,000
+  2018-05-31    JB PRITZKER                         Indiv…  JB FOR GOVERNOR                         $   25,000,000
+  2022-02-14    KENNETH GRIFFIN                     Indiv…  IRVIN FOR ILLINOIS                      $   20,000,000
+  2022-09-23    JB PRITZKER                         Indiv…  JB FOR GOVERNOR                         $   20,000,000
+
+================================================================================
+  10 RANDOM CONTRIBUTION ROWS — raw data spot check  [ILLINOIS]
+================================================================================
+  Date          Contributor                   T            Amount  Committee                       City                St    Employer                Occupation          
+  ------------  ----------------------------  -----  ------------  ------------------------------  ------------------  ----  ----------------------  --------------------
+  1994-09-29    PROFESSIONAL INDEPENDENT IN…  Orga…  $        2,000  COMM TO ELECT ED ZABROCKI STA…  SPRINGFIELD         IL                                                
+  1999-08-20    INTN'L HEAT & FROST INSULAT…  Orga…  $          200  CITZ FOR JUDY ERWIN             CHICAGO             IL                                                
+  1999-08-31    TURNER MANOR                  Orga…  $            7  ILLINOIS HEALTH CARE ASSN PAC   HARRISBURG          IL                                                
+  1999-10-02    LANDRUM & BROWN               Orga…  $          500  13TH WARD DEMOCRATIC ORG        CINCINNATI          OH                                                
+  1999-10-07    JAMES MONTANA JR.,            Indi…  $          500  COMMITTEE TO ELECT CARL E HAW…  CHICAGO             IL                                                
+  1999-11-26    FIRST NATIONAL BANK           Orga…  $          125  COMMITTEE FOR BETTER GOVERNME…  OLNEY               IL                                                
+  2000-10-31    AMERICAN FAMILY INSURANCE P…  Orga…  $        1,000  JAMES PATE PHILIP CAMPAIGN FU…  SCHAUMBURG          IL                                                
+  2000-11-09    VIRGIL CALVERT NURSING AND …  Orga…  $          500  CITIZENS FOR JEFF SCHOENBERG    EAST ST. LOUIS      IL                                                
+  2004-01-30    BROADWAY ELECTRIC INC.        Orga…  $          750  FIRST WARD DEMOCRATIC PARTY     CHICAGO             IL                                                
+  2004-01-30    AMERITECH ILLINOIS PAC        Orga…  $          300  CITIZENS FOR DANIEL J MCLAUGH…  SPRINGFIELD         IL                                                
+

@@ -1,0 +1,152 @@
+{
+  "state": "CO",
+  "run_at": "2026-07-05T21:40:57.131283",
+  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/colorado/cleaned",
+  "passed": true,
+  "row_counts": {
+    "candidates": 53056,
+    "committees": 49915,
+    "contributions": 4223626,
+    "expenditures": 1043629
+  },
+  "sampled_tables": {
+    "contributions": 4223626,
+    "expenditures": 1043629
+  },
+  "tier1_failures": [],
+  "tier1_fill_rates": {
+    "candidates": {
+      "_total": 53056,
+      "state": 100.0,
+      "person_id": 100.0,
+      "state_filer_id": 100.0,
+      "candidate_name": 100.0
+    },
+    "committees": {
+      "_total": 49915,
+      "state": 100.0,
+      "state_filer_id": 100.0
+    },
+    "contributions": {
+      "_total": 500000,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    },
+    "expenditures": {
+      "_total": 500000,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    }
+  },
+  "tier2_warnings": [
+    {
+      "table": "contributions",
+      "warning": "1 rows have dates before 1990 \u2014 may be legitimate old records"
+    },
+    {
+      "table": "contributions",
+      "warning": "11 non-empty 'election_year' values are outside 1990\u20132030 or non-numeric \u2014 e.g. ['1900', '1963', '1966', '1970', '2066']"
+    },
+    {
+      "table": "contributions",
+      "warning": "276 non-empty 'contributor_state' values are not recognised US state/territory codes (0.1%) \u2014 e.g. ['#N', '(N', '-', '0', '20']"
+    },
+    {
+      "table": "contributions",
+      "warning": "2,081 non-empty 'contributor_zip' values don't match ZIP format (0.4%) \u2014 e.g. ['*0751', '*O534', '-7731', '/1401', '/80027']"
+    },
+    {
+      "table": "expenditures",
+      "warning": "1 rows have dates before 1990 \u2014 may be legitimate old records"
+    },
+    {
+      "table": "expenditures",
+      "warning": "6 non-empty 'election_year' values are outside 1990\u20132030 or non-numeric \u2014 e.g. ['1900', '1930', '1980', '2206', '5200']"
+    },
+    {
+      "table": "expenditures",
+      "warning": "1,455 non-empty 'payee_state' values are not recognised US state/territory codes (0.3%) \u2014 e.g. ['--', '0', '2', '33', '80']"
+    },
+    {
+      "table": "expenditures",
+      "warning": "3,321 non-empty 'payee_zip' values don't match ZIP format (0.7%) \u2014 e.g. ['*****', '*0908', '-2451', '-7840', '.....']"
+    }
+  ],
+  "tier2_enrichment": {
+    "candidates": {
+      "total": 53056,
+      "candidate_first": 97.9,
+      "candidate_last": 100.0,
+      "office": 100.0,
+      "district": 86.7,
+      "jurisdiction": 100.0,
+      "party": 99.7,
+      "election_year": 99.1,
+      "incumbent": 0.0
+    },
+    "committees": {
+      "total": 49915,
+      "committee_type": 100.0,
+      "committee_name": 100.0,
+      "candidate_name": 84.7,
+      "treasurer_name": 30.2,
+      "city": 99.9,
+      "zip": 99.9
+    },
+    "contributions": {
+      "total": 500000,
+      "contributor_name": 94.7,
+      "contributor_type": 94.7,
+      "contributor_city": 94.3,
+      "contributor_state": 94.5,
+      "contributor_zip": 93.3,
+      "employer": 57.3,
+      "occupation": 56.8,
+      "candidate_name": 43.4,
+      "office": 0.0,
+      "election_year": 100.0
+    },
+    "expenditures": {
+      "total": 500000,
+      "payee_name": 97.1,
+      "transaction_type": 100.0,
+      "purpose": 69.6,
+      "category": 100.0,
+      "payee_city": 96.5,
+      "payee_state": 97.0,
+      "payee_zip": 96.0,
+      "candidate_name": 55.5,
+      "office": 0.0,
+      "election_year": 100.0
+    }
+  },
+  "tier2_breakdowns": {
+    "committees": {
+      "committee_type": {
+        "Candidate": 34865,
+        "Candidate Committee": 8923,
+        "Issue Committee": 2144,
+        "Political Committee": 1857,
+        "Independent Expenditure Committee": 528,
+        "Political Party Committee": 481,
+        "Small Donor Committee": 432,
+        "Small Scale Issue Committee": 305,
+        "527 Political Organization": 260,
+        "Federal PAC": 120
+      },
+      "active": {
+        "0": 46471,
+        "1": 3444
+      }
+    }
+  },
+  "drift_warnings": []
+}

@@ -40,7 +40,7 @@ with open(_STATES_CSV, encoding="utf-8") as _f:
 SCRAPER_DIR = PROJECT_ROOT / "src" / "pipeline" / "scrapers"
 PARSER_DIR  = PROJECT_ROOT / "src" / "pipeline" / "parsers"
 TABULATE    = PROJECT_ROOT / "src" / "pipeline" / "tabulate.py"
-VALIDATE    = PROJECT_ROOT / "tests" / "validate.py"
+VALIDATE    = PROJECT_ROOT / "src" / "pipeline" / "validate.py"
 
 PYTHON = sys.executable
 
@@ -103,21 +103,21 @@ def _subprocess(cmd: list[str], label: str, log=None) -> bool:
     return result.returncode == 0
 
 
-TEST_QUERIES = PROJECT_ROOT / "tests" / "test_queries.py"
-QUERIES_DIR  = PROJECT_ROOT / "tests" / "reports"
+QUERIES     = PROJECT_ROOT / "src" / "pipeline" / "queries.py"
+QUERIES_DIR = PROJECT_ROOT / "metadata"
 
 
 def _run_queries(name: str, log) -> None:
-    """Capture test_queries.py output and save to run dir + tests/reports.
+    """Capture queries.py output and save to run dir + metadata/.
     Never blocks the pipeline — errors are printed and logged but ignored."""
-    if not TEST_QUERIES.exists():
+    if not QUERIES.exists():
         return
 
-    print(f"\n  ▶ test_queries/{name}.py")
+    print(f"\n  ▶ queries/{name}.py")
     t0 = time.perf_counter()
     try:
         result = subprocess.run(
-            [PYTHON, str(TEST_QUERIES), name],
+            [PYTHON, str(QUERIES), name],
             capture_output=True, text=True, cwd=PROJECT_ROOT,
         )
         output   = result.stdout
@@ -125,7 +125,7 @@ def _run_queries(name: str, log) -> None:
             output += "\n" + result.stderr
         duration = round(time.perf_counter() - t0, 1)
 
-        # Always write to tests/reports/{state}_queries.txt (latest)
+        # Always write to metadata/{state}_queries.txt (latest)
         QUERIES_DIR.mkdir(parents=True, exist_ok=True)
         (QUERIES_DIR / f"{name}_queries.txt").write_text(output, encoding="utf-8")
 
@@ -146,13 +146,20 @@ def _run_queries(name: str, log) -> None:
                   duration_s=round(time.perf_counter() - t0, 1), error=str(e))
 
 
+def _state_slug(state: str) -> str:
+    """Convert a state name to a valid Python module filename slug.
+    e.g. "New York" → "new_york", "Michigan" → "michigan"
+    """
+    return state.lower().replace(" ", "_")
+
+
 def scraper_path(state: str) -> Path | None:
-    p = SCRAPER_DIR / f"{state}.py"
+    p = SCRAPER_DIR / f"{_state_slug(state)}.py"
     return p if p.exists() else None
 
 
 def parser_path(state: str) -> Path | None:
-    p = PARSER_DIR / f"{state}.py"
+    p = PARSER_DIR / f"{_state_slug(state)}.py"
     return p if p.exists() else None
 
 
@@ -241,8 +248,15 @@ def _run_state(abbr: str, name: str, command: str,
 
 
 def main(command: str, state_abbrs: list[str],
-         extra_flags: list[str] | None = None):
-    """Run the full pipeline (scrape → parse → validate → tabulate → aggregate) for the given states."""
+         extra_flags: list[str] | None = None,
+         no_aggregate: bool = False):
+    """Run the full pipeline (scrape → parse → validate → tabulate → aggregate) for the given states.
+
+    Args:
+        no_aggregate: If True, skip the aggregate step entirely and return the
+                      results dict so the caller (e.g. a daemon) can handle
+                      fallback and aggregation itself.
+    """
     extra_flags = extra_flags or []
     run_id = _setup_run_id(command, state_abbrs, extra_flags)
     log    = get_logger(None, "orc")
@@ -267,6 +281,14 @@ def main(command: str, state_abbrs: list[str],
 
         _summary(results)
         failed = [k for k, v in results.items() if not v]
+
+        if no_aggregate:
+            duration = round(time.perf_counter() - t0, 1)
+            log.info(f"Done in {duration}s (aggregate deferred to caller)")
+            log._emit("run_completed", run_id=run_id, status="completed",
+                      duration_s=duration, passed=len(results) - len(failed),
+                      failed=len(failed), aggregate="deferred")
+            return results
 
         # Auto-aggregate if all states passed
         if not failed:

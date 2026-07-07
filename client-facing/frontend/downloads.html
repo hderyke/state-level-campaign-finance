@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Downloads — Integrity Index</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .page-header { margin-bottom: 2.5rem; }
+    .page-header h1 {
+      font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 700;
+      letter-spacing: -1px; line-height: 1.15; margin-bottom: 0.6rem;
+    }
+    .page-header p { font-size: 15px; color: var(--text-muted); line-height: 1.6; max-width: 540px; }
+
+    /* ── master DB card ── */
+    .master-card {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1.5rem;
+      background: var(--surface); border: 1px solid var(--border-hl);
+      border-radius: 12px; padding: 1.5rem 1.75rem;
+      margin-bottom: 2.5rem;
+    }
+    .master-card__left { display: flex; flex-direction: column; gap: 4px; }
+    .master-card__label {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.8px;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+    .master-card__title { font-size: 17px; font-weight: 600; color: var(--text); }
+    .master-card__meta { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+    .btn-dl-master {
+      flex-shrink: 0;
+      display: flex; align-items: center; gap: 7px;
+      background: var(--green); color: #000;
+      border: none; border-radius: 8px;
+      font-size: 13.5px; font-weight: 600; font-family: inherit;
+      padding: 10px 20px; text-decoration: none;
+      transition: opacity 0.15s; white-space: nowrap;
+    }
+    .btn-dl-master:hover { opacity: 0.85; }
+
+    /* ── section heading ── */
+    .section-heading {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.8px;
+      text-transform: uppercase; color: var(--text-muted);
+      margin-bottom: 1rem;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .section-heading::after {
+      content: ""; flex: 1; height: 1px; background: var(--border);
+    }
+
+    /* ── state grid ── */
+    .state-dl-grid {
+      display: grid; grid-template-columns: 1fr;
+      gap: 1px; background: var(--border);
+      border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    }
+    .state-dl-row {
+      display: grid; grid-template-columns: 1fr 60px 60px 60px 80px;
+      align-items: center;
+      background: var(--surface-2); padding: 0.65rem 1rem;
+      gap: 0;
+    }
+    .state-dl-row:hover { background: var(--surface-3); }
+    .state-dl-name {
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .state-dl-name__top {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13.5px; color: var(--text); font-weight: 500;
+    }
+    .state-dl-updated {
+      font-size: 11px; color: var(--text-muted); padding-left: 1px;
+    }
+.state-dl-link {
+      text-align: center;
+      font-size: 12px; font-weight: 500;
+      color: var(--text-muted); text-decoration: none;
+      padding: 4px 0;
+      transition: color 0.12s;
+      display: block;
+    }
+    .state-dl-link:hover { color: var(--green); }
+    .state-dl-link.disabled {
+      opacity: 0.25; pointer-events: none; cursor: default;
+    }
+    .state-dl-docs {
+      text-align: right;
+      font-size: 12px; font-weight: 500;
+      color: var(--text-muted); text-decoration: none;
+      padding: 4px 0;
+      transition: color 0.12s;
+      display: flex; align-items: center; justify-content: flex-end; gap: 4px;
+    }
+    .state-dl-docs:hover { color: var(--green); }
+
+    @media (max-width: 700px) {
+      .master-card { flex-direction: column; align-items: flex-start; }
+      .state-dl-row {
+        grid-template-columns: 1fr 40px 40px 40px 40px;
+        padding: 0.65rem 0.6rem;
+      }
+      .state-dl-link, .state-dl-docs {
+        font-size: 10.5px;
+        padding: 4px 0;
+      }
+      .state-dl-docs {
+        text-align: center;
+        justify-content: center;
+        gap: 2px;
+      }
+      .state-dl-docs svg { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a class="nav-logo" href="index.html">Integrity Index</a>
+    <a class="nav-section" href="index.html">State Finance</a>
+  </nav>
+
+  <div class="container">
+
+    <div class="page-header">
+      <h1>Downloads</h1>
+      <p>Full database and per-state files. Raw source files, cleaned CSVs, and DuckDB databases.</p>
+    </div>
+
+    <!-- Master DB -->
+    <div class="master-card">
+      <div class="master-card__left">
+        <div class="master-card__label">Full dataset</div>
+        <div class="master-card__title">state-level-cf.db</div>
+        <div class="master-card__meta">All 22 states · contributions, expenditures, candidates, committees · DuckDB</div>
+      </div>
+      <a href="#" class="btn-dl-master" onclick="triggerDownload(event, null, 'master')">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M7 1v8M4 6l3 3 3-3M2 11h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Download
+      </a>
+    </div>
+
+    <!-- Per-state -->
+    <div class="section-heading">By state</div>
+
+    <div class="state-dl-grid" id="state-dl-grid"></div>
+
+  </div>
+
+  <footer>
+    <a href="https://github.com/hderyke/state-level-campaign-finance" target="_blank">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.341-3.369-1.341-.454-1.155-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
+      </svg>
+      GitHub
+    </a>
+    <a href="data-quality.html">Data Quality</a>
+    <a href="downloads.html" class="footer-link-disabled">Downloads</a>
+    <span class="footer-credit">Built by Henry DeRyke</span>
+  </footer>
+
+  <script src="config/config.dev.js"></script>
+  <script>
+    const STATE_NAMES = {
+      AK:'Alaska', AL:'Alabama', AR:'Arkansas', AZ:'Arizona', CA:'California',
+      CO:'Colorado', CT:'Connecticut', DE:'Delaware', FL:'Florida', GA:'Georgia',
+      HI:'Hawaii', IA:'Iowa', ID:'Idaho', IL:'Illinois', IN:'Indiana',
+      KS:'Kansas', KY:'Kentucky', LA:'Louisiana', MA:'Massachusetts', MD:'Maryland',
+      ME:'Maine', MI:'Michigan', MN:'Minnesota', MO:'Missouri', MS:'Mississippi',
+      MT:'Montana', NC:'North Carolina', ND:'North Dakota', NE:'Nebraska',
+      NH:'New Hampshire', NJ:'New Jersey', NM:'New Mexico', NV:'Nevada',
+      NY:'New York', OH:'Ohio', OK:'Oklahoma', OR:'Oregon', PA:'Pennsylvania',
+      RI:'Rhode Island', SC:'South Carolina', SD:'South Dakota', TN:'Tennessee',
+      TX:'Texas', UT:'Utah', VA:'Virginia', VT:'Vermont', WA:'Washington',
+      WI:'Wisconsin', WV:'West Virginia', WY:'Wyoming',
+    };
+
+    function fmtDate(iso) {
+      if (!iso) return '—';
+      const [y, m, d] = iso.split('-');
+      const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m - 1];
+      return `${mon} ${+d}, ${y}`;
+    }
+
+    function renderGrid(states) {
+      const grid = document.getElementById('state-dl-grid');
+      if (!states.length) {
+        grid.innerHTML = '<div style="padding:1rem;color:var(--text-muted)">No states available.</div>';
+        return;
+      }
+      states.sort((a, b) => (STATE_NAMES[a.state] || a.state).localeCompare(STATE_NAMES[b.state] || b.state));
+      grid.innerHTML = states.map(({ state, last_synced, newest_record }) => {
+        const name = STATE_NAMES[state] || state;
+        const slug = name.toLowerCase().replace(/ /g, '_');
+        return `
+          <div class="state-dl-row">
+            <div class="state-dl-name">
+              <div class="state-dl-name__top">${name}</div>
+              <div class="state-dl-updated">Last synced ${fmtDate(last_synced)}</div>
+              <div class="state-dl-updated">Newest record ${fmtDate(newest_record)}</div>
+            </div>
+            <a href="#" class="state-dl-link" onclick="triggerDownload(event, '${state}', 'db')">DB</a>
+            <a href="#" class="state-dl-link" onclick="triggerDownload(event, '${state}', 'csv')">CSV</a>
+            <a href="#" class="state-dl-link" onclick="triggerDownload(event, '${state}', 'raw')">Raw</a>
+            <a href="https://github.com/hderyke/state-level-campaign-finance/blob/main/docs/states/${slug}.md"
+               target="_blank" class="state-dl-docs">
+              Docs
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                <path d="M2 10L10 2M10 2H4M10 2v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </a>
+          </div>`;
+      }).join('');
+    }
+
+    const S3_BASE = 'https://state-level-cf-data-065148239427-us-east-2-an.s3.us-east-2.amazonaws.com';
+
+    function triggerDownload(e, state, type) {
+      e.preventDefault();
+      let url;
+      if (type === 'master') {
+        url = `${S3_BASE}/data/state-level-cf.db`;
+      } else {
+        const name = STATE_NAMES[state] || state;
+        const slug = name.toLowerCase().replace(/ /g, '_');
+        const ext = { db: `${slug}.db`, csv: `${slug}_clean.zip`, raw: `${slug}_raw.zip` }[type];
+        url = `${S3_BASE}/data/${name}/${ext}`;
+      }
+      window.location.href = url;
+    }
+
+    (async () => {
+      try {
+        const res = await fetch(`${CONFIG.API_BASE}/downloads/manifest`);
+        const data = await res.json();
+        renderGrid(data.states);
+      } catch (e) {
+        document.getElementById('state-dl-grid').innerHTML =
+          '<div style="padding:1rem;color:var(--text-muted)">Could not load manifest.</div>';
+      }
+    })();
+  </script>
+
+</body>
+</html>

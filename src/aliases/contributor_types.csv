@@ -153,3 +153,105 @@ CO,Unknown,
 # older "Contributor Type" raw values require data to enumerate fully.
 ID,Person,Individual
 ID,Company,Organization
+# == Kentucky ==================================================================
+# KREF Contribution Type field. Several types are accounting/internal entries
+# with no external donor — contributor_name is set by parser per type:
+#   BALANCE_CARRYFORWARD: contributor_name = committee_name (parser fix)
+#   UNITEMIZED/ANONYMOUS/CASH: no contributor name available
+#   INTEREST/INCOME_TAX_CHECKOFF: government/investment income, not a donor
+KY,INDIVIDUAL,Individual
+KY,UNITEMIZED,
+KY,CANDIDATE,Candidate
+KY,BALANCE_CARRYFORWARD,
+KY,KYPAC,PAC
+KY,CASH,
+KY,OTHER,
+KY,FEDERALPAC,PAC
+KY,ANONYMOUS,
+KY,INTEREST,
+KY,CONTRIBUTINGORGANIZATION,Organization
+KY,CANDIDATE_DEBT_ASSUMPTION,
+KY,EXECUTIVECOMM,Party
+KY,INCOME_TAX_CHECKOFF,
+KY,OTHER_CANDIDATES,Candidate
+KY,CAUCUS_CAMP_COMM,PAC
+KY,OUT_OF_STATE_PACS,PAC
+KY,OTHER_CAMP_COMM,Candidate Committee
+KY,AUTHORIZED_ENTITY,Organization
+KY,INCOME_TAX_CHECKOFF_OTHER_INT,
+KY,AFFILIATE,Organization
+KY,GOVERNOR,Candidate
+KY,EXEC_COMM_UNITEM,
+KY,NATIONAL_EXECUTIVE_COMMITTEE,Party
+KY,LT_GOVERNOR,Candidate
+KY,EXEC_COMM_CASH,
+KY,CAUCUS_CAMP_COMM_CASH,
+# == Louisiana =================================================================
+# ContributorTypeCode from contributions CSVs.
+# Core types
+LA,IND,Individual
+LA,I,Individual
+LA,BUS,Organization
+LA,LEG,Organization
+LA,ORG,Organization
+LA,FIN,Organization
+LA,BAN,Organization
+LA,CAN,Candidate
+LA,PAC,PAC
+LA,COM,PAC
+LA,PCM,PAC
+LA,PCC,PAC
+LA,PTY,Party Committee
+# Officer/role codes (individual acting in official capacity for an entity)
+LA,CHR,Organization
+LA,TRE,Organization
+LA,PRE,Organization
+LA,OFF,Organization
+LA,DTR,Organization
+LA,SCM,Organization
+LA,LBY,Individual
+# Miscellaneous / suppressed
+LA,OTH,
+LA,ANO,
+LA,BNM,
+LA,BEN,
+LA,R/E,Organization
+# == Maryland ==================================================================
+MD,Individual,Individual
+MD,Self,Individual
+MD,Spouse,Individual
+MD,Business/Group/Organization,Organization
+MD,Non-Profit Organization,Organization
+MD,Labor Union,Organization
+MD,Political Action Committee,PAC
+MD,Political Club,PAC
+MD,Federal Committee,PAC
+MD,Candidate Committee,Candidate Committee
+MD,Public Financing,
+# == Massachusetts ==============================================================
+# contributor_type is derived from Record_Type_ID in the parser.
+MA,Individual,Individual
+MA,Committee,Committee
+MA,Union/Association,Organization
+MA,Business/Corporation,Organization
+MA,Other,Other
+# == Michigan ==================================================================
+# MI contributor_type is derived at parse time from name fields (Individual/Organization),
+# not from contribtype (which describes payment type, not donor type). Pass through as-is.
+MI,Individual,Individual
+MI,Organization,Organization
+# == Minnesota =================================================================
+# "Contrib type" from mn_contributions.csv — MN uses entity registration type as contributor type.
+# Confirm exact strings after first parse run; common values listed here.
+MN,Individual,Individual
+MN,Political Committee/Fund,Committee
+MN,Party Unit,Party Committee
+MN,Candidate Committee,Candidate Committee
+MN,Lobbyist,Individual
+# "Self" = candidate self-funding
+MN,Self,Individual
+MN,Corporation,Organization
+MN,Other,
+# "Unknown/Null" and county-registration labels are data-quality artifacts — suppress
+MN,Unknown/Null,
+MN,Registered with Hennepin County,

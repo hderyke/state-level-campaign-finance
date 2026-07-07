@@ -10,10 +10,10 @@ Source code documentation for the state-level campaign finance pipeline. For CLI
 2. [Schema](#2-schema)
 3. [Orchestration](#3-orchestration)
 4. [Pipeline Stages](#4-pipeline-stages)
-5. [Tests](#5-tests)
+5. [Validation and Queries](#5-validation-and-queries)
 6. [Person IDs and Name Matching](#6-person-ids-and-name-matching)
 7. [Aliases](#7-aliases)
-8. [Cloudflare R2](#8-cloudflare-r2)
+8. [S3](#8-s3)
 9. [Logging](#9-logging)
 10. [Error Handling](#10-error-handling)
 
@@ -35,17 +35,17 @@ python3 src/main.py sync AL AK AZ
          │  for each state:
          ├──▶  scrapers/{state}.py   → data/{State}/raw/
          ├──▶  parsers/{state}.py    → data/{State}/cleaned/*.csv
-         ├──▶  tests/validate.py     → tests/reports/{state}_latest.json
+         ├──▶  pipeline/validate.py  → metadata/{state}_latest.json
          ├──▶  pipeline/tabulate.py  → data/{State}/cleaned/{state}.db
          │
          │  after all states pass:
          └──▶  pipeline/aggregate.py → data/state-level-cf.db
 
 
-python3 src/main.py push AL   (separate branch — no pipeline stages)
+python3 src/main.py push AL   (separate branch — no pipeline stages; run after sync/reparse finishes)
          │
          ▼
-      main.py ──▶ cloudflare.py ──▶ Cloudflare R2 Worker
+      main.py ──▶ s3.py ──▶ S3 bucket
 ```
 
 Each stage runs as a **subprocess** spawned by `orc.py`. This means a parser crash cannot take down the orchestrator, and all stage output streams to the terminal in real time. The aggregate step only runs if every state in the batch passed validation and tabulation.
@@ -191,9 +191,9 @@ Aggregate discovers all tabulated state `.db` files by scanning `data/*/cleaned/
 
 ---
 
-## 5. Tests
+## 5. Validation and Queries
 
-### Validator (`tests/validate.py`)
+### Validator (`src/pipeline/validate.py`)
 
 The validator runs automatically as part of every pipeline run (between parse and tabulate) and gates tabulation on success. It can also be run manually against any state's cleaned CSVs.
 
@@ -205,13 +205,13 @@ The 99% threshold (`TIER1_PASS_RATE = 0.99`) rather than 100% tolerance is inten
 
 Tier 2 warnings are printed and saved to the report but do not affect the exit code. These include: `election_year` out of range, `amended` not in `0`/`1`/blank, amounts above $10M (possible data entry errors), unrecognized state codes in `contributor_state`/`payee_state`, malformed ZIP codes, and enrichment fill rates for optional fields.
 
-**Drift detection.** On each run, the validator compares current row counts against the previous run's report (stored at `tests/reports/{state}_latest.json`). A drop of more than 5% in any table triggers a tier 2 drift warning. This catches accidental data loss from parser regressions.
+**Drift detection.** On each run, the validator compares current row counts against the previous run's report (stored at `metadata/{state}_latest.json`). A drop of more than 5% in any table triggers a tier 2 drift warning. This catches accidental data loss from parser regressions.
 
-**Row sampling.** For memory safety, large files are validated on a random sample rather than loading everything into memory. The default sample size is 500,000 rows (tunable via `MAX_SAMPLE_ROWS` at the top of `tests/validate.py`). Sampling uses reservoir sampling (Algorithm R) so the sample is uniformly random across the full file rather than just the first N rows — important for chronologically ordered files. The total row count is always computed by streaming the full file regardless of sampling. When sampling is active, the terminal output and HTML report note "sampled X of Y rows" for transparency.
+**Row sampling.** For memory safety, large files are validated on a random sample rather than loading everything into memory. The default sample size is 500,000 rows (tunable via `MAX_SAMPLE_ROWS` at the top of `src/pipeline/validate.py`). Sampling uses reservoir sampling (Algorithm R) so the sample is uniformly random across the full file rather than just the first N rows — important for chronologically ordered files. The total row count is always computed by streaming the full file regardless of sampling. When sampling is active, the terminal output and HTML report note "sampled X of Y rows" for transparency.
 
-**Output.** Each run writes `tests/reports/{state}_latest.json` with row counts, tier 1 fill rates, tier 2 warnings, enrichment stats, and drift deltas. When running under `orc.py`, the report is also copied to `logs/prod/{run_id}/{state}_validate.json`.
+**Output.** Each run writes `metadata/{state}_latest.json` with row counts, tier 1 fill rates, tier 2 warnings, enrichment stats, and drift deltas. When running under `orc.py`, the report is also copied to `logs/prod/{run_id}/{state}_validate.json`.
 
-### Test queries (`tests/test_queries.py`)
+### Spot-check queries (`src/pipeline/queries.py`)
 
 A manual spot-check tool run after tabulation to evaluate data quality by eye. Accepts a state name or `all` (which targets `data/state-level-cf.db` instead of a state `.db`).
 
@@ -284,54 +284,62 @@ To add a new normalization mapping, append a row to the relevant CSV. The `(stat
 
 ---
 
-## 8. Cloudflare R2
+## 8. S3
 
-`src/cloudflare.py` handles syncing data to and from a Cloudflare R2 bucket via a Cloudflare Worker that acts as a thin authentication and manifest proxy.
+`cloud/s3.py` handles syncing data to and from an S3 bucket, talking to AWS directly via `boto3` — no proxy or intermediary service sits in front of it. It replaces the project's earlier Cloudflare R2 setup (`src/cloudflare.py`, now removed, and the Worker under `worker/campaign-finance-r2/`, which is no longer used but left in place for reference). It lives in `cloud/` alongside `cloud/lambda/manifest_updater/` (the S3-triggered function that keeps the aggregate `metadata/manifest.csv` current) rather than under `src/`, since neither talks to state data directly — both are AWS glue sitting between the pipeline and the client-facing API.
 
-### The Worker
+Push is a **separate, manual step** run after `sync`/`reparse` completes — it is not triggered automatically by `orc.py`. This means every push publishes whatever is currently on disk, including that state's most recent validation results.
 
-The Cloudflare Worker is a lightweight serverless function deployed to Cloudflare's edge that sits in front of the R2 bucket. It serves three purposes:
+### Bucket layout
 
-**Authentication.** The R2 bucket is not publicly accessible. All push and pull operations go through the Worker, which validates the `X-Api-Key` header against a shared secret before doing anything. This keeps the bucket private without needing to distribute R2 credentials to every consumer.
+```
+data/{State}/{state}.db
+data/{State}/{state}_raw.zip        (zip of data/{State}/raw/)
+data/{State}/{state}_clean.zip      (zip of data/{State}/cleaned/, .db excluded)
+data/state-level-cf.db
 
-**Manifest tracking.** The Worker maintains a server-side manifest of every file in the bucket — its size, MD5 hash, last pusher, and timestamp. This is what makes the `noop` check possible: on a `push/intent` request, the Worker compares the incoming file hashes against its manifest and tells the client which files have actually changed. Without this, every push would re-upload everything regardless of whether it changed.
+metadata/latest/{State}/manifest.json
+metadata/latest/{State}/report.html
+metadata/latest/{State}/validate.json
+metadata/latest/{State}/queries.txt
 
-**Pre-signed URL generation.** For files that do need uploading, the Worker generates a short-lived pre-signed R2 URL and returns it to the client. The actual upload then goes directly from the client to R2, bypassing the Worker entirely. This keeps large files (multi-hundred-MB state exports) out of the Worker's request body, which has size limits and would be a bottleneck.
+metadata/successful/{State}/...     (same four files)
+```
+
+`metadata/latest/{State}/` is overwritten on every push, pass or fail. `metadata/successful/{State}/` is only touched when that push's validation passed, so it always reflects the last known-good run for that state — neither directory keeps history beyond the single most recent write.
+
+`manifest.json` is built at push time from `metadata/{state}_latest.json` (always the freshest validation report regardless of run mode) — it carries `last_updated`, `status` (`success`/`failed`), `row_counts`, and tier-1 fill rates. This is what a future `downloads.py` FastAPI router would read to describe available state data without touching the heavier `report.html`/`validate.json` files. `report.html` is sourced from the most recent single-state `logs/prod/{ts}_{sync|reparse}[_force]_{ABBR}/` run directory — if a state has never been run standalone (only as part of a multi-state batch), push skips the report and logs a warning rather than failing.
 
 ### Credentials setup
 
 Create a `.env` file in the project root with the following variables:
 
 ```
-R2_ACCOUNT_ID=<your Cloudflare account ID>
-R2_ACCESS_KEY_ID=<R2 access key>
-R2_SECRET_ACCESS_KEY=<R2 secret key>
-R2_BUCKET=<bucket name>
-WORKER_URL=https://<your-worker>.workers.dev
-WORKER_API_KEY=<shared secret for Worker auth>
+AWS_ACCESS_KEY_ID=<AWS access key>
+AWS_SECRET_ACCESS_KEY=<AWS secret key>
+AWS_REGION=<e.g. us-east-1>
+S3_BUCKET=<bucket name>
 ```
 
-`main.py` loads this file via `python-dotenv` before any cloudflare operations run. The variables can also be set directly in the environment (e.g. in a cron job or CI).
+`main.py` loads this file via `python-dotenv` before any S3 operations run. The variables can also be set directly in the environment (e.g. in a cron job or CI), or supplied via the standard AWS credential chain (shared config file, instance role, etc.) if `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` are left unset.
 
-### Intent / confirm pattern
+### Delta detection
 
-Uploads do not go directly to R2. Instead, `push_*` functions use a two-step protocol via the Worker:
+There's no server-side manifest tracking what's already in the bucket — each push checks live against S3 itself. For every candidate file, `s3.py`:
 
-1. **`/push/intent`** — send a list of files with their sizes and MD5 hashes. The Worker checks each against its manifest and responds with an action for each file: `upload` (new or changed) or `noop` (unchanged). For files to upload, the Worker returns a pre-signed R2 URL.
-2. **Upload** — files marked `upload` are PUT directly to R2 via the pre-signed URL. The Worker is not in the upload path, so large files do not pass through it.
-3. **`/push/confirm`** — after all uploads succeed, send confirmation to the Worker so it can update its manifest (byte deltas, pusher identity, timestamp).
+1. Computes an MD5 of the local file.
+2. Calls `head_object` on the target key and reads the `md5` value stashed in that object's metadata from its last upload.
+3. Uploads only if the hashes differ (or the object doesn't exist yet), stashing the new MD5 in the object's metadata as part of the `PutObject` call. Matching hashes are skipped (`noop`) and logged as such.
 
-This design means the Worker handles auth and manifest tracking without being a bandwidth bottleneck. The `noop` check means unchanged files are skipped automatically on every push.
+This avoids trusting a local record of "what we think is in the bucket," which could drift from reality after a partial failure or a push from another machine — `head_object` always reflects the bucket's actual current state.
 
-### Push, pull, diff
+### Push, pull
 
-`push_state` / `pull_state` — sync a single state's `data/{State}/` directory. `push_state` also runs a diff first and deletes any R2 objects that no longer exist locally (i.e. files removed from the local data directory are removed from R2 too).
+`push_state(abbr, state_name)` / `pull_state(abbr, state_name)` — sync a single state. Push zips `raw/` and `cleaned/` fresh each time, uploads the three `data/` artifacts plus the four `metadata/` artifacts (to `latest/` and, if the run passed, `successful/`). Pull downloads and unzips the same artifacts back into `data/{State}/`, without deleting anything already on disk.
 
-`push_all` / `pull_all` — sync the entire `data/` directory. Both require typing `yes` at a confirmation prompt since they can touch a large amount of data.
+`push_all` / `pull_all` — iterate over every state with a local `data/` directory (push) or every state registered in `states.csv` (pull), pushing/pulling one at a time, followed by the aggregate db. Both require typing `yes` at a confirmation prompt.
 
-`push_file` / `pull_file` — sync a single file (used for the aggregate database: `push db` / `pull db`).
-
-`diff_state` / `diff_all` — compare local files against R2 by size and print a report showing which files are only local, only remote, or mismatched in size. Does not upload or download anything.
+`push_db` / `pull_db` — sync just the aggregate database (`push db` / `pull db`).
 
 ---
 

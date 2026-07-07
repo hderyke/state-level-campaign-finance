@@ -32,6 +32,7 @@ from src.aliases import (
     transaction_category_mappings,
     committee_type_mappings,
     expenditure_category_mappings,
+    office_type_mappings,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -139,6 +140,11 @@ def run():
         'state', 'transaction_type',
         else_expr='NULL',               # unknown → NULL (don't invent categories)
     )
+    ofc_case     = _case_expr(
+        office_type_mappings(),
+        'state', 'office',
+        else_expr='NULL',               # unknown → NULL (don't invent canonical labels)
+    )
 
     con        = None
     tables_ok  = 0
@@ -215,6 +221,27 @@ def run():
                     """)
 
 
+
+                if table == "candidates":
+                    # canonical_office → derived from office via office_types.csv (exact match)
+                    con.execute(f"""
+                        UPDATE candidates
+                        SET canonical_office = {ofc_case}
+                        WHERE office IS NOT NULL
+                    """)
+                    # LIKE-based fallbacks for states that embed district info in the office field
+                    # (e.g. GA "State Representative District: 15" → "State Representative")
+                    for like_state, like_pattern, canon in [
+                        ("GA", "State Representative%", "State Representative"),
+                        ("GA", "State Senate%",         "State Senator"),
+                    ]:
+                        con.execute(f"""
+                            UPDATE candidates
+                            SET canonical_office = '{canon}'
+                            WHERE canonical_office IS NULL
+                            AND state = '{like_state}'
+                            AND office LIKE '{like_pattern}'
+                        """)
 
                 if table == "contributions":
                     # contributor_type → canonical (keep raw for unmapped values)

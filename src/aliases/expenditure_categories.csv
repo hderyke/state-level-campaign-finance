@@ -235,3 +235,87 @@ IA,Monetary,Monetary
 IL,6B,Monetary
 IL,8B,Monetary
 IL,9B,Independent Expenditure
+# == Kentucky ==================================================================
+# KREF Expenditure Type field (transaction_type column in expenditures).
+# ITC = Income Tax Checkoff disbursement; DEBT_ASSUMPTION = accounting transfer.
+KY,MONETARY,Monetary
+KY,NONE,
+KY,INKIND,In-Kind
+KY,DEBT_ASSUMPTION,
+KY,TRANSFER,Transfer
+KY,ITC,
+# == Maine =====================================================================
+ME,Expenditure,Monetary
+ME,Independent Expenditure,Independent Expenditure
+ME,Returned Contribution,Monetary
+ME,Debt Payment,Monetary
+ME,Loan Payment,Monetary
+# == Louisiana =================================================================
+# Schedule codes from expenditures CSVs. These appear on multiple form types:
+#   F102 (Candidate):  E-1 = contrib to others, E-2 = operational
+#   F202 (Committee):  E-1 = contrib to candidate, E-2 = operational,
+#                      E-3 = independent expenditure
+#   F305 (Other Person): A = operational, C = operational,
+#                        D = operational, D-2 = contribution to committee
+# B   = Loans and debts repaid (Schedule B, all form types)
+# E-4 = Administrative/filing fees
+LA,E-1,Contribution
+LA,E-2,Monetary
+LA,E-3,Independent Expenditure
+LA,E-4,Monetary
+LA,A,Monetary
+LA,C,Monetary
+LA,D,Monetary
+LA,D-1,Monetary
+LA,D-2,Contribution
+LA,B,Monetary
+# == Maryland ==================================================================
+# Transaction Type from TEXP files. Outstanding Obligation types are debt
+# obligations, not cash expenditures.
+MD,Expenditure,Monetary
+MD,Independent Expenditure / Electioneering Communication,Independent Expenditure
+MD,Outstanding Obligation,Other
+MD,Outstanding Obligation Payment,Monetary
+MD,Outstanding Obligation Forgiven,Other
+MD,Return Expenditure,Refund
+# == Massachusetts ==============================================================
+# transaction_type in expenditures = Record_Type_ID description from the parser.
+MA,Expenditure,Monetary
+MA,Contribution to Registered Committee,Contribution
+MA,Reimbursement,Monetary
+MA,Credit Card Payment,Monetary
+MA,Vendor Payment,Monetary
+MA,Bank-Reported Expenditure,Monetary
+MA,Independent Expenditure,Independent Expenditure
+MA,Administrative Expense,Monetary
+MA,Merchant Provider Fee,Monetary
+MA,Out-of-Pocket Candidate Expense,Monetary
+# == Michigan ==================================================================
+MI,Direct Expenditures,Monetary
+MI,Direct Expenditures - Public Funds,Monetary
+MI,Direct Expenditures - Debt/Loan Repayment,Monetary
+MI,GOTV Expenditures,Monetary
+MI,Incidental Expenditures (Incumbent Only),Monetary
+MI,In-Kind Expenditures,In-Kind
+MI,Independent Expenditures,Independent Expenditure
+# Loan rows routed to loans_debts at parse time — suppress residuals
+MI,Direct Expenditures - Loan Owed to/Given By,
+# SUPP appears in IE filings for ballot question support/oppose activity
+MI,SUPP,Other
+# Refund/Rebate rows written as negative-amount expenditures by the parser
+MI,Refund/Rebate,Other
+# == Minnesota =================================================================
+# "Type" from mn_expenditures.csv — expenditure type codes from the CFB.
+# IE "Type" values from mn_ind_expenditures.csv: parser prefixes "For" or "Against".
+# Confirm exact strings after first parse run; common values listed here.
+MN,General Expenditure,Monetary
+MN,Campaign Expenditure,Monetary
+MN,Non-Campaign Disbursement,Monetary
+MN,Other Disbursement,Monetary
+MN,Ballot Question Expenditure,Other
+MN,Contribution,Contribution
+MN,Contribution to Another Committee,Contribution
+MN,Independent Expenditure For,Independent Expenditure
+MN,Independent Expenditure Against,Independent Expenditure
+MN,In-Kind,In-Kind
+MN,In-Kind IE,In-Kind

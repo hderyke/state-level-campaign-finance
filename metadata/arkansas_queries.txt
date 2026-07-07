@@ -1,0 +1,225 @@
+
+================================================================================
+  TOP 20 CONTRIBUTORS — total donated & top recipient committee  [ARKANSAS]
+================================================================================
+  Contributor                                    Txns   Total Donated  Top Recipient                                       To Top
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  Contributions, Non-Arkansas                      26  $    5,651,021  FedEx Corporation Political Action Commit…  $    3,015,682
+  HNTB Holdings Ltd. Federal PAC                   13  $    2,614,154  HNTB Holdings Ltd. PAC                      $    2,614,154
+  Contributions from non-AR State, Contribu…       17  $    2,112,841  Regions Financial Corporation Political A…  $    1,283,006
+  Harris Victory Fund                               3  $    1,062,000  DPA Services Corporation-DBA Democratic P…  $    1,062,000
+  Contributions, Non-AR                            13  $      944,493  Reynolds American Inc. Political Action C…  $      944,493
+  Transfer from Tim Griffin for Attorney Ge…        1  $      797,839  Griffin, Tim                                $      797,839
+  Contributions, Non Arkansas                       2  $      567,204  Weyerhaeuser Company Political Action Com…  $      567,204
+  Cameron, Ronald                                  16  $      522,700  Safe Streets Arkansas                       $      475,000
+  Devos, Dick                                       1  $      500,000  AFC Victory Fund                            $      500,000
+  Devos, Betsy                                      1  $      500,000  AFC Victory Fund                            $      500,000
+  New Generation                                    3  $      490,000  Arkansas Conservatives                      $      490,000
+  Acadia Healthcare Company, Inc. PAC               5  $      316,745  Acadia Healthcare Company, Inc. PAC         $      310,745
+  Duffield, Matt                                   17  $      312,511  Duffield, Matt                              $      278,611
+  Olson, Christian                                 29  $      260,252  Olson, Christian                            $      255,257
+  Walton, Jim                                      88  $      239,082  House Leadership PAC                        $       20,000
+  Brown, Matthew                                  148  $      199,057  Brown, Matthew                              $      176,416
+  Simon, Brad                                       7  $      190,100  Simon, Brad                                 $      190,000
+  Collins, Andrew                                  60  $      188,176  Collins, Andrew                             $      163,882
+  Democratic National Committee                    12  $      187,647  DPA Services Corporation-DBA Democratic P…  $      187,647
+  ARKANSANS FOR STUDENTS AND ED.                    1  $      164,703  REPUBLICAN PARTY OF ARKANSAS(STATE)         $      164,703
+
+================================================================================
+  TOP 20 RECIPIENT CANDIDATES — total contributions received  [ARKANSAS]
+================================================================================
+  Candidate                                   St    Office                      Party            Txns  Total Received
+  ------------------------------------------  ----  --------------------------  ------------  -------  --------------
+  Sanders, Sarah                              AR    Governor                    Republican …   40,079  $    7,539,360
+  Griffin, Tim                                AR    Attorney General            Republican …    1,076  $    2,224,136
+  Rutledge, Leslie                            AR    Lieutenant Governor         Republican …      498  $      723,011
+  Wooldridge, Jeremy                          AR    State Senate                Republican …      389  $      584,592
+  Duffield, Matt                              AR    State Representative        Republican …      602  $      577,849
+  McNulty, Molly                              AR    Court of Appeals                            1,244  $      384,763
+  Wood, Rhonda                                AR    Supreme Court                                 392  $      371,550
+  Wallace, David                              AR    State Senate                Republican …      313  $      313,965
+  Childress, Paul                             AR    State Representative        Republican …      304  $      299,009
+  Olson, Christian                            AR    State Land Commissioner     Republican …       95  $      288,690
+  Bohannan, Trey                              AR    State Senate                Republican …      155  $      287,281
+  Bronni, Nick                                AR    Supreme Court                                 287  $      280,347
+  Johnson, Mark                               AR    State Senate                Republican …      355  $      274,426
+  Caldwell, Ronald                            AR    State Senate                Republican …      347  $      269,575
+  Hiland, James                               AR    Supreme Court                                 176  $      265,800
+  ACHOR, BRANDON                              AR    State Senate                Republican …      260  $      264,271
+  Tellez, Robert                              AR    Circuit Judge                                 830  $      260,799
+  Simon, Brad                                 AR    State Senate                Republican …      132  $      258,440
+  Davis, Breanne                              AR    State Senate                Republican …      152  $      252,857
+  Brown, Matthew                              AR    State Representative        Republican …      162  $      250,961
+
+================================================================================
+  TOP 20 NON-CANDIDATE COMMITTEES — total contributions received  [ARKANSAS]
+================================================================================
+  St    Committee                                   Type                             Txns  Total Received
+  ----  ------------------------------------------  ----------------------------  -------  --------------
+  AR    Huck PAC                                    Political Action Committee    120,916  $    6,936,062
+  AR    DPA Services Corporation-DBA Democratic P…  Political Party                23,385  $    4,430,216
+  AR    Comcast Corporation & NBCUniversal Politi…  Political Action Committee     40,521  $    3,082,840
+  AR    Union Pacific Corp. Fund for Effective Go…  Political Action Committee     17,124  $    3,024,512
+  AR    FedEx Corporation Political Action Commit…  Political Action Committee         13  $    3,015,682
+  AR    Elevance Health, Inc. Political Action Co…  Political Action Committee     34,612  $    3,006,443
+  AR    BNSF Railway Company RAILPAC                Political Action Committee     42,382  $    2,924,334
+  AR    Koch, Inc. Political Action Committee (KO…  Political Action Committee     17,846  $    2,763,864
+  AR    The Cigna Group Employee Political Action…  Political Action Committee     26,189  $    2,734,735
+  AR    HDR, Inc. Employee Owners PAC               Political Action Committee         13  $    2,635,339
+  AR    HNTB Holdings Ltd. PAC                      Political Action Committee         13  $    2,614,154
+  AR    Centene Corporation Political Action Comm…  Political Action Committee     39,312  $    2,520,545
+  AR    General Motors Company Political Action C…  Political Action Committee     75,610  $    2,511,966
+  AR    Entergy Corporation Employee Political Ac…  Political Action Committee     40,181  $    2,409,101
+  AR    Altria Group, Inc. Political Action Commi…  Political Action Committee     60,362  $    2,405,815
+  AR    Merck & Co., Inc., Employees Political Ac…  Political Action Committee     67,951  $    2,362,163
+  AR    Deloitte Political Action Committee         Political Action Committee      5,061  $    2,333,379
+  AR    Caterpillar inc. Political Action Commitee  Political Action Committee     15,371  $    2,143,197
+  AR    Cozen O'Connor Political Action Committee   Political Action Committee      9,757  $    2,088,684
+  AR    Regions Financial Corporation Political A…  Political Action Committee     17,275  $    1,888,818
+
+================================================================================
+  TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client  [ARKANSAS]
+================================================================================
+  Payee                                          Txns  Total Received  Largest Client                                 From Client
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  Contribution to Fed, Non AR State and loc…       75  $    6,507,970  Regions Financial Corporation Political A…  $    1,347,000
+  Non AR Candidates & Committees                   38  $    6,148,485  FedEx Corporation Political Action Commit…  $    3,009,401
+  Non Arkansas Candidates and Committees           22  $    2,893,461  HNTB Holdings Ltd. PAC                      $    2,522,274
+  Fulfillment Solutions Inc.                      350  $    2,870,414  Huck PAC                                    $    2,870,414
+  Democratic National Committee                    21  $    2,451,941  DPA Services Corporation-DBA Democratic P…  $    2,451,941
+  JCD Consulting                                  233  $    1,346,868  Hammer, Kim                                 $      244,624
+  Planet Direct Mail                              159  $    1,109,296  Huck PAC                                    $    1,109,296
+  Capitol Consulting Firm                         167  $      906,025  Simon, Brad                                 $      274,185
+  Camco                                           200  $      893,801  Hudson, Courtney                            $      231,435
+  JCD Consulting Services                          93  $      858,902  Wooldridge, Jeremy                          $      356,644
+
+================================================================================
+  ACTIVITY BY YEAR — contribution and expenditure row counts and totals  [ARKANSAS]
+================================================================================
+    Year      Cont N        Cont Total      Expn N        Expn Total
+  ------  ----------  ----------------  ----------  ----------------
+    2000           0    $            0           1    $            0
+    2001          13    $       12,752          15    $        8,160
+    2002           1    $        5,000           0    $            0
+    2003           0    $            0           1    $          200
+    2005           1    $        3,000           0    $            0
+    2006           1    $           50           0    $            0
+    2008           0    $            0           1    $          196
+    2011           0    $            0           1    $           24
+    2012           1    $           50           0    $            0
+    2015           0    $            0           1    $           42
+    2020           1    $          100           0    $            0
+    2021           1    $           50           0    $            0
+    2022       1,691    $      888,381          47    $      162,167
+    2023     225,274    $   25,026,622       9,187    $   12,548,745
+    2024     352,121    $   42,404,976      16,267    $   34,624,584
+    2025     405,965    $   51,185,954      17,504    $   26,202,942
+    2026     105,724    $   17,960,645      10,333    $   18,744,379
+
+================================================================================
+  CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total  [ARKANSAS]
+================================================================================
+  Contributor Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Individual                       1,078,169    $  110,397,159      98.8%
+  Business/Organization/Unliste…      10,008    $   20,792,486       0.9%
+  Political Action Committee           1,555    $    2,478,111       0.1%
+  Candidate                              783    $    3,490,623       0.1%
+  County Political Party Commit…         249    $      249,134       0.0%
+  Political Party                         29    $       63,267       0.0%
+  Independent Expenditure Commi…           1    $       16,800       0.0%
+
+================================================================================
+  TOP 10 CONTRIBUTOR STATES — where the money comes from  [ARKANSAS]
+================================================================================
+  State                        N             Total    % rows
+  ------------------  ----------  ----------------  --------
+  AR                     205,789    $   59,126,559      18.9%
+  TX                     124,466    $    9,628,131      11.4%
+  MI                      70,969    $    3,689,493       6.5%
+  PA                      66,726    $    4,412,551       6.1%
+  VA                      51,629    $    3,461,049       4.7%
+  MO                      45,215    $    3,613,693       4.1%
+  IL                      39,666    $    3,923,977       3.6%
+  IN                      32,975    $    2,474,123       3.0%
+  NY                      32,403    $    2,968,362       3.0%
+  NJ                      28,598    $    2,043,295       2.6%
+
+================================================================================
+  EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total  [ARKANSAS]
+================================================================================
+  Transaction Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Itemized Monetary                   34,407    $   37,666,843      64.5%
+  Itemized Monetary Contributio…      10,473    $   34,634,574      19.6%
+  Itemized Administrative Expen…       8,030    $   18,919,431      15.0%
+  (blank)                                294    $      884,449       0.6%
+  Itemized Nonmoney Contributio…         118    $      104,943       0.2%
+  Non-Itemized Monetary                   23    $        8,605       0.0%
+  Non-Itemized Administrative E…           7    $          839       0.0%
+  Non-Itemized Monetary Contrib…           6    $       71,755       0.0%
+
+================================================================================
+  10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check  [ARKANSAS]
+================================================================================
+  Date          Contributor                         Type    Committee                                       Amount
+  ------------  ----------------------------------  ------  ------------------------------------  ----------------
+  2024-09-19    Harris Victory Fund                 Busin…  DPA Services Corporation-DBA Democr…    $    1,000,000
+  2022-12-30    Transfer from Tim Griffin for Att…  Busin…  Griffin, Tim                            $      797,839
+  2025-11-13    Contributions, Non Arkansas         Indiv…  Weyerhaeuser Company Political Acti…    $      534,226
+  2026-04-02    Devos, Dick                         Indiv…  AFC Victory Fund                        $      500,000
+  2026-04-02    Devos, Betsy                        Indiv…  AFC Victory Fund                        $      500,000
+  2026-03-31    Contributions from non-AR State, …  Indiv…  Deloitte Political Action Committee     $      386,795
+  2026-02-11    Cameron, Ronald                     Indiv…  Safe Streets Arkansas                   $      300,000
+  2026-03-18    New Generation                      Busin…  Arkansas Conservatives                  $      300,000
+  2024-12-31    Duffield, Matt                      Candi…  Duffield, Matt                          $      278,611
+  2025-08-20    Acadia Healthcare Company, Inc. P…  Busin…  Acadia Healthcare Company, Inc. PAC     $      271,011
+
+================================================================================
+  10 RANDOM CONTRIBUTION ROWS — raw data spot check  [ARKANSAS]
+================================================================================
+  Date          Contributor                   T            Amount  Committee                       City                St    Employer                Occupation          
+  ------------  ----------------------------  -----  ------------  ------------------------------  ------------------  ----  ----------------------  --------------------
+  2022-12-09                                  Indi…  $           25  Sanders, Sarah                  Rapid City          SD    Retired                 Retired             
+  2023-01-27                                  Indi…  $            5  OGE Energy Corp Employees Pol…  Oklahoma City       OK    OGE Energy Corp         Dir Fuels, Mkt Ops …
+  2023-09-12    Cox, Frank                    Indi…  $          500  Ware, Brooke-Augusta            Little Rock         AR    CMW Marketing + Creat…  Marketing Executive 
+  2023-09-27    Humphrey, Lori                Indi…  $           34  Altria Group, Inc. Political …  Hopkinsville        KY    US Smokls Tob Co LLC    General Business    
+  2023-12-05    LARSON, ROBERT                Indi…  $           24  BNSF Railway Company RAILPAC    FORT WORTH          TX    BNSF Railway Company    MGR LABOR RELATIONS 
+  2023-12-11                                  Indi…  $            1  Faulkner County Democratic Pa…  Conway              AR    Not Employed            Not Currently Emplo…
+  2024-04-12    Schraibman, Susan             Indi…  $           75  Windstream Holdings II, LLC F…  Hudson              OH    Windstream Services, …  President-State Ope…
+  2024-09-24                                  Indi…  $            5  Black Hills Corporation PAC     Lincoln             NE    Black Hills Corporati…  Planner Utility Con…
+  2024-11-19    Benson, Johanna               Indi…  $           10  Black Hills Corporation PAC     Lincoln             NE    Black Hills Corporati…  Mgr Finance         
+  2024-12-17    Hagen, Scott                  Indi…  $           33  Black Hills Corporation PAC     Rapid City          SD    Black Hills Corporati…  DIR SUPPLY CHAIN    
+
+================================================================================
+  10 MOST RECENT CONTRIBUTIONS — data freshness check  [ARKANSAS]
+================================================================================
+  Date          Contributor                       Type            Amount  Committee                         
+  ------------  --------------------------------  ------  --------------  ----------------------------------
+  2026-06-30                                      Indiv…  $            6  Gonzales Worthen, Diana           
+  2026-06-30                                      Indiv…  $          100  Gonzales Worthen, Diana           
+  2026-06-30                                      Indiv…  $           50  Gonzales Worthen, Diana           
+  2026-06-30                                      Indiv…  $          100  Gonzales Worthen, Diana           
+  2026-06-30                                      Indiv…  $          100  Gonzales Worthen, Diana           
+  2026-06-30                                      Indiv…  $          200  Gonzales Worthen, Diana           
+  2026-06-30                                      Indiv…  $          200  Gonzales Worthen, Diana           
+  2026-06-30                                      Indiv…  $           50  Gonzales Worthen, Diana           
+  2026-06-30                                      Indiv…  $           50  Gonzales Worthen, Diana           
+  2026-06-30                                      Indiv…  $           75  Gonzales Worthen, Diana           
+
+================================================================================
+  10 MOST RECENT EXPENDITURES — data freshness check  [ARKANSAS]
+================================================================================
+  Date          Payee                                     Amount  Committee                     Type                  
+  ------------  --------------------------------  --------------  ----------------------------  ----------------------
+  2026-06-30    Dees, Tyler                       $          572  Dees, Tyler                   Itemized Monetary     
+  2026-06-30    Arvest                            $            5  Crossland Construction PAC    Itemized Administrati…
+  2026-06-30    Bank OZK                          $            5  ARKANSAS ASPHALT PAVEMENT A…  Itemized Administrati…
+  2026-06-30    Peoples Bank                      $           36  SATCO PAC, Inc                Itemized Administrati…
+  2026-06-30    Cabot Chamber of Commerce         $          100  Lonoke County Republican Co…  Itemized Administrati…
+  2026-06-30    WebstaurantStore                  $          695  Baxter County Republican Co…  Itemized Administrati…
+  2026-06-30    Contribution to Fed, Non AR Sta…  $      487,843  Cadence Bank PAC              Itemized Monetary Con…
+  2026-06-30    Soto, Erick                       $          750  Gonzales Worthen, Diana       Itemized Monetary     
+  2026-06-30    Well Water Consulting, LLC        $        2,084  Gonzales Worthen, Diana       Itemized Monetary     
+  2026-06-30    Stripe                            $           35  Gonzales Worthen, Diana       Itemized Monetary     
+

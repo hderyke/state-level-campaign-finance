@@ -1,0 +1,258 @@
+
+================================================================================
+  TOP 20 CONTRIBUTORS — total donated & top recipient committee  [KENTUCKY]
+================================================================================
+  Contributor                                    Txns   Total Donated  Top Recipient                                       To Top
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  VARIOUS                                       3,188  $   34,190,898  KENTUCKY STATE DEMOCRATIC EXECUTIVE COMMI…  $   10,563,659
+  KENTUCKY EDUCATORS POLITICAL ACTION COMMI…    1,418  $   32,755,340  KENTUCKY EDUCATORS POLITICAL ACTION COMMI…  $   30,250,226
+  ERNIE FLETCHER                                   48  $   24,254,586  ERNIE FLETCHER                              $   24,253,586
+  STEVEN BESHEAR                                  117  $   23,665,012  STEVEN BESHEAR                              $   23,633,757
+  MATT BEVIN                                       46  $   21,322,968  MATT BEVIN                                  $   21,321,468
+  HAL HEINER                                       91  $   20,482,950  HAL HEINER                                  $   20,449,488
+  W. LUNSFORD                                      98  $   19,562,270  W. LUNSFORD                                 $   19,525,370
+  GREG FISCHER                                    154  $   19,325,902  GREG FISCHER                                $   19,253,645
+  Better Schools Kentucky, Pac                     64  $   19,311,771  Better Schools Kentucky, Pac                $   19,311,771
+  Democratic Governors Association                 32  $   19,271,075  Defending Bluegrass Values                  $   19,266,075
+  KENTUCKY UNITED AUTOMOBILE, AEROSPACE & A…      480  $   15,858,019  KENTUCKY UNITED AUTOMOBILE, AEROSPACE & A…  $   15,548,235
+  ANDREW BESHEAR                                   68  $   15,511,214  ANDREW BESHEAR                              $   15,500,214
+  JACK CONWAY                                      54  $   13,849,614  JACK CONWAY                                 $   13,831,514
+  ROCKY ADKINS                                    324  $   13,838,721  ROCKY ADKINS                                $   13,769,167
+  REPUBLICAN GOVERNORS ASSOCIATION                 27  $   13,718,587  PUTTING KENTUCKY FIRST, UCC                 $   13,718,587
+  Kentucky Democratic Party                       273  $   13,449,743  ANDREW BESHEAR                              $    9,094,306
+  A. CHANDLER                                      42  $   12,825,731  A. CHANDLER                                 $   12,825,531
+  Republican Governors Association                 15  $   12,643,448  KENTUCKY VALUES                             $   12,643,448
+  COMMUNICATIONS WORKERS OF AMERICA - DISTR…      116  $   12,232,709  COMMUNICATIONS WORKERS OF AMERICA - DISTR…  $   12,211,142
+  KENTUCKY REALTORS PAC                         1,787  $   11,811,767  KENTUCKY REALTORS PAC                       $   10,719,494
+
+================================================================================
+  TOP 20 RECIPIENT CANDIDATES — total contributions received  [KENTUCKY]
+================================================================================
+  Candidate                                   St    Office                      Party            Txns  Total Received
+  ------------------------------------------  ----  --------------------------  ------------  -------  --------------
+  ANDREW BESHEAR                              KY    GOVERNOR                    Democratic     76,914  $   54,725,573
+  STEVEN BESHEAR                              KY    SLATE                       Democratic     28,586  $   48,527,536
+  ERNIE FLETCHER                              KY    SLATE                       Republican     22,294  $   39,896,425
+  MATT BEVIN                                  KY    SLATE                       Republican      8,603  $   32,584,537
+  JACK CONWAY                                 KY    SLATE                       Democratic     17,036  $   29,605,264
+  GREG FISCHER                                KY    MAYOR (J2)                  Democratic      8,011  $   27,084,405
+  HAL HEINER                                  KY    SLATE                       Republican      4,286  $   22,172,016
+  W. LUNSFORD                                 KY    SLATE                       Democratic      1,230  $   20,431,575
+  A. CHANDLER                                 KY    SLATE                       Democratic     11,492  $   20,020,406
+  ROCKY ADKINS                                KY    STATE REPRESENTATIVE        Democratic      3,952  $   18,150,119
+  KELLY CRAFT                                 KY    GOVERNOR                    Republican      1,852  $   12,366,299
+  ADAM EDELEN                                 KY    SLATE                       Democratic      5,594  $   11,522,040
+  DANIEL CAMERON                              KY    GOVERNOR                    Republican     19,767  $   10,517,903
+  JODY RICHARDS                               KY    STATE REPRESENTATIVE        Democratic      4,756  $   10,037,847
+  JERRY ABRAMSON                              KY    MAYOR (J2)                  Democratic      3,704  $    9,311,164
+  GREGORY STUMBO                              KY    ATTORNEY GENERAL            Democratic      3,782  $    8,844,364
+  JIM GRAY                                    KY    MAYOR (J2)                                  5,232  $    7,637,611
+  DAMON THAYER                                KY    STATE SENATOR (ODD)         Republican      3,739  $    7,497,782
+  ANDY BESHEAR                                KY    GOVERNOR                    Democratic     34,948  $    7,450,511
+  JAMES COMER                                 KY    SLATE                       Republican      6,264  $    7,007,369
+
+================================================================================
+  TOP 20 NON-CANDIDATE COMMITTEES — total contributions received  [KENTUCKY]
+================================================================================
+  St    Committee                                   Type                             Txns  Total Received
+  ----  ------------------------------------------  ----------------------------  -------  --------------
+  KY    KENTUCKY EDUCATORS POLITICAL ACTION COMMI…  State Pac                         615  $   39,436,765
+  KY    KENTUCKY STATE DEMOCRATIC EXECUTIVE COMMI…  Executive Committee             2,560  $   36,963,928
+  KY    Better Schools Kentucky, Pac                State Pac                         303  $   32,564,235
+  KY    KENTUCKY FAMILY VALUES, UCC                 Issues Committee                  354  $   30,244,487
+  KY    Kentucky State Republican Executive Commi…  Executive Committee             1,990  $   23,795,057
+  KY    Defending Bluegrass Values                  Independent Expenditure-Onl…       57  $   22,433,119
+  KY    PUTTING KENTUCKY FIRST, UCC                 Issues Committee                   46  $   17,873,209
+  KY    KENTUCKY UNITED AUTOMOBILE, AEROSPACE & A…  State Pac                         103  $   16,335,840
+  KY    KENTUCKY REALTORS PAC                       State Pac                      27,411  $   16,066,183
+  KY    KENTUCKY VALUES                             Independent Expenditure-Onl…       16  $   12,648,448
+  KY    COMMUNICATIONS WORKERS OF AMERICA - DISTR…  State Pac                         793  $   12,435,976
+  KY    KENTUCKY HOUSE DEMOCRATIC CAUCUS CAMPAIGN…  Caucus Campaign Committee       8,423  $   11,855,692
+  KY    PLUMBERS & PIPE FITTERS LOCAL # 502, PAC    State Pac                         264  $    9,290,644
+  KY    Protect Our Schools KY                      Issues Committee                  854  $    8,698,778
+  KY    SENATE REPUBLICAN CAUCUS CAMPAIGN COMMITT…  Caucus Campaign Committee       2,507  $    8,324,271
+  KY    INTERNATIONAL BROTHERHOOD OF ELECTRICAL W…  State Pac                         175  $    7,968,407
+  KY    KENTUCKIANS FOR STRONG LEADERSHIP, UCC      Issues Committee                  128  $    7,476,554
+  KY    BESHEAR ABRAMSON INAUGURAL COMMITTEE 2011   Inaugural Committee               131  $    7,302,044
+  KY    HOUSE REPUBLICAN CAUCUS CAMPAIGN COMMITTEE  Caucus Campaign Committee       2,727  $    6,851,712
+  KY    BLUEGRASS VALUES, UCC                       Issues Committee                   27  $    6,720,904
+
+================================================================================
+  TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client  [KENTUCKY]
+================================================================================
+  Payee                                          Txns  Total Received  Largest Client                                 From Client
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  VARIOUS                                      19,458  $   91,408,076  KENTUCKY STATE DEMOCRATIC EXECUTIVE COMMI…  $   11,983,600
+  Great American Media                             25  $   18,092,029  Defending Bluegrass Values                  $   18,092,029
+  Del Cielo Media LLC                              17  $   10,397,767  KENTUCKY VALUES                             $    9,896,532
+  BlueWest Media                                   14  $   10,077,372  ANDREW BESHEAR                              $   10,077,372
+  Andy Besher for Governor                         10  $    9,044,306  KENTUCKY STATE DEMOCRATIC EXECUTIVE COMMI…  $    9,044,306
+  THE CAMPAIGN GROUP, INC.                         40  $    7,715,141  JACK CONWAY                                 $    7,715,141
+  MENTZER MEDIA SERVICES, INC.                     37  $    7,416,710  Bluegrass Freedom Action                    $    4,060,020
+  Beacon Media                                     18  $    7,267,021  Protect Our Schools KY                      $    7,267,021
+  Grit Creative                                   412  $    7,057,683  Kentucky State Republican Executive Commi…  $    1,078,330
+  MEDIA STRATEGIES                                 22  $    6,792,883  STEVEN BESHEAR                              $    6,410,883
+
+================================================================================
+  ACTIVITY BY YEAR — contribution and expenditure row counts and totals  [KENTUCKY]
+================================================================================
+    Year      Cont N        Cont Total      Expn N        Expn Total
+  ------  ----------  ----------------  ----------  ----------------
+    1996       1,053    $    1,917,697         704    $      144,615
+    1997      11,916    $   14,791,538       7,364    $    2,636,103
+    1998      72,585    $   71,575,830      67,092    $   34,958,272
+    1999      27,749    $   32,424,354      15,218    $   11,121,902
+    2000      30,703    $   56,526,209      18,961    $   26,513,040
+    2001      15,225    $   23,853,342       2,067    $    3,944,476
+    2002      76,201    $   97,938,674      22,965    $   46,806,759
+    2003      43,340    $   94,345,913       9,241    $   37,700,199
+    2004      39,992    $   56,093,671       9,872    $   22,184,712
+    2005      19,251    $   27,343,894       2,414    $    1,440,941
+    2006     105,864    $  118,365,630      23,380    $   23,072,520
+    2007      48,554    $   80,432,448       8,095    $   31,836,115
+    2008      37,175    $   58,635,150      10,190    $   13,213,506
+    2009      22,536    $   34,134,574       3,180    $    4,361,494
+    2010      89,693    $  115,506,651      15,477    $   22,377,108
+    2011      32,571    $   68,115,511       8,241    $   24,237,011
+    2012      37,680    $   65,929,825       6,065    $    9,772,793
+    2013      21,025    $   34,780,542       2,594    $    4,167,490
+    2014      87,725    $  147,527,330      12,954    $   18,764,817
+    2015      43,120    $  121,198,754       9,222    $   58,444,110
+    2016      40,563    $   90,013,688       6,336    $   18,078,302
+    2017      18,415    $   39,614,575       2,529    $    5,129,022
+    2018      80,245    $  156,022,098      13,341    $   23,104,179
+    2019      41,492    $  137,130,294      10,372    $   64,583,095
+    2020      63,890    $   40,101,274      24,909    $   36,965,519
+    2021      50,543    $   22,993,821      13,171    $   10,476,852
+    2022     152,044    $   80,927,227      66,049    $   77,046,440
+    2023     136,294    $  118,971,255      19,928    $  126,020,672
+    2024      82,184    $   53,237,238      28,166    $   55,888,030
+    2025      48,371    $   23,710,722      14,318    $   15,436,939
+    2026      41,602    $   16,093,064      20,912    $   21,384,108
+    2030           1    $           17           0    $            0
+
+================================================================================
+  CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total  [KENTUCKY]
+================================================================================
+  Contributor Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  INDIVIDUAL                       1,044,916    $  414,976,727      64.5%
+  UNITEMIZED                         174,555    $   49,286,526      10.8%
+  CANDIDATE                          106,366    $  127,067,222       6.6%
+  BALANCE_CARRYFORWARD                92,665    $  988,206,535       5.7%
+  KYPAC                               56,828    $   48,455,581       3.5%
+  CASH                                38,720    $    4,380,018       2.4%
+  OTHER                               24,607    $  183,855,790       1.5%
+  FEDERALPAC                          15,575    $   20,609,498       1.0%
+  ANONYMOUS                           13,076    $    2,493,135       0.8%
+  INTEREST                            11,034    $    1,101,221       0.7%
+  CONTRIBUTINGORGANIZATION             9,834    $   90,988,980       0.6%
+  CANDIDATE_DEBT_ASSUMPTION            8,558    $   64,931,653       0.5%
+  EXECUTIVECOMM                        6,783    $   58,562,647       0.4%
+  INCOME_TAX_CHECKOFF                  6,515    $    5,875,475       0.4%
+  OTHER_CANDIDATES                     4,449    $    1,310,603       0.3%
+  CAUCUS_CAMP_COMM                     1,816    $   13,515,596       0.1%
+  OUT_OF_STATE_PACS                    1,487    $    1,011,970       0.1%
+  OTHER_CAMP_COMM                        838    $    5,636,370       0.1%
+  AUTHORIZED_ENTITY                      287    $    1,121,882       0.0%
+  INCOME_TAX_CHECKOFF_OTHER_INT…         248    $        6,423       0.0%
+  AFFILIATE                              182    $      169,715       0.0%
+  GOVERNOR                               144    $   12,718,006       0.0%
+  EXEC_COMM_UNITEM                        52    $        3,826       0.0%
+  NATIONAL_EXECUTIVE_COMMITTEE            36    $    3,875,702       0.0%
+  LT_GOVERNOR                             20    $       44,363       0.0%
+  EXEC_COMM_CASH                           9    $       22,350       0.0%
+  CAUCUS_CAMP_COMM_CASH                    2    $       25,000       0.0%
+
+================================================================================
+  TOP 10 CONTRIBUTOR STATES — where the money comes from  [KENTUCKY]
+================================================================================
+  State                        N             Total    % rows
+  ------------------  ----------  ----------------  --------
+  KY                     839,333    $  532,946,950      51.8%
+  (blank)                702,186    $1,387,246,207      43.4%
+  OH                      11,272    $    6,183,374       0.7%
+  IN                       8,988    $    4,309,716       0.6%
+  DC                       8,136    $  107,249,070       0.5%
+  FL                       5,439    $    4,748,803       0.3%
+  TN                       4,833    $    3,308,794       0.3%
+  NY                       3,423    $    6,402,026       0.2%
+  TX                       3,215    $    3,768,880       0.2%
+  IL                       2,880    $    5,156,497       0.2%
+
+================================================================================
+  EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total  [KENTUCKY]
+================================================================================
+  Transaction Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  MONETARY                           457,877    $  779,671,148      96.3%
+  NONE                                10,356    $    8,359,820       2.2%
+  INKIND                               2,690    $   27,651,260       0.6%
+  TRANSFER                             1,850    $   29,379,724       0.4%
+  DEBT_ASSUMPTION                      1,838    $    5,973,223       0.4%
+  ITC                                    716    $      775,967       0.2%
+
+================================================================================
+  10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check  [KENTUCKY]
+================================================================================
+  Date          Contributor                         Type    Committee                                       Amount
+  ------------  ----------------------------------  ------  ------------------------------------  ----------------
+  2007-06-22    W. LUNSFORD                         CANDI…  W. LUNSFORD                             $    5,700,000
+  1998-10-25    GEORGE KISER                        CANDI…  GEORGE KISER                            $    5,281,998
+  2023-06-19    Andrew Beshear                      OTHER   ANDREW BESHEAR                          $    5,000,000
+  2000-12-07    VARIOUS                             OTHER   KENTUCKY STATE DEMOCRATIC EXECUTIVE…    $    4,941,576
+  2015-11-10    HAL HEINER                          CANDI…  HAL HEINER                              $    4,917,869
+  2014-07-01    HAL HEINER                          BALAN…  HAL HEINER                              $    3,907,980
+  2014-06-24    HAL HEINER                          CANDI…  HAL HEINER                              $    3,800,000
+  2000-11-30    VARIOUS                             OTHER   Kentucky State Republican Executive…    $    3,720,203
+  2014-10-01    HAL HEINER                          BALAN…  HAL HEINER                              $    3,502,535
+  2015-01-01    HAL HEINER                          BALAN…  HAL HEINER                              $    3,467,422
+
+================================================================================
+  10 RANDOM CONTRIBUTION ROWS — raw data spot check  [KENTUCKY]
+================================================================================
+  Date          Contributor                   T            Amount  Committee                       City                St    Employer                Occupation          
+  ------------  ----------------------------  -----  ------------  ------------------------------  ------------------  ----  ----------------------  --------------------
+  1997-09-30                                  INTE…  $            7  DEBORAH WILLIAMS                                                                  Unknown             
+  1997-11-06                                  UNIT…  $        2,480  PAM MILLER                                                                                            
+  2006-09-16    FIFTH DISTRICT DEMOCRATIC W…  CONT…  $          500  LESLIE COMBS                    HAZARD              KY                                                
+  2010-02-27    JUDY RALEY                    INDI…  $          500  MARTY SHEPHARD                  BUFFALO             MO                                                
+  2010-03-10    JOYCE STEINMAN                INDI…  $          100  SCOTT KIMMICH                   FT. THOMAS                N/A                                         
+  2010-03-19    MELISSA ACKMAN                INDI…  $          250  CHRIS MACKE                     LOUISVILLE          KY    VALASBIS                                    
+  2010-03-23    VICKRAM RAJADHYAKSHA          INDI…  $        1,000  DAVID TANDY                     POWELL              OH    DLZ                                         
+  2010-03-27    LOUIS BERMAN                  INDI…  $        1,000  STEVEN BESHEAR                  LOUISVILLE                NEACE LUKENS                                
+  2010-04-12    KEITH MILLER                  BALA…  $          365  KEITH MILLER                                                                                          
+  2010-04-19    WARREN HEIST                  INDI…  $           50  TERRY CARL                      PARK HILLS          KY    KREMER MARKETS                              
+
+================================================================================
+  10 MOST RECENT CONTRIBUTIONS — data freshness check  [KENTUCKY]
+================================================================================
+  Date          Contributor                       Type            Amount  Committee                         
+  ------------  --------------------------------  ------  --------------  ----------------------------------
+  2030-07-20    BRUCE REYNOLDS                    INDIV…  $           17  JOHN AUBREY                       
+  2026-06-30    Service One Credit Union          INTER…  $            1  Warren County Conservatives Polit…
+  2026-06-30    Jonathan Holzapfel                INDIV…  $           60  PADUCAH PROFESSIONAL FIREFIGHTERS…
+  2026-06-30    Matt Meiser                       INDIV…  $           60  PADUCAH PROFESSIONAL FIREFIGHTERS…
+  2026-06-30    John Potter                       INDIV…  $           60  PADUCAH PROFESSIONAL FIREFIGHTERS…
+  2026-06-30                                      UNITE…  $           15  PADUCAH PROFESSIONAL FIREFIGHTERS…
+  2026-06-30                                      UNITE…  $           30  PADUCAH PROFESSIONAL FIREFIGHTERS…
+  2026-06-30                                      UNITE…  $           42  PADUCAH PROFESSIONAL FIREFIGHTERS…
+  2026-06-30                                      UNITE…  $           30  PADUCAH PROFESSIONAL FIREFIGHTERS…
+  2026-06-30                                      UNITE…  $           42  PADUCAH PROFESSIONAL FIREFIGHTERS…
+
+================================================================================
+  10 MOST RECENT EXPENDITURES — data freshness check  [KENTUCKY]
+================================================================================
+  Date          Payee                                     Amount  Committee                     Type                  
+  ------------  --------------------------------  --------------  ----------------------------  ----------------------
+  2026-07-15    Jalon Batey                       $            1  DAPHNE BATEY                  MONETARY              
+  2026-06-30    Republic Bank & Trust             $           84  POLITICAL HOUSING CLUB OF N…  MONETARY              
+  2026-06-30    ROBERT DUVALL                     $       -1,000  KCARE PAC (formerly "Kentuc…  MONETARY              
+  2026-06-30    Republic Bank                     $            3  Kentucky Electric Cooperati…  MONETARY              
+  2026-06-30    Ryan Grosser                      $          237  RYAN GROSSER                  TRANSFER              
+  2026-06-30    IGLOU INTERNET SERVICES, INC      $           36  KENTUCKY ADVANCE PRACTICE, …  MONETARY              
+  2026-06-30    CHRIS MCDANIEL                    $       -2,200  KCARE PAC (formerly "Kentuc…  MONETARY              
+  2026-06-30    First Financial Bank              $            3  LIBERTARIAN PARTY OF CAMPBE…  MONETARY              
+  2026-06-30    Charles Martin                    $        1,106  CHARLES (BRUISER) MARTIN      MONETARY              
+  2026-06-30    Donna Hall                        $          127  THE WOMEN'S NETWORK, PAC      MONETARY              
+

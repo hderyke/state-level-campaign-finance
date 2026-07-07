@@ -1,0 +1,138 @@
+{
+  "state": "ID",
+  "run_at": "2026-07-05T22:25:46.534204",
+  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/idaho/cleaned",
+  "passed": true,
+  "row_counts": {
+    "candidates": 7437,
+    "committees": 8600,
+    "contributions": 957398,
+    "expenditures": 386958
+  },
+  "sampled_tables": {
+    "contributions": 957398
+  },
+  "tier1_failures": [],
+  "tier1_fill_rates": {
+    "candidates": {
+      "_total": 7437,
+      "state": 100.0,
+      "person_id": 100.0,
+      "state_filer_id": 27.1,
+      "candidate_name": 100.0
+    },
+    "committees": {
+      "_total": 8600,
+      "state": 100.0,
+      "state_filer_id": 28.5
+    },
+    "contributions": {
+      "_total": 500000,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 99.9,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    },
+    "expenditures": {
+      "_total": 386958,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 99.9,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    }
+  },
+  "tier2_warnings": [
+    {
+      "table": "candidates",
+      "warning": "5424/7437 rows have empty 'state_filer_id' \u2014 72.9% empty (threshold: 1.0%) \u2014 expected for id_model=name_hash (person_id does not depend on state_filer_id; see docs/states/idaho.md)"
+    },
+    {
+      "table": "committees",
+      "warning": "6152/8600 rows have empty 'state_filer_id' \u2014 71.5% empty (threshold: 1.0%) \u2014 expected for id_model=name_hash (person_id does not depend on state_filer_id; see docs/states/idaho.md)"
+    },
+    {
+      "table": "contributions",
+      "warning": "1,469 non-empty 'contributor_state' values are not recognised US state/territory codes (0.3%) \u2014 e.g. ['0', '10', '18', '8', '83']"
+    },
+    {
+      "table": "contributions",
+      "warning": "478 non-empty 'contributor_zip' values don't match ZIP format (0.1%) \u2014 e.g. ['0', '100', '100.', '1005', '1027']"
+    },
+    {
+      "table": "expenditures",
+      "warning": "822 non-empty 'payee_state' values are not recognised US state/territory codes (0.2%) \u2014 e.g. ['#N/A', '0', '16', '27', '40']"
+    },
+    {
+      "table": "expenditures",
+      "warning": "2,964 non-empty 'payee_zip' values don't match ZIP format (0.8%) \u2014 e.g. ['#N/A', '0', '0000', '000000', '1001']"
+    }
+  ],
+  "tier2_enrichment": {
+    "candidates": {
+      "total": 7437,
+      "candidate_first": 68.7,
+      "candidate_last": 68.7,
+      "office": 99.9,
+      "district": 89.6,
+      "jurisdiction": 27.1,
+      "party": 88.9,
+      "election_year": 100.0,
+      "incumbent": 0.0
+    },
+    "committees": {
+      "total": 8600,
+      "committee_type": 100.0,
+      "committee_name": 100.0,
+      "candidate_name": 86.5,
+      "treasurer_name": 28.4,
+      "city": 23.4,
+      "zip": 23.4
+    },
+    "contributions": {
+      "total": 500000,
+      "contributor_name": 97.2,
+      "contributor_type": 95.9,
+      "contributor_city": 96.9,
+      "contributor_state": 97.0,
+      "contributor_zip": 96.7,
+      "employer": 0.0,
+      "occupation": 0.0,
+      "candidate_name": 40.0,
+      "office": 40.0,
+      "election_year": 81.7
+    },
+    "expenditures": {
+      "total": 386958,
+      "payee_name": 92.9,
+      "transaction_type": 100.0,
+      "purpose": 54.8,
+      "category": 68.5,
+      "payee_city": 97.4,
+      "payee_state": 97.8,
+      "payee_zip": 96.4,
+      "candidate_name": 61.7,
+      "office": 61.7,
+      "election_year": 90.4
+    }
+  },
+  "tier2_breakdowns": {
+    "committees": {
+      "committee_type": {
+        "Candidate Committee": 7437,
+        "PAC": 728,
+        "Political Committee": 366,
+        "Central Committee": 69
+      },
+      "active": {
+        "(blank)": 6152,
+        "1": 1830,
+        "0": 618
+      }
+    }
+  },
+  "drift_warnings": []
+}

@@ -45,6 +45,16 @@ def ts_display(ts_str):
     except Exception:
         return ts_str
 
+def fmt_date(iso_str):
+    """'2026-06-30' -> 'Jun 30, 2026'; '—' for missing/unparseable values."""
+    if not iso_str:
+        return "—"
+    try:
+        dt = datetime.strptime(iso_str, "%Y-%m-%d")
+        return f"{dt.strftime('%b')} {dt.day}, {dt.strftime('%Y')}"
+    except Exception:
+        return iso_str
+
 def status_class(status):
     mapping = {
         "ok": "ok", "passed": "ok", "completed": "ok",
@@ -246,6 +256,7 @@ def build_report(events: list[dict]) -> dict:
                     "drift_warnings":  e.get("drift_warnings", 0),
                     "row_counts":      e.get("row_counts", {}),
                     "sampled_tables":  e.get("sampled_tables", {}),
+                    "newest_record":   e.get("newest_record"),
                 })
 
         # Tabulate
@@ -748,12 +759,15 @@ def render_validate(va):
     t2_cls = "warn-text" if t2 else "dim"
     dr_cls = "warn-text" if drift else "dim"
 
+    newest_record = va.get("newest_record")
+
     va_badge = badge(status) if status else ""
     return f'''<div class="stage">
 <div class="stage-title">Validate {va_badge}</div>
 <div class="stage-stat"><span class="{t1_cls} num">{t1}</span> <span class="dim">tier-1 failures</span></div>
 <div class="stage-stat"><span class="{t2_cls} num">{t2}</span> <span class="dim">tier-2 warnings</span></div>
 <div class="stage-stat"><span class="{dr_cls} num">{drift}</span> <span class="dim">drift warnings</span></div>
+<div class="stage-stat"><span class="dim">newest record</span> <span class="num">{fmt_date(newest_record)}</span></div>
 <div class="stage-stat"><span class="dim">duration</span> <span class="num">{fmt_dur(dur)}</span></div>
 </div>'''
 
@@ -986,7 +1000,7 @@ def _vmini(table: str, total: int, rows_html: str, sampled: int | None = None) -
 def render_validate_report(vr: dict) -> str:
     """Render a {state}_validate.json report as a detail section.
 
-    Expected keys (from tests/validate.py):
+    Expected keys (from src/pipeline/validate.py):
       passed, row_counts, tier1_failures, tier1_fill_rates,
       tier2_warnings, tier2_enrichment, tier2_breakdowns, drift_warnings
     """

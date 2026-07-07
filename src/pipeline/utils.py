@@ -75,10 +75,20 @@ def clean_name(val: str) -> str:
 
 
 def clean_zip(val: str) -> str:
-    """Normalize a ZIP code: 9-digit strings become XXXXX-XXXX; others pass through."""
+    """Normalize a ZIP code.
+
+    - 9-digit strings (no hyphen) → XXXXX-XXXX
+    - ZIP+4 with incomplete extension (e.g. "06066-") → strip trailing hyphen → "06066"
+    - Truncated ZIP+4 (e.g. "75019-44") → strip incomplete extension → "75019"
+    - Otherwise pass through as-is.
+    """
     v = (val or "").strip()
     if re.match(r"^\d{9}$", v):
         return f"{v[:5]}-{v[5:]}"
+    # Strip trailing hyphen with missing or too-short 4-digit extension
+    m = re.match(r"^(\d{5})-(\d{0,3})$", v)
+    if m:
+        return m.group(1)   # drop the incomplete extension
     return v
 
 

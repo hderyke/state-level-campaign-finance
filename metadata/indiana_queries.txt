@@ -1,0 +1,271 @@
+
+================================================================================
+  TOP 20 CONTRIBUTORS — total donated & top recipient committee  [INDIANA]
+================================================================================
+  Contributor                                    Txns   Total Donated  Top Recipient                                       To Top
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  INDIANA DEMOCRATIC PARTY                      1,486  $   68,212,279  WARRICK COUNTY DEMOCRATIC CENTRAL COMMITT…  $   55,456,087
+  HOUSE REPUBLICAN CAMPAIGN COMMITTEE           2,166  $   32,905,621  INDIANA REPUBLICAN STATE COMMITTEE, INC     $   15,891,375
+  UNITEMIZED                                   16,124  $   23,556,926  INDIANA CREDIT UNION POLITICAL ACTION COM…  $    1,919,043
+  SENATE MAJORITY CAMPAIGN COMMITTEE              791  $   16,233,248  INDIANA REPUBLICAN STATE COMMITTEE, INC     $    9,252,783
+  INDIANA HOUSE DEMOCRATIC CAUCUS FUND            511  $   13,598,032  INDIANA DEMOCRATIC STATE CENTRAL COMMITTEE  $   12,900,046
+  RGA RIGHT DIRECTION PAC                          35  $   13,320,751  ERIC HOLCOMB FOR INDIANA                    $    8,122,542
+  I-PACE                                        2,697  $   12,520,538  RITZ4EDUCATION                              $      781,221
+  INDIANA REPUBLICAN STATE COMMITTEE              915  $   11,771,679  ZOELLER FOR ATTORNEY GENERAL                $      960,468
+  INDIVIDUAL MEMBERS OF THE ISTA                  199  $   11,673,271  INDIANA POLITICAL ACTION COMMITTEE FOR ED…  $   11,673,271
+  INDIANA STATE TEACHERS ASSOCIATION              211  $    8,630,797  INDIANA POLITICAL ACTION COMMITTEE FOR ED…  $    8,603,697
+  REPUBLICAN GOVERNORS ASSOCIATION                 43  $    8,583,452  MITCH FOR GOVERNOR CAMPAIGN COMMITTEE       $    6,080,000
+  DNC SERVICES CORP.                               53  $    7,454,820  INDIANA DEMOCRATIC STATE CENTRAL COMMITTEE  $    7,454,820
+  DEMOCRATIC GOVERNORS ASSOCIATION                 76  $    6,418,554  DEMOCRATIC GOVERNORS ASSOCIATION - INDIANA  $    3,741,389
+  INDIANA SENATE DEMOCRATS COMMITTEE              569  $    6,232,764  INDIANA DEMOCRATIC STATE CENTRAL COMMITTEE  $    5,162,039
+  INDIANA REPUBLICAN STATE CENTRAL COMMITTEE      703  $    6,177,781  MITCH FOR GOVERNOR CAMPAIGN COMMITTEE       $      625,779
+  MIDWEST OPERATING ENGINEERS CONSTRUCTION …      174  $    6,090,277  NORTHERN INDIANA OPERATORS JOINT LABOR MA…  $    6,090,277
+  INDIANA HOUSE DEMOCRATIC CAUCUS                 702  $    5,977,982  COMMITTEE TO ELECT CODIE ROSS               $      307,128
+  INDIANA BUSINESS FOR RESPONSIVE GOVERNMENT    1,869  $    5,471,816  BILL DAVIS FOR INDIANA STATE REPRESENTATI…  $      356,780
+  TEAM HOLCOMB PAC                                117  $    5,068,853  ERIC HOLCOMB FOR INDIANA                    $    2,668,198
+  INTERNATIONAL UNION OF OPERATING ENGINEER…      611  $    5,009,240  INTL UNION OF OPERATING ENGINEERS LOCAL 1…  $    5,009,240
+
+================================================================================
+  TOP 20 RECIPIENT CANDIDATES — total contributions received  [INDIANA]
+================================================================================
+  Candidate                                   St    Office                      Party            Txns  Total Received
+  ------------------------------------------  ----  --------------------------  ------------  -------  --------------
+  MITCHELL ELIAS DANIELS, JR.                 IN    GOVERNOR                    Republican     87,191  $   60,596,976
+  MICHAEL RICHARD PENCE                       IN    GOVERNOR                    Republican     31,824  $   33,989,665
+  ERIC JOSEPH HOLCOMB                         IN    STATE REPRESENTATIVE        Republican     10,374  $   29,655,423
+  JOHN R. GREGG                               IN    STATE REPRESENTATIVE        Democratic     33,880  $   24,276,104
+  MICHAEL K BRAUN                             IN    STATE REPRESENTATIVE        Republican      7,285  $   23,171,396
+  JOSEPH E. KERNAN                            IN    GOVERNOR                    Democratic     16,205  $   18,419,344
+  SUZANNE M CROUCH                            IN    GOVERNOR                    Republican      9,623  $   12,592,681
+  JILL LONG THOMPSON                          IN    GOVERNOR                    Democratic      7,166  $    9,654,267
+  THEODORE EDWARD ROKITA                      IN    ATTORNEY GENERAL            Republican      9,616  $    9,232,056
+  ERIC RANDALL DODEN                          IN    GOVERNOR                    Republican      1,151  $    9,034,771
+  BRIAN C. BOSMA                              IN    STATE REPRESENTATIVE        Republican      5,698  $    7,085,106
+  FRANK L. O'BANNON                           IN                                Democratic      9,130  $    6,385,132
+  JENNIFER MCCORMICK                          IN    GOVERNOR                    Democratic     13,569  $    6,055,858
+  DAVID MARTIN MCINTOSH                       IN    GOVERNOR                    Republican      6,132  $    6,025,247
+  TODD MICHAEL HUSTON                         IN    STATE REPRESENTATIVE        Republican      2,897  $    5,967,303
+  BRADLEY B CHAMBERS                          IN    GOVERNOR                    Republican      1,443  $    5,382,783
+  JAMES ARMAND SCHELLINGER                    IN    GOVERNOR                    Democratic      2,398  $    5,297,366
+  GREGORY FRANCIS ZOELLER                     IN                                Republican      3,043  $    4,228,063
+  B. PATRICK BAUER                            IN    STATE REPRESENTATIVE        Democratic      3,371  $    4,130,923
+  MYRON MARTIN SUTTON                         IN    STATE REPRESENTATIVE        Democratic        429  $    4,123,686
+
+================================================================================
+  TOP 20 NON-CANDIDATE COMMITTEES — total contributions received  [INDIANA]
+================================================================================
+  St    Committee                                   Type                             Txns  Total Received
+  ----  ------------------------------------------  ----------------------------  -------  --------------
+  IN    INDIANA DEMOCRATIC STATE CENTRAL COMMITTEE  Regular Party                  31,527  $   92,426,423
+  IN    INDIANA REPUBLICAN STATE COMMITTEE, INC     Regular Party                  15,029  $   87,476,577
+  IN    REPUBLICAN NATIONAL STATE ELECTIONS COMMI…  Political Action                2,575  $   81,188,948
+  IN    HOUSE REPUBLICAN CAMPAIGN COMMITTEE         Legislative Caucus             20,323  $   64,372,989
+  IN    WARRICK COUNTY DEMOCRATIC CENTRAL COMMITT…  Regular Party                   1,999  $   56,062,356
+  IN    INDIANA HOUSE DEMOCRATIC CAUCUS             Legislative Caucus             10,138  $   30,081,214
+  IN    SENATE MAJORITY CAMPAIGN COMMITTEE (SMCC)   Legislative Caucus              9,739  $   25,356,232
+  IN    INDIANA POLITICAL ACTION COMMITTEE FOR ED…  Political Action                2,071  $   21,861,788
+  IN    ACTBLUE INDIANA                             Political Action              216,744  $   14,936,392
+  IN    AMERICAN FEDERATION FOR CHILDREN ACTION F…  Political Action                  101  $   14,856,020
+  IN    INDIANA REALTORS POLITICAL ACTION COMMITT…  Political Action               21,968  $   13,823,177
+  IN    MARION COUNTY DEMOCRATIC CENTRAL COMMITTEE  Regular Party                  36,739  $   13,217,054
+  IN    MARION COUNTY REPUBLICAN CENTRAL COMMITTEE  Regular Party                   8,540  $   12,448,156
+  IN    INDIANA SENATE DEMOCRAT COMMITTEE           Legislative Caucus              6,934  $   10,896,133
+  IN    INTL UNION OF OPERATING ENGINEERS LOCAL 1…  Political Action                2,009  $   10,701,541
+  IN    DEMOCRATIC LEGISLATIVE CAMPAIGN COMMITTEE   Political Action                  817  $    9,574,449
+  IN    HOOSIERS FOR QUALITY EDUCATION POLITICAL …  Political Action                  229  $    7,238,167
+  IN    NEA FUND FOR CHILDREN AND PUBLIC EDUCATIO…  Political Action                9,706  $    7,040,938
+  IN    INDIANA BUSINESS FOR RESPONSIVE GOVERNMENT  Political Action                4,159  $    6,615,317
+  IN    LAW PAC OF INDIANA                          Political Action               23,507  $    6,259,267
+
+================================================================================
+  TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client  [INDIANA]
+================================================================================
+  Payee                                          Txns  Total Received  Largest Client                                 From Client
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  PERKINS NICHOLS MEDIA                           224  $   34,378,700  MITCH FOR GOVERNOR CAMPAIGN COMMITTEE       $   24,383,498
+  INDIANA DEMOCRATIC PARTY                      3,782  $   33,931,297  INDIANA HOUSE DEMOCRATIC CAUCUS             $   10,155,477
+  INDIANA REPUBLICAN STATE COMMITTEE            2,408  $   26,114,054  SENATE MAJORITY CAMPAIGN COMMITTEE (SMCC)   $    9,165,760
+  HOUSE REPUBLICAN CAMPAIGN COMMITTEE           4,174  $   23,023,107  REPUBLICAN STATE LEADERSHIP COMMITTEE-IND…  $    2,256,000
+  INDIANA REPUBLICAN STATE COMMITTEE, INC.      1,317  $   16,231,945  INDIANA REPUBLICAN STATE COMMITTEE, INC     $    7,088,304
+  TARGET ENTERPRISES LLC                           53  $   15,739,208  ERIC HOLCOMB FOR INDIANA                    $   14,261,911
+  INDIANA HOUSE DEMOCRATIC CAUCUS               2,804  $   14,815,946  DEMOCRATIC LEGISLATIVE CAMPAIGN COMMITTEE   $    1,772,431
+  TARGET ENTERPRISES, LLC                          33  $   13,998,035  MIKE BRAUN FOR INDIANA, INC.                $   13,998,035
+  HRCC                                          2,226  $   13,225,364  COMMITTEE TO ELECT BRIAN BOSMA              $    1,756,542
+  INDIANA REPUBLICAN PARTY FEDERAL FUND         1,684  $   13,075,470  HOUSE REPUBLICAN CAMPAIGN COMMITTEE         $    6,714,618
+
+================================================================================
+  ACTIVITY BY YEAR — contribution and expenditure row counts and totals  [INDIANA]
+================================================================================
+    Year      Cont N        Cont Total      Expn N        Expn Total
+  ------  ----------  ----------------  ----------  ----------------
+    2000      72,017    $   83,560,525      35,480    $   62,331,617
+    2001      43,192    $   29,457,056      16,069    $   23,613,284
+    2002      53,161    $   76,873,398      37,715    $   77,562,655
+    2003      49,914    $   91,445,451      27,469    $   25,377,436
+    2004     141,329    $   88,788,133      40,329    $   83,062,490
+    2005      52,887    $   24,275,618      19,213    $   16,335,734
+    2006      94,806    $   71,279,473      39,261    $   66,733,108
+    2007      67,818    $   41,688,161      23,054    $   23,452,872
+    2008     108,424    $  107,621,420      43,680    $  106,179,580
+    2009      59,447    $   21,127,583      18,047    $   15,980,273
+    2010      87,301    $   72,649,498      38,454    $   70,223,042
+    2011      77,066    $   36,783,496      21,913    $   24,135,731
+    2012     115,320    $   75,828,735      40,089    $   89,815,490
+    2013      60,210    $   27,752,067      19,422    $   17,083,064
+    2014      80,002    $   49,898,348      34,392    $   52,576,082
+    2015      72,771    $   34,897,091      22,735    $   23,233,506
+    2016     118,208    $   87,114,821      37,775    $  101,894,647
+    2017      52,574    $   27,869,415      19,267    $   17,452,610
+    2018      85,995    $   52,209,752      37,315    $   55,798,488
+    2019      70,506    $   39,234,317      24,967    $   28,356,221
+    2020     122,063    $   68,706,027      37,830    $   80,444,326
+    2021      74,121    $   33,747,267      23,217    $   20,060,397
+    2022     114,335    $   72,395,434      44,150    $   71,967,987
+    2023      86,141    $   51,843,694      31,807    $   47,815,675
+    2024     163,114    $   94,148,723      45,356    $  117,363,678
+    2025     102,577    $   46,262,978      28,783    $   30,605,043
+    2026      32,145    $   19,368,074      10,858    $   18,282,672
+
+================================================================================
+  CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total  [INDIANA]
+================================================================================
+  Contributor Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Individual                       1,032,042    $  225,504,505      45.7%
+  (blank)                            965,225    $  789,604,667      42.8%
+  Other Organization                  80,697    $  259,929,361       3.6%
+  Political Action Committee          74,411    $  134,298,047       3.3%
+  Corporation                         73,579    $   58,036,234       3.3%
+  Political Action                    24,379    $   48,030,687       1.1%
+  Labor Organization                   5,099    $    5,876,884       0.2%
+  Recipient                            1,249    $    3,879,032       0.1%
+  Unknown                                745    $    1,665,159       0.0%
+  Creditor                                16    $       -3,320       0.0%
+  Regular Party                            1    $          300       0.0%
+  Legislative Caucus                       1    $        5,000       0.0%
+
+================================================================================
+  TOP 10 CONTRIBUTOR STATES — where the money comes from  [INDIANA]
+================================================================================
+  State                        N             Total    % rows
+  ------------------  ----------  ----------------  --------
+  IN                   1,746,550    $1,086,456,829      77.4%
+  IL                      96,676    $   44,905,146       4.3%
+  (blank)                 77,411    $   70,402,212       3.4%
+  KY                      44,087    $    5,594,065       2.0%
+  CA                      27,646    $   20,022,042       1.2%
+  OH                      20,758    $   15,103,065       0.9%
+  TX                      20,328    $   17,672,891       0.9%
+  FL                      19,296    $   10,712,214       0.9%
+  MA                      16,339    $    7,535,641       0.7%
+  GA                      14,060    $    3,144,311       0.6%
+
+================================================================================
+  EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total  [INDIANA]
+================================================================================
+  Transaction Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Direct                             304,005    $  487,965,760      37.1%
+  Direct - Operations                198,817    $  211,661,153      24.3%
+  Direct - Contributions             121,786    $  262,485,559      14.9%
+  Direct - Advertising                44,341    $  178,187,983       5.4%
+  Direct - Fundraising                26,249    $   23,264,836       3.2%
+  Direct - Missing                    20,991    $   39,253,568       2.6%
+  Unitemized - Unitemized             20,028    $    3,612,771       2.4%
+  Other                               19,233    $   54,663,297       2.3%
+  In-Kind                             13,747    $   32,994,102       1.7%
+  Unitemized                          13,059    $    3,878,082       1.6%
+  In-Kind - Operations                 5,233    $   11,673,973       0.6%
+  Payment of Debt                      4,859    $    6,688,172       0.6%
+  Missing                              3,692    $    6,217,146       0.5%
+  In-Kind - Advertising                3,374    $   18,651,751       0.4%
+  In-Kind - Fundraising                3,369    $    2,513,203       0.4%
+  Other - Operations                   2,797    $    2,598,402       0.3%
+  Returned Contribution                2,298    $    3,328,593       0.3%
+  Other - Contributions                1,868    $    4,238,555       0.2%
+  Missing - Operations                 1,192    $    1,099,570       0.1%
+  Returned Contribution - Opera…       1,118    $      922,441       0.1%
+  In-Kind - Contributions              1,072    $    1,306,841       0.1%
+  Payment of Debt - Operations           957    $    1,882,564       0.1%
+  In-Kind - Missing                      907    $    1,960,306       0.1%
+  Payment of Debt - Advertising          639    $      565,709       0.1%
+  Other - Missing                        505    $      244,912       0.1%
+  Other - Advertising                    432    $    1,872,142       0.1%
+  Other - Fundraising                    415    $      705,840       0.1%
+  Returned Contribution - Contr…         288    $      209,802       0.0%
+  Payment of Debt - Fundraising          261    $      255,725       0.0%
+  Payment of Debt - Missing              259    $      459,432       0.0%
+  Missing - Contributions                172    $      813,617       0.0%
+  Missing - Fundraising                  162    $      141,671       0.0%
+  Missing - Advertising                  154    $      296,072       0.0%
+  Returned Contribution - Fundr…         124    $       90,760       0.0%
+  Returned Contribution - Missi…          87    $       77,790       0.0%
+  Payment of Debt - Contributio…          87    $      873,988       0.0%
+  Missing - Missing                       50    $       41,689       0.0%
+  Returned Contribution - Adver…          20    $       39,931       0.0%
+  gas                                      1    $            0       0.0%
+
+================================================================================
+  10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check  [INDIANA]
+================================================================================
+  Date          Contributor                         Type    Committee                                       Amount
+  ------------  ----------------------------------  ------  ------------------------------------  ----------------
+  2003-03-01    INDIANA DEMOCRATIC PARTY                    WARRICK COUNTY DEMOCRATIC CENTRAL C…    $   55,452,555
+  2003-12-31    UNITEMIZED                                  WHITLEY COUNTY REPUBLICAN CENTRAL C…    $   12,301,513
+  2004-04-09    UNITEMIZED                                  INDIANA REGIONAL CARPENTERS COPE AC…    $    4,769,203
+  2002-12-18    REPUBLICAN NATIONAL COMMITTEE               REPUBLICAN NATIONAL STATE ELECTIONS…    $    3,452,247
+  2002-10-09    REPUBICAN NATIONAL COMMI.                   REPUBLICAN NATIONAL STATE ELECTIONS…    $    3,312,120
+  2002-06-14    TEXANS FOR JOHN CORNYN                      REPUBLICAN NATIONAL STATE ELECTIONS…    $    3,100,000
+  2002-09-30    REPUBLICAN NATIONAL COMMI                   REPUBLICAN NATIONAL STATE ELECTIONS…    $    2,721,399
+  2006-09-27    INDIANA DEMOCRATIC PARTY                    MYRON SUTTON COMMITTEE                  $    2,010,926
+  2024-01-25    DARYLE DODEN                        Indiv…  DODEN FOR INDIANA                       $    2,000,000
+  2012-05-11    JIM WALTON                          Indiv…  AMERICAN FEDERATION FOR CHILDREN AC…    $    1,900,000
+
+================================================================================
+  10 RANDOM CONTRIBUTION ROWS — raw data spot check  [INDIANA]
+================================================================================
+  Date          Contributor                   T            Amount  Committee                       City                St    Employer                Occupation          
+  ------------  ----------------------------  -----  ------------  ------------------------------  ------------------  ----  ----------------------  --------------------
+  2004-07-23    JUNE E. MOORD                        $           50  KERNAN FOR INDIANA              FORT WAYNE          IN                                                
+  2004-09-30    JOHN HOFFER                          $           12  CATERPILLAR INC. POLITICAL AC…  AURORA              IL                                                
+  2005-12-30    BANK ONE                      Corp…  $           75  PAT BAUER FOR INDIANA           INDIANAPOLIS        IN                                                
+  2006-12-20    GARY R YARBROUGH                     $            5  AT&T INDIANA POLITICAL ACTION…  INDIANAPOLIS        IN                                                
+  2011-07-01    TERRY CARRICO                        $           20  KINDRED HEALTHCARE, INC. PAC    NEW ALBANY          IN                                                
+  2011-07-08    JONATHAN M LEONARD                   $            7  COCA-COLA REFRESHMENTS USA, I…  MENIFEE             CA                            Manufacturing       
+  2011-09-29    ANNIE CHRIST-GARCIA                  $           10  MARION COUNTY DEMOCRATIC CENT…  INDIANAPOLIS        IN                            Office and Administ…
+  2011-11-04    RICHARD L MELTON                     $            5  AT&T INDIANA POLITICAL ACTION…  GREENWOOD           IN                                                
+  2011-12-20    RACHEL RUTH MILLER                   $           25  GREGG FOR INDIANA               BRAZIL              IN                                                
+  2011-12-31    RAHSAAN BRYANT                       $            9  UA 157 POLITICAL ACTION COMMI…  AVON                IN                                                
+
+================================================================================
+  10 MOST RECENT CONTRIBUTIONS — data freshness check  [INDIANA]
+================================================================================
+  Date          Contributor                       Type            Amount  Committee                         
+  ------------  --------------------------------  ------  --------------  ----------------------------------
+  2026-05-29                                              $            0  HOOSIERS FOR YUQUILIMA            
+  2026-05-07                                              $          416  HOOSIERS FOR YUQUILIMA            
+  2026-05-07    ADOBE                             Corpo…  $           37  FRIENDS OF KRISTI RISK            
+  2026-05-06                                              $          700  FRIENDS OF KRISTI RISK            
+  2026-05-06                                              $        2,000  FRIENDS OF KRISTI RISK            
+  2026-05-06                                              $          500  FRIENDS OF KRISTI RISK            
+  2026-05-04    DAVID L CULP                      Indiv…  $           50  FRIENDS OF TANNER BOUCHIE         
+  2026-05-04    DEBORAH KERN                      Indiv…  $        2,000  CHLOE ANDIS FOR INDIANA STATE SEN…
+  2026-05-04    JOE VOLK                          Indiv…  $          999  JOE VOLK FOR SENATOR              
+  2026-05-03    NOOR ONEILL                       Indiv…  $           10  CHLOE ANDIS FOR INDIANA STATE SEN…
+
+================================================================================
+  10 MOST RECENT EXPENDITURES — data freshness check  [INDIANA]
+================================================================================
+  Date          Payee                                     Amount  Committee                     Type                  
+  ------------  --------------------------------  --------------  ----------------------------  ----------------------
+  2026-09-26    SUNCO                             $           28  COMMITTEE TO ELECT JOHN WAT…  In-Kind - Missing     
+  2026-06-26    ADAM MANN                         $        4,349  ADAM MANN FOR INDIANA HOUSE…  Returned Contribution…
+  2026-06-26    DANIEL KREILEIN                   $           25  ADAM MANN FOR INDIANA HOUSE…  Returned Contribution…
+  2026-06-26    MAGGIE MARYSTONE                  $           85  ADAM MANN FOR INDIANA HOUSE…  Returned Contribution…
+  2026-06-15    FUERZA COLECTIVA                  $          144  HOOSIERS FOR YUQUILIMA        Direct - Contributions
+  2026-06-13    FUERZA COLECTIVA                  $          515  HOOSIERS FOR YUQUILIMA        Direct - Contributions
+  2026-06-13    INDIANAPOLIS NEIGHBORHOOD RESOU…  $          515  HOOSIERS FOR YUQUILIMA        Direct - Contributions
+  2026-06-09    FIRST FINANCIAL BANK              $            6  JOE VOLK FOR SENATOR          Direct - Operations   
+  2026-06-08    CANVA                             $           15  HOOSIERS FOR YUQUILIMA        Direct - Operations   
+  2026-06-03    THOMAS ARTHUR                     $          151  COMMITTEE TO ELECT TOM ARTH…  Returned Contribution…
+

@@ -1,0 +1,252 @@
+
+================================================================================
+  TOP 20 CONTRIBUTORS — total donated & top recipient committee  [MICHIGAN]
+================================================================================
+  Contributor                                    Txns   Total Donated  Top Recipient                                       To Top
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  SIXTEEN THIRTY FUND                              81  $   33,972,202  PROMOTE THE VOTE 2022                       $   10,461,370
+  MICHIGAN HOUSE DEMOCRATIC FUND                1,166  $   22,901,001  FRIENDS OF NATE SHANNON                     $    1,901,021
+  DIBC HOLDINGS INC                                 6  $   18,454,000  THE PEOPLE SHOULD DECIDE                    $   18,454,000
+  HOUSE REPUBLICAN CAMPAIGN COMMITTEE             687  $   17,535,303  COMMITTEE TO ELECT MARK TISDEL              $    1,524,051
+  CONSUMERS ENERGY                                133  $   13,896,158  CLEAN AFFORDABLE RENEWABLE ENERGY FOR MIC…  $   13,444,518
+  RIGHT TO LIFE OF MICHIGAN                     1,337  $   13,549,794  CITIZENS TO SUPPORT MI WOMEN AND CHILDREN   $   12,063,831
+  DTE ENERGY                                      285  $   12,902,797  CLEAN AFFORDABLE RENEWABLE ENERGY FOR MIC…  $   12,618,074
+  MICHIGAN CATHOLIC CONFERENCE                     18  $   12,155,695  CITIZENS TO SUPPORT MI WOMEN AND CHILDREN   $    7,316,820
+  MICHIGAN CHAMBER OF COMMERCE                    487  $   11,328,553  PROTECTING MICHIGAN TAXPAYERS               $    6,400,000
+  JON STRYKER                                     136  $   11,249,503  COALITION FOR PROGRESS                      $   10,198,227
+  SRCC                                            179  $   11,056,123  CTE PAMELA HORNBERGER FOR STATE SENATE      $    2,124,369
+  TRANSFER FROM PRIMARY TO GENERAL                  3  $   10,359,204  JENNIFER M GRANHOLM FOR GOVERNOR            $    7,916,661
+  HOME CARE FIRST INC.                             23  $    9,360,000  CITIZENS FOR AFFORDABLE QUALITY HOME CARE   $    9,360,000
+  MICHIGAN SENATE DEMOCRATIC FUND                 361  $    9,355,785  DARRIN CAMILLERI FOR STATE SENATE           $    1,886,057
+  RESTRORATION OF AMERICA                          17  $    7,900,000  AMERICANS FOR CITIZEN VOTING - MICHIGAN     $    7,900,000
+  COMERICA BANK                                 1,820  $    7,713,814  MICHIGAN REPUBLICAN PARTY                   $    5,616,505
+  HRCC                                            359  $    6,317,724  COMMITTEE TO ELECT DALE BINIECKI            $      870,676
+  REPUBLICAN STATE LEADERSHIP CO                   42  $    5,764,197  RSLC PAC (SUPERPAC)                         $    4,674,697
+  HOUSE REPUBLICAN CAMPAIGN COMM                  317  $    5,732,815  COMMITTEE TO ELECT STEVE FRISBIE FOR STAT…  $    1,167,548
+  AMERICAN CIVIL LIBERTIES UNION                   47  $    5,726,388  MICHIGANDERS FOR FAIR LENDING               $    2,625,551
+
+================================================================================
+  TOP 20 RECIPIENT CANDIDATES — total contributions received  [MICHIGAN]
+================================================================================
+  Candidate                                   St    Office                      Party            Txns  Total Received
+  ------------------------------------------  ----  --------------------------  ------------  -------  --------------
+  GRETCHEN WHITMER                            MI    Governor                    Democratic …  248,005  $   33,315,461
+  BILL SCHUETTE                               MI    Governor                    Republican …   34,150  $   20,118,011
+  JOCELYN BENSON                              MI    Governor                    Democratic …   70,425  $    9,587,255
+  TUDOR DIXON                                 MI    Governor                    Republican …   74,238  $    8,853,534
+  BRIAN CALLEY                                MI    Governor                    Republican …    7,990  $    6,484,310
+  ARIC NESBITT                                MI    Governor                    Republican …    7,354  $    4,553,134
+  JOHN JAMES                                  MI    Governor                    Republican …   32,299  $    4,491,206
+  TOM LEONARD                                 MI    Attorney General            Republican …    7,255  $    4,112,974
+  DANA NESSEL                                 MI    Attorney General            Democratic …   30,296  $    3,883,005
+  JAMES CRAIG                                 MI    Governor                    Republican …   31,400  $    3,266,408
+  GARRETT SOLDANO                             MI    Governor                    Republican …   42,904  $    3,078,010
+  MARK HUIZENGA                               MI    State Senator               Republican …    1,293  $    2,900,705
+  NATE SHANNON                                MI    Representative in State L…  Democratic …    6,347  $    2,791,561
+  PAMELA HORNBERGER                           MI    State Senator               Republican …      827  $    2,721,092
+  ANNETTE GLENN                               MI    State Senator               Republican …    2,483  $    2,635,744
+  PETER HOEKSTRA                              MI    Governor                    Republican …    9,307  $    2,531,461
+  KEVIN HERTEL                                MI    State Senator               Democratic …    5,714  $    2,474,332
+  REGGIE MILLER                               MI    Representative in State L…  Democratic …   10,839  $    2,405,489
+  DAVID LAGRAND                               MI    State Senator               Democratic …    5,949  $    2,395,369
+  JAIME CHURCHES                              MI    Representative in State L…  Democratic …   15,338  $    2,392,460
+
+================================================================================
+  TOP 20 NON-CANDIDATE COMMITTEES — total contributions received  [MICHIGAN]
+================================================================================
+  St    Committee                                   Type                             Txns  Total Received
+  ----  ------------------------------------------  ----------------------------  -------  --------------
+  MI    REPRODUCTIVE FREEDOM FOR ALL                Ballot Question                32,373  $   46,001,862
+  MI    CLEAN AFFORDABLE RENEWABLE ENERGY FOR MIC…  Ballot Question                   283  $   27,859,257
+  MI    PROTECTING MICHIGAN TAXPAYERS               Ballot Question                   468  $   27,273,894
+  MI    PROTECT WORKING FAMILIES                    Ballot Question                 1,206  $   23,606,377
+  MI    PROMOTE THE VOTE 2022                       Ballot Question                 1,200  $   22,778,167
+  MI    CITIZENS TO SUPPORT MI WOMEN AND CHILDREN   Ballot Question                 3,964  $   21,558,725
+  MI    MICHIGAN HOUSE DEMOCRATIC FUND              Caucus                         48,510  $   18,546,072
+  MI    THE PEOPLE SHOULD DECIDE                    Ballot Question                     6  $   18,454,000
+  MI    VOTERS NOT POLITICIANS BALLOT COMMITTEE     Ballot Question                38,186  $   17,482,284
+  MI    MICHIGAN SENATE DEMOCRATIC FUND             Caucus                         15,114  $   14,222,549
+  MI    MICHIGAN ENERGY MICHIGAN JOBS               Ballot Question                   302  $   13,979,751
+  MI    JUSTICE FOR ALL (SUPERPAC)                  Independent Expenditure           420  $   11,521,803
+  MI    SENATE REPUBLICAN CAMPAIGN COMMITTEE        Caucus                          3,451  $   11,219,379
+  MI    COALITION FOR PROGRESS                      Political                         336  $   11,177,938
+  MI    UAW MICHIGAN VOLUNTARY POLITICAL ACTION C…  Independent                   1,292,446  $   10,776,423
+  MI    CITIZENS PROTECTING MICHIGANS CONSTITUTION  Ballot Question                   217  $   10,128,267
+  MI    HOME CARE FIRST                             Ballot Question                    34  $    9,451,105
+  MI    CITIZENS FOR AFFORDABLE QUALITY HOME CARE   Ballot Question                    28  $    9,360,437
+  MI    SAFE ROADS YES                              Ballot Question                   143  $    9,320,074
+  MI    MICHIGAN REGIONAL COUNCIL OF CARPENTERS P…  Independent                   479,211  $    9,242,338
+
+================================================================================
+  TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client  [MICHIGAN]
+================================================================================
+  Payee                                          Txns  Total Received  Largest Client                                 From Client
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  FRIENDS OF THOMAS HALL                            3  $1,351,265,238  CLEVELAND CLIFFS INC PAC                    $1,351,265,238
+  ERIC SHELLY                                       2  $  960,700,000  GREEN PARTY OF MICHIGAN COMMITTEE           $  960,700,000
+  CTE PAMELA HORNBERGER                           269  $  480,674,017  MARATHON PETROLEUM CORPORATION EMPLOYEES …  $  480,511,812
+  MUNDY KATOWITZ MEDIA INC.                       298  $   38,184,957  PROTECT WORKING FAMILIES                    $   17,263,290
+  GMMB                                            117  $   29,534,736  GRETCHEN WHITMER FOR GOVERNOR               $   28,942,694
+  MICHIGAN HOUSE DEMOCRATIC FUND                4,829  $   28,806,614  DEMOCRATIC STATE CENTRAL COMMITTEE          $    2,258,600
+  KNOW-HOW STRATEGIES                              11  $   22,671,160  REPRODUCTIVE FREEDOM FOR ALL                $   22,671,160
+  MICHIGAN DEMOCRATIC STATE CENTRAL CO          1,154  $   20,587,883  GRETCHEN WHITMER FOR GOVERNOR               $    3,792,366
+  JOE SLADE WHITE COMMUNICATIONS                   47  $   20,059,567  CLEAN AFFORDABLE RENEWABLE ENERGY FOR MIC…  $   20,059,567
+  KELLY SCOTT & MADISON INC                        12  $   18,786,748  CITIZENS TO SUPPORT MI WOMEN AND CHILDREN   $   18,786,748
+
+================================================================================
+  ACTIVITY BY YEAR — contribution and expenditure row counts and totals  [MICHIGAN]
+================================================================================
+    Year      Cont N        Cont Total      Expn N        Expn Total
+  ------  ----------  ----------------  ----------  ----------------
+    1990           0    $            0           1    $          200
+    1991           0    $            0           1    $        1,452
+    1992           0    $            0           1    $           13
+    1995           0    $            0           5    $          714
+    1996           7    $          936          11    $          232
+    1997         247    $       53,962       3,392    $    1,695,226
+    1998       3,257    $      850,792       6,620    $    4,218,303
+    1999         295    $       82,645       3,166    $    1,283,429
+    2000      24,077    $    2,189,676       4,530    $    2,744,631
+    2001      34,176    $    1,822,507       3,674    $    1,075,644
+    2002      84,869    $   11,923,493      20,939    $   14,705,660
+    2003     166,551    $    7,573,484      14,525    $    7,657,668
+    2004     536,476    $   29,101,453      54,075    $   44,930,662
+    2005     474,949    $   23,423,716      30,884    $   19,488,256
+    2006     530,710    $   63,074,149      73,923    $  124,085,439
+    2007     470,754    $   19,928,876      31,041    $   19,841,792
+    2008     544,633    $   49,473,551      68,364    $   92,983,883
+    2009     514,612    $   28,012,071      44,709    $   28,407,167
+    2010     524,322    $   85,453,264     109,826    $  149,103,782
+    2011     522,555    $   25,833,662      32,577    $   21,745,221
+    2012     473,858    $  217,016,398      84,938    $  325,569,882
+    2013     488,579    $   37,279,194      44,631    $   33,179,495
+    2014     512,674    $  100,385,926     105,277    $  185,478,371
+    2015     471,932    $   43,104,653      34,162    $   43,991,630
+    2016     545,301    $   53,419,848      73,095    $   80,515,565
+    2017     432,188    $   53,678,129      44,221    $   49,045,444
+    2018     650,969    $  167,047,417     122,874    $  306,818,133
+    2019     346,204    $   26,926,361      37,193    $   28,216,393
+    2020     577,746    $   84,060,550      66,542    $  120,345,131
+    2021     415,869    $   53,275,685      39,130    $   54,117,352
+    2022     607,080    $  241,665,026     109,635    $  471,361,196
+    2023     424,349    $   40,419,009      41,750    $   43,457,133
+    2024     541,495    $  124,723,880      84,527    $  172,772,270
+    2025     693,921    $   93,440,074      57,653    $   70,276,490
+    2026     229,276    $   30,001,142       9,497    $   25,436,647
+
+================================================================================
+  CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total  [MICHIGAN]
+================================================================================
+  Contributor Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Individual                      11,257,617    $  716,095,205      95.0%
+  Organization                       586,446    $  999,223,927       5.0%
+
+================================================================================
+  TOP 10 CONTRIBUTOR STATES — where the money comes from  [MICHIGAN]
+================================================================================
+  State                        N             Total    % rows
+  ------------------  ----------  ----------------  --------
+  MI                   8,755,865    $1,240,128,876      73.9%
+  OH                     526,222    $   14,671,807       4.4%
+  CA                     425,096    $   51,700,112       3.6%
+  TX                     268,358    $   20,071,375       2.3%
+  IL                     200,225    $   16,220,297       1.7%
+  NY                     176,043    $   42,761,734       1.5%
+  FL                     144,384    $   22,680,090       1.2%
+  PA                     119,740    $   10,089,237       1.0%
+  WA                     103,645    $    7,480,476       0.9%
+  MA                      79,715    $   16,693,421       0.7%
+
+================================================================================
+  EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total  [MICHIGAN]
+================================================================================
+  Transaction Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  Direct Expenditures              1,117,927   $13,139,141,082      76.7%
+  SUPP                               138,848    $  390,909,635       9.5%
+  Independent Expenditures            77,653    $  194,009,768       5.3%
+  Direct Expenditures - Public …      33,418    $  194,597,967       2.3%
+  Incidental Expenditures (Incu…      27,134    $    7,922,024       1.9%
+  In-Kind Expenditures                20,329    $  105,294,805       1.4%
+  Direct Expenditures - Debt/Lo…      17,103    $   45,499,026       1.2%
+  GOTV Expenditures                   11,864    $    3,308,360       0.8%
+  Refund/Rebate                        7,468    $  -17,949,543       0.5%
+  Direct Expenditures - Private…       3,659    $    7,103,274       0.3%
+  Incidental Expense Disburseme…       1,701    $    1,253,365       0.1%
+  Direct Expenditures - Public …         256    $      785,989       0.0%
+  GOTV Expenditures - Public Fu…         174    $      139,206       0.0%
+  Independent Expenditures - Lo…          20    $      143,316       0.0%
+  In-Kind Expenditures - Public…          12    $       61,915       0.0%
+  In-Kind Expenditures - Loan O…          11    $        2,232       0.0%
+  Incidental Office Expenditure…           7    $        2,126       0.0%
+  In-Kind Expenditures - Privat…           4    $        5,303       0.0%
+  Independent Expenditures - De…           2    $       11,100       0.0%
+  Direct Expenditures - Private…           1    $        1,325       0.0%
+  Incidental Expenditures - Deb…           1    $        1,490       0.0%
+  GOTV Expenditures - Loan Owed…           1    $          250       0.0%
+
+================================================================================
+  10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check  [MICHIGAN]
+================================================================================
+  Date          Contributor                         Type    Committee                                       Amount
+  ------------  ----------------------------------  ------  ------------------------------------  ----------------
+  2012-10-31    DIBC HOLDINGS INC                   Organ…  THE PEOPLE SHOULD DECIDE                $    9,175,000
+  2012-10-31    DIBC HOLDINGS INC                   Organ…  THE PEOPLE SHOULD DECIDE                $    9,175,000
+  2006-08-09    TRANSFER FROM PRIMARY TO GENERAL    Organ…  JENNIFER M GRANHOLM FOR GOVERNOR        $    6,950,177
+  2022-09-13    OPEN SOCIETY POLICY CENTER          Organ…  REPRODUCTIVE FREEDOM FOR ALL            $    4,500,000
+  2012-10-16    CONSUMERS ENERGY                    Organ…  CLEAN AFFORDABLE RENEWABLE ENERGY F…    $    3,750,000
+  2018-10-02    SIXTEEN THIRTY FUND                 Organ…  VOTERS NOT POLITICIANS BALLOT COMMI…    $    3,500,000
+  2018-10-10    ACTION NOW INITIATIVE               Organ…  VOTERS NOT POLITICIANS BALLOT COMMI…    $    3,033,800
+  2012-10-12    MICHIGAN CHAMBER OF COMMERCE        Organ…  PROTECTING MICHIGAN TAXPAYERS           $    3,000,000
+  2006-09-20    JON STRYKER                         Indiv…  COALITION FOR PROGRESS                  $    2,651,400
+  2012-07-10    CONSUMERS ENERGY                    Organ…  CLEAN AFFORDABLE RENEWABLE ENERGY F…    $    2,625,000
+
+================================================================================
+  10 RANDOM CONTRIBUTION ROWS — raw data spot check  [MICHIGAN]
+================================================================================
+  Date          Contributor                   T            Amount  Committee                       City                St    Employer                Occupation          
+  ------------  ----------------------------  -----  ------------  ------------------------------  ------------------  ----  ----------------------  --------------------
+  2000-05-17    THOMAS DEDENBACH              Indi…  $          100  COMMITTEE TO REELECT LINDA DA…  RICHMOND            MI                                                
+  2002-10-08    BRIAN GARDNER                 Indi…  $          100  RIGHT TO LIFE OF MICHIGAN STA…  JACKSON             MI    CONSUMERS POWER COMPA…  ENGINEER            
+  2004-01-30    DAVID R SMIDT                 Indi…  $           15  LEAR CORPORATION                OXFORD              MI                                                
+  2004-09-08    GERMAINE TOLSTON              Indi…  $            5  A T AND T MICHIGAN PAC          DETROIT             MI                                                
+  2004-09-13    AMAR AREPALLI                 Indi…  $           10  LEAR CORPORATION                STERLING HEIGHTS    MI    LEAR CORPORATION        QUALITY DIRECTOR    
+  2004-09-27    NINA DAVIS                    Indi…  $           18  UAW MICHIGAN VOLUNTARY POLITI…  CANTON              MI                                                
+  2004-09-27    MARK J BARANEK                Indi…  $            5  UAW MICHIGAN VOLUNTARY POLITI…  BAY CITY            MI                                                
+  2004-09-27    LARRY G BOWMAN                Indi…  $           10  UAW MICHIGAN VOLUNTARY POLITI…  SAGINAW             MI                                                
+  2005-05-25    ROBERT A KLIMECK              Indi…  $           10  UAW MICHIGAN VOLUNTARY POLITI…  COMMERCE TWP        MI                                                
+  2005-05-25    MICHAEL SPURLIN               Indi…  $            3  UAW MICHIGAN VOLUNTARY POLITI…  PONTIAC             MI                                                
+
+================================================================================
+  10 MOST RECENT CONTRIBUTIONS — data freshness check  [MICHIGAN]
+================================================================================
+  Date          Contributor                       Type            Amount  Committee                         
+  ------------  --------------------------------  ------  --------------  ----------------------------------
+  2026-10-26    MELANIE HILLIARD                  Indiv…  $           25  JACKSON COUNTY DEMOCRATIC EXECUTI…
+  2026-06-24    ARIC NESBITT                      Indiv…  $           70  IOSCO COUNTY REPUBLICAN COMMITTEE 
+  2026-06-14    ROGER THORNTON                    Indiv…  $           10  SAGINAW COUNTY REPUBLICAN COMMITT…
+  2026-06-12    DAVID SMIROS                      Indiv…  $           35  LIBERTARIAN PARTY OF MI EXEC COMM…
+  2026-06-11    JENNIFER STAINTON                 Indiv…  $           35  LIBERTARIAN PARTY OF MI EXEC COMM…
+  2026-06-11    ASHLEY BLOWER                     Indiv…  $           10  LIBERTARIAN PARTY OF MI EXEC COMM…
+  2026-06-10    CARL MINTZ                        Indiv…  $           35  LIBERTARIAN PARTY OF MI EXEC COMM…
+  2026-06-10    GERALD FARRAR                     Indiv…  $           35  SAGINAW COUNTY REPUBLICAN COMMITT…
+  2026-06-10    RANDALL NORTON                    Indiv…  $           35  SAGINAW COUNTY REPUBLICAN COMMITT…
+  2026-06-10    ANDREW DUKE                       Indiv…  $           53  LIBERTARIAN PARTY OF MI EXEC COMM…
+
+================================================================================
+  10 MOST RECENT EXPENDITURES — data freshness check  [MICHIGAN]
+================================================================================
+  Date          Payee                                     Amount  Committee                     Type                  
+  ------------  --------------------------------  --------------  ----------------------------  ----------------------
+  2026-06-24    DOUG LLOYD FOR MI ATTORNEY GENE…  $        1,500  MICHIGAN GROUND WATER ASSN …  Direct Expenditures   
+  2026-06-23    CASS COUNTY DEMOCRATIC PARTY      $          255  GERIK NASSTROM FOR MICHIGAN   Direct Expenditures   
+  2026-06-18    HUNTINGTON BANK                   $           20  DUGGAN LEADERSHIP FUND        Direct Expenditures   
+  2026-06-18    DYKEMA GOSSETT PLLC               $          955  DUGGAN LEADERSHIP FUND        Direct Expenditures   
+  2026-06-10    COMMITTEE TO ELECT STEVE FRISBI…  $          250  MICHIGAN GROUND WATER ASSN …  Direct Expenditures   
+  2026-06-04    GREG VLIETSTRA                    $          110  SOUTHWEST MICHIGAN EDUCATIO…  Direct Expenditures   
+  2026-05-28    CIVICOPILOT                       $          200  LIBERTARIAN PARTY OF MI EXE…  Direct Expenditures   
+  2026-05-25    ACTBLUE                           $          586  COMMITTEE TO ELECT CHEDRICK…  Direct Expenditures   
+  2026-05-25    OATH                              $          107  COMMITTEE TO ELECT CHEDRICK…  Direct Expenditures   
+  2026-05-25    STRIPE INC                        $            1  JACKSON COUNTY DEMOCRATIC E…  Direct Expenditures   
+

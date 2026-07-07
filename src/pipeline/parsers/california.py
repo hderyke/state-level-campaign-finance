@@ -181,9 +181,10 @@ def _retire_wal() -> None:
         wal.rename(str(wal) + f".{int(time.time())}.old")
 
 
-def _build_ref_tables(con: duckdb.DuckDBPyConnection) -> None:
+def _build_ref_tables(con: duckdb.DuckDBPyConnection, log=None) -> None:
     """Load CVR, FILERNAME, and FILER_TYPES into `con` as DuckDB tables."""
-    print("  Loading CVR (max-amend dedup)...", end=" ", flush=True)
+    if log:
+        log.info("  Loading CVR (max-amend dedup)...")
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS cvr_dedup AS
         SELECT
@@ -203,9 +204,11 @@ def _build_ref_tables(con: duckdb.DuckDBPyConnection) -> None:
           AND NULLIF(TRIM(FILING_ID), '') IS NOT NULL
     """)
     n = con.execute("SELECT COUNT(*) FROM cvr_dedup").fetchone()[0]
-    print(f"{n:,} filings")
+    if log:
+        log.info(f"  CVR: {n:,} filings")
 
-    print("  Loading FILERNAME_CD...", end=" ", flush=True)
+    if log:
+        log.info("  Loading FILERNAME_CD...")
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS filername AS
         SELECT
@@ -229,9 +232,11 @@ def _build_ref_tables(con: duckdb.DuckDBPyConnection) -> None:
         WHERE rn = 1
     """)
     n = con.execute("SELECT COUNT(*) FROM filername").fetchone()[0]
-    print(f"{n:,} filers")
+    if log:
+        log.info(f"  FILERNAME: {n:,} filers")
 
-    print("  Building filername_xref (renamed filers)...", end=" ", flush=True)
+    if log:
+        log.info("  Building filername_xref (renamed filers)...")
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS filername_xref AS
         SELECT TRIM(XREF_FILER_ID) AS xref_id,
@@ -251,9 +256,11 @@ def _build_ref_tables(con: duckdb.DuckDBPyConnection) -> None:
         WHERE rn = 1
     """)
     n = con.execute("SELECT COUNT(*) FROM filername_xref").fetchone()[0]
-    print(f"{n:,} xref entries")
+    if log:
+        log.info(f"  filername_xref: {n:,} xref entries")
 
-    print("  Loading FILER_TO_FILER_TYPE_CD...", end=" ", flush=True)
+    if log:
+        log.info("  Loading FILER_TO_FILER_TYPE_CD...")
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS filer_types AS
         SELECT
@@ -275,7 +282,8 @@ def _build_ref_tables(con: duckdb.DuckDBPyConnection) -> None:
         WHERE rn = 1
     """)
     n = con.execute("SELECT COUNT(*) FROM filer_types").fetchone()[0]
-    print(f"{n:,} entries")
+    if log:
+        log.info(f"  FILER_TO_FILER_TYPE: {n:,} entries")
 
 
 def run(entities: bool = False, contributions: bool = False, expenditures: bool = False,
@@ -317,10 +325,10 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
         # == Stage 1: reference tables + candidates + committees ===============
         if run_all or 1 in _stages:
             ref_con = duckdb.connect(REF_DB)
-            _build_ref_tables(ref_con)
+            _build_ref_tables(ref_con, log=log)
 
             # == Candidates from CVR ===========================================
-            print("  candidates...", end=" ", flush=True)
+            log.info("  candidates...")
             t1 = time.perf_counter()
             cand_path = out("candidates.csv")
             ref_con.execute(f"""
@@ -385,13 +393,13 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
                 f"SELECT COUNT(*) FROM read_csv('{cand_path}', all_varchar=true)"
             ).fetchone()[0]
             utils.assign_person_ids(CLEAN_DIR / "candidates.csv", id_model="committee")
-            print(f"{n_cands:,} candidates")
+            log.info(f"  candidates: {n_cands:,}")
             log.file_parsed("CVR_CAMPAIGN_DISCLOSURE_CD.tsv", "candidates", n_cands,
                             duration_s=round(time.perf_counter() - t1, 1),
                             bytes=(RAW_DIR / "CVR_CAMPAIGN_DISCLOSURE_CD.tsv").stat().st_size)
 
             # == Committees from FILERNAME_CD ==================================
-            print("  committees...", end=" ", flush=True)
+            log.info("  committees...")
             t1 = time.perf_counter()
             cmte_path = out("committees.csv")
             ref_con.execute(f"""
@@ -451,17 +459,17 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
             n_cmtes = ref_con.execute(
                 f"SELECT COUNT(*) FROM read_csv('{cmte_path}', all_varchar=true)"
             ).fetchone()[0]
-            print(f"{n_cmtes:,} committees")
+            log.info(f"  committees: {n_cmtes:,}")
             log.file_parsed("FILERNAME_CD.tsv", "committees", n_cmtes,
                             duration_s=round(time.perf_counter() - t1, 1),
                             bytes=(RAW_DIR / "FILERNAME_CD.tsv").stat().st_size)
 
             ref_con.close()
-            print(f"  Reference tables saved → {REF_DB}")
+            log.debug(f"  Reference tables saved → {REF_DB}")
 
             # Seed california.db with candidates + committees so tabulate.py
             # doesn't need to regenerate them from CSV.
-            print("  Seeding california.db with candidates + committees...", end=" ", flush=True)
+            log.info("  Seeding california.db with candidates + committees...")
             main_con = _open_main_db()
             main_con.execute(f"""
                 CREATE OR REPLACE TABLE candidates AS
@@ -479,7 +487,7 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
 
             main_con.close()
             _retire_wal()
-            print("done")
+            log.info("  Seeded california.db")
 
             if not run_all:
                 _emit_completed(log, t0, n_cont, n_expn, n_cands, n_cmtes)
@@ -498,7 +506,7 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
         # writing a multi-GB CSV to the mounted filesystem).
         if run_all or 2 in _stages:
             con = open_main_with_ref()
-            print(f"  contributions  RCPT_CD.tsv...", end=" ", flush=True)
+            log.info("  contributions  RCPT_CD.tsv...")
             t2 = time.perf_counter()
             con.execute(f"""
                 CREATE OR REPLACE TABLE contributions AS
@@ -534,7 +542,7 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
                   AND TRIM(r.AMOUNT) != ''
             """)
             n_cont = con.execute("SELECT COUNT(*) FROM contributions").fetchone()[0]
-            print(f"{n_cont:,} rows")
+            log.info(f"  contributions: {n_cont:,} rows")
             con.execute(f"""
                 COPY contributions TO '{out("contributions.csv.gz")}'
                 (HEADER, DELIMITER ',', COMPRESSION gzip)
@@ -552,7 +560,7 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
         # == Stage 3: Expenditures =============================================
         if run_all or 3 in _stages:
             con = open_main_with_ref()
-            print(f"  expenditures   EXPN_CD.tsv...", end=" ", flush=True)
+            log.info("  expenditures   EXPN_CD.tsv...")
             t3 = time.perf_counter()
             con.execute(f"""
                 CREATE OR REPLACE TABLE expenditures AS
@@ -590,7 +598,7 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
                   AND TRIM(r.AMOUNT) != ''
             """)
             n_expn = con.execute("SELECT COUNT(*) FROM expenditures").fetchone()[0]
-            print(f"{n_expn:,} rows")
+            log.info(f"  expenditures: {n_expn:,} rows")
             con.execute(f"""
                 COPY expenditures TO '{out("expenditures.csv.gz")}'
                 (HEADER, DELIMITER ',', COMPRESSION gzip)
@@ -607,6 +615,7 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
 
         # Clean up the ref DB after a full run (it can be rebuilt from raw TSVs)
         Path(REF_DB).unlink(missing_ok=True)
+        log.debug("  Cleaned up ref DB")
 
         # Log output file stats
         log.file_parsed("contributions.csv.gz", "contributions", n_cont,
@@ -623,7 +632,7 @@ def run(entities: bool = False, contributions: bool = False, expenditures: bool 
             (["contributions"] if 2 in _stages else []) +
             (["expenditures"] if 3 in _stages else [])
         ) or "all"
-        print(f"\nCalifornia: {scope} done.")
+        log.info(f"California: {scope} done.")
         _emit_completed(log, t0, n_cont, n_expn, n_cands, n_cmtes)
 
     except KeyboardInterrupt:

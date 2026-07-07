@@ -6,13 +6,15 @@ Files in this directory:
     committee_types.csv        state,raw,canonical   (AK,Candidate,Candidate Committee ...)
     contributor_types.csv      state,raw,canonical   (AL,Individual,Individual ...)
     transaction_categories.csv state,raw,canonical   (AL,Cash (Itemized),Monetary ...)
+    expenditure_categories.csv state,raw,canonical   (AL,Itemized,Monetary ...)
+    office_types.csv           state,raw,canonical   (KY,SLATE,Governor/Lt. Governor Ticket ...)
     parties.csv                raw,canonical         (REP → REPUBLICAN, DFL → DEMOCRAT ...)  — optional, not yet populated
     states.csv                 abbr,name,fips        (AK,Alaska,02 ...)
 
 Usage:
     from src.aliases import expand_nickname, canonical_committee_type,
                            canonical_contributor_type, canonical_transaction_category,
-                           canonical_party, fips_code
+                           canonical_office_type, canonical_party, fips_code
 
     expand_nickname("MIKE")                                    # → ["MICHAEL"]
     canonical_committee_type("AK", "Candidate")                # → "CANDIDATE COMMITTEE"
@@ -20,6 +22,7 @@ Usage:
     canonical_contributor_type("AK", "Group")                  # → None  (ambiguous)
     canonical_transaction_category("AL", "Cash (Itemized)")    # → "Monetary"
     canonical_transaction_category("CA", "X")                  # → "In-Kind"
+    canonical_office_type("KY", "SLATE")                       # → "Governor/Lt. Governor Ticket"
     canonical_party("REP")                                     # → "REPUBLICAN"
     fips_code("AK")                                            # → "02"
 """
@@ -86,6 +89,11 @@ def _load_expenditure_categories() -> dict[tuple[str, str], str | None]:
     return _load_state_keyed("expenditure_categories.csv")
 
 
+def _load_office_types() -> dict[tuple[str, str], str | None]:
+    """(state_upper, raw_upper) → canonical office label, or None if intentionally unmapped."""
+    return _load_state_keyed("office_types.csv")
+
+
 def _load_parties() -> dict[str, str]:
     """raw_upper → canonical_upper."""
     path = _DIR / "parties.csv"
@@ -123,6 +131,7 @@ _COMMITTEE_TYPES:         dict[tuple[str, str], str | None] = _load_committee_ty
 _CONTRIBUTOR_TYPES:       dict[tuple[str, str], str | None] = _load_contributor_types()
 _TRANSACTION_CATEGORIES:  dict[tuple[str, str], str | None] = _load_transaction_categories()
 _EXPENDITURE_CATEGORIES:  dict[tuple[str, str], str | None] = _load_expenditure_categories()
+_OFFICE_TYPES:            dict[tuple[str, str], str | None] = _load_office_types()
 _PARTIES:                 dict[str, str]                    = _load_parties()
 _FIPS:                    dict[str, str]                    = _load_fips()
 
@@ -226,6 +235,27 @@ def canonical_expenditure_category(state: str, raw: str) -> str | None:
 def expenditure_category_mappings() -> dict[tuple[str, str], str | None]:
     """Return the full (state_upper, raw_upper) → canonical|None mapping for SQL generation."""
     return dict(_EXPENDITURE_CATEGORIES)
+
+
+def canonical_office_type(state: str, raw: str) -> str | None:
+    """
+    Return the canonical office label for a state-specific raw office value.
+    Falls back to the raw value if no mapping exists; returns None if blank.
+
+    Examples:
+        canonical_office_type("KY", "SLATE")              → "Governor/Lt. Governor Ticket"
+        canonical_office_type("KY", "STATE REPRESENTATIVE") → "State Representative"
+        canonical_office_type("AL", "GOVERNOR")           → "GOVERNOR"  (no mapping yet)
+    """
+    key = (state.strip().upper(), (raw or "").strip().upper())
+    if key in _OFFICE_TYPES:
+        return _OFFICE_TYPES[key]
+    return raw.strip() or None   # unknown mapping — pass through as-is
+
+
+def office_type_mappings() -> dict[tuple[str, str], str | None]:
+    """Return the full (state_upper, raw_upper) → canonical|None mapping for SQL generation."""
+    return dict(_OFFICE_TYPES)
 
 
 def canonical_party(raw: str) -> str:

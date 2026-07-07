@@ -204,7 +204,7 @@ def read_central_directory(session: requests.Session, zip_size: int) -> dict:
 
 # == Selective extraction ======================================================
 def extract_entry(session: requests.Session, entry: dict, zip_path: str,
-                  out_path: Path) -> int:
+                  out_path: Path, log=None) -> int:
     """
     Range-download + decompress one ZIP entry.
     Returns the number of data rows (lines minus 1).
@@ -257,8 +257,8 @@ def extract_entry(session: requests.Session, entry: dict, zip_path: str,
     # Add a small buffer: in practice LH and CD sizes can differ by a few KB
     fetch_size = comp_size + 4096
 
-    print(f"    → fetching {comp_size / 1024 / 1024:.0f} MB compressed...",
-          end=" ", flush=True)
+    if log:
+        log.info(f"  fetching {comp_size / 1024 / 1024:.0f} MB compressed...")
 
     # == Step 2: stream-download + decompress ==================================
     CHUNK   = 8 * 1024 * 1024   # 8 MB per HTTP request
@@ -352,9 +352,9 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False,
                           "Chrome/124.0.0.0 Safari/537.36",
         })
 
-        print("California: checking server...", end=" ", flush=True)
+        log.info("California: checking server...")
         zip_size, server_last_mod = check_zip(session)
-        print(f"ZIP = {zip_size / 1024**3:.2f} GB, last modified {server_last_mod}")
+        log.info(f"  ZIP = {zip_size / 1024**3:.2f} GB, last modified {server_last_mod}")
 
         done = {} if force else load_manifest()
 
@@ -362,43 +362,39 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False,
         force_selected = force or not no_horizontal
 
         if not force_selected and all(done.get(n) == server_last_mod for n in targets.values()):
-            print("California: selected files current — skipping.")
+            log.info("California: selected files current — skipping.")
             log._emit("scrape_completed", status="completed",
                       duration_s=round(time.perf_counter() - t0, 1),
                       files_ok=0, files_err=0, note="all_current")
             return
 
-        print("California: reading ZIP central directory...", end=" ", flush=True)
+        log.info("California: reading ZIP central directory...")
         cd = read_central_directory(session, zip_size)
-        print(f"({len(cd)} entries)")
+        log.info(f"  central directory: {len(cd)} entries")
 
         for zip_path, local_name in targets.items():
             if not force_selected and done.get(local_name) == server_last_mod:
-                print(f"  {local_name}: already current — skipping")
                 log.file_download_skip(filename=local_name)
                 continue
 
             if zip_path not in cd:
-                print(f"  {local_name}: not found in ZIP — skipping")
                 log.file_download_error(filename=local_name,
                                         error="not found in ZIP central directory")
                 files_err += 1
                 continue
 
             out_path = RAW_DIR / local_name
-            print(f"  {local_name}:", end=" ", flush=True)
             log.file_download_start(filename=local_name)
             t_file = time.perf_counter()
 
             try:
-                row_count = extract_entry(session, cd[zip_path], zip_path, out_path)
+                row_count = extract_entry(session, cd[zip_path], zip_path, out_path,
+                                          log=log)
             except Exception as e:
-                print(f"failed: {e}")
                 log.file_download_error(filename=local_name, error=str(e))
                 files_err += 1
                 continue
 
-            print(f"{row_count:,} rows")
             log.file_download_ok(filename=local_name,
                                  bytes=out_path.stat().st_size,
                                  rows=row_count,
@@ -411,7 +407,7 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False,
             })
             files_ok += 1
 
-        print("California: done.")
+        log.info("California: done.")
         log._emit("scrape_completed", status="completed",
                   duration_s=round(time.perf_counter() - t0, 1),
                   files_ok=files_ok, files_err=files_err)

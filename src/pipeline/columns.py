@@ -43,6 +43,7 @@ CANDIDATES = [
     "candidate_first",
     "candidate_last",
     "office",
+    "canonical_office",  # derived at aggregate time via src/aliases/office_types.csv
     "district",
     "jurisdiction",
     "party",
@@ -149,6 +150,7 @@ COLUMN_TYPES = {
     "active":               "BIGINT",
     # candidate fields
     "candidate_name":       "VARCHAR",
+    "canonical_office":     "VARCHAR",
     "candidate_first":      "VARCHAR",
     "candidate_last":       "VARCHAR",
     "office":               "VARCHAR",

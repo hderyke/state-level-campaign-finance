@@ -1,0 +1,115 @@
+{
+  "state": "KS",
+  "run_at": "2026-07-05T17:44:58.052438",
+  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/kansas/cleaned",
+  "passed": true,
+  "row_counts": {
+    "candidates": 3654,
+    "committees": 3654,
+    "contributions": 147995,
+    "expenditures": 50399
+  },
+  "sampled_tables": {},
+  "tier1_failures": [],
+  "tier1_fill_rates": {
+    "candidates": {
+      "_total": 3654,
+      "state": 100.0,
+      "person_id": 100.0,
+      "state_filer_id": 0.0,
+      "candidate_name": 100.0
+    },
+    "committees": {
+      "_total": 3654,
+      "state": 100.0,
+      "state_filer_id": 0.0
+    },
+    "contributions": {
+      "_total": 147995,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    },
+    "expenditures": {
+      "_total": 50399,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    }
+  },
+  "tier2_warnings": [
+    {
+      "table": "candidates",
+      "warning": "3654/3654 rows have empty 'state_filer_id' \u2014 100.0% empty (threshold: 1.0%) \u2014 expected for id_model=name_hash (person_id does not depend on state_filer_id; see docs/states/kansas.md)"
+    },
+    {
+      "table": "committees",
+      "warning": "3654/3654 rows have empty 'state_filer_id' \u2014 100.0% empty (threshold: 1.0%) \u2014 expected for id_model=name_hash (person_id does not depend on state_filer_id; see docs/states/kansas.md)"
+    }
+  ],
+  "tier2_enrichment": {
+    "candidates": {
+      "total": 3654,
+      "candidate_first": 100.0,
+      "candidate_last": 99.7,
+      "office": 100.0,
+      "district": 99.4,
+      "jurisdiction": 0.0,
+      "party": 0.0,
+      "election_year": 100.0,
+      "incumbent": 0.0
+    },
+    "committees": {
+      "total": 3654,
+      "committee_type": 100.0,
+      "committee_name": 100.0,
+      "candidate_name": 100.0,
+      "treasurer_name": 0.0,
+      "city": 0.0,
+      "zip": 0.0
+    },
+    "contributions": {
+      "total": 147995,
+      "contributor_name": 94.3,
+      "contributor_type": 0.0,
+      "contributor_city": 85.0,
+      "contributor_state": 85.3,
+      "contributor_zip": 85.3,
+      "employer": 0.0,
+      "occupation": 30.2,
+      "candidate_name": 100.0,
+      "office": 100.0,
+      "election_year": 100.0
+    },
+    "expenditures": {
+      "total": 50399,
+      "payee_name": 90.9,
+      "transaction_type": 0.0,
+      "purpose": 81.3,
+      "category": 0.0,
+      "payee_city": 77.2,
+      "payee_state": 77.4,
+      "payee_zip": 77.4,
+      "candidate_name": 100.0,
+      "office": 100.0,
+      "election_year": 100.0
+    }
+  },
+  "tier2_breakdowns": {
+    "committees": {
+      "committee_type": {
+        "Candidate": 3654
+      },
+      "active": {
+        "(blank)": 3654
+      }
+    }
+  },
+  "drift_warnings": []
+}

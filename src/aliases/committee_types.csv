@@ -153,3 +153,73 @@ IN,Political Action,PAC
 IN,Regular Party,Party Committee
 IN,Legislative Caucus,Party Committee
 IN,System,
+# == Kentucky ==================================================================
+# KREF committee_type from the committees API endpoint.
+# Issues Committees are independent advocacy committees (functionally PAC-like
+# but not candidate-specific); in KY statute they are a distinct filer category.
+# Caucus Campaign Committees are legislative caucus collective fundraising entities.
+KY,Campaign Committee,Candidate Committee
+KY,State Pac,PAC
+KY,Issues Committee,PAC
+KY,Executive Committee,Party Committee
+KY,Independent Expenditure-Only Committee,Independent Expenditure
+KY,Inaugural Committee,Other
+KY,Exploratory Committee,Candidate Committee
+KY,Contributing Organization,Organization
+KY,Caucus Campaign Committee,PAC
+KY,Executive Committee Building Fund,Party Committee
+# == Maine =====================================================================
+ME,Candidate,Candidate Committee
+ME,Political Action Committee,PAC
+ME,Party Committee,Party Committee
+ME,Ballot Question Committee,Ballot Measure
+ME,Gubernatorial Transition And Inaugural Committee,Other
+# Personal financial disclosure filers are not campaign committees — suppressed
+ME,Legislative Personal Filer,
+ME,Personal Financial Disclosure Filer - Executive,
+# == Louisiana =================================================================
+# Louisiana does not provide committee_type in bulk CSVs — field is left blank
+# by parser. Filer type (candidate vs PAC) is inferred from FilerFirstName
+# presence, not from a committee_type column. No mappings needed here.
+# == Maryland ==================================================================
+MD,Candidate Committee,Candidate Committee
+MD,Political Action Committee (PAC),PAC
+MD,Super Political Action Committee (Super PAC),PAC
+MD,Party Central Committee,Party Committee
+MD,Legislative Caucus Committee,Party Committee
+MD,Independent Expenditure,Independent Expenditure
+MD,Electioneering Communication,Independent Expenditure
+MD,Ballot Issue Committee,Ballot Measure
+MD,Slate Committee,Other
+MD,Out of State (Non Federal) Committee,Other
+MD,Participating Organizations Committee,Other
+MD,Public Financing Committee,Other
+# == Massachusetts ==============================================================
+# Account type codes from all_filers.txt → canonical labels.
+# D/U/Z/z/N/O are candidate-type accounts (various vintages of the registration system).
+MA,Candidate Committee,Candidate Committee
+MA,PAC,PAC
+MA,Independent Expenditure,Independent Expenditure
+MA,Party Committee,Party Committee
+MA,Ballot Measure,Ballot Measure
+MA,Other,Other
+# == Michigan ==================================================================
+# com_type values from transaction files; committee_type labels from entity search
+MI,Candidate,Candidate Committee
+MI,Political,PAC
+# "Independent" in MI = committees not affiliated with a candidate or party (non-IE PACs)
+MI,Independent,PAC
+MI,Caucus,PAC
+MI,Ballot Question,Ballot Measure
+MI,Independent Expenditure,Independent Expenditure
+MI,Qualifying Political Party,Party Committee
+MI,State Political Party,Party Committee
+MI,County Political Party,Party Committee
+MI,District Political Party,Party Committee
+# == Minnesota =================================================================
+# RegisteredEntityType (PCC/PCF/PTU) is mapped to canonical values at parse time
+# so the per-state DB query works without alias expansion. Aliases here are no-ops
+# for the aggregate DB but kept for completeness.
+MN,Candidate Committee,Candidate Committee
+MN,PAC,PAC
+MN,Party Committee,Party Committee

@@ -1,0 +1,259 @@
+
+================================================================================
+  TOP 20 CONTRIBUTORS — total donated & top recipient committee  [FLORIDA]
+================================================================================
+  Contributor                                    Txns   Total Donated  Top Recipient                                       To Top
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  REPUBLICAN PARTY OF FLORIDA                  26,204  $  138,243,514  Florida House Republican Campaign Commit    $   21,710,000
+  FRIENDS OF RON DESANTIS                         104  $  124,371,730  Republican Party of Florida                 $  115,043,730
+  TRULIEVE INC.                                    95  $  119,769,399  Smart & Safe Florida                        $  118,659,899
+  FLORIDA DEMOCRATIC PARTY                     13,076  $   67,454,188  Sink, Alex                                  $    7,068,432
+  TRULIEVE INC                                    116  $   56,075,000  Smart & Safe Florida                        $   55,275,000
+  REPUBLICAN GOVERNORS ASSOCIATION                 42  $   50,985,026  Empower Parents PAC                         $   23,950,000
+  STATE OF FLORIDA                                606  $   48,153,099  DeSantis, Ron                               $   10,530,894
+  LAS VEGAS SANDS CO.                               5  $   46,500,000  Florida Voters in Charge                    $   46,500,000
+  HUGHES HUBBARD AND REED LLP                       1  $   41,000,000  Lipner, Ryan Adam                           $   41,000,000
+  GRIFFIN KENNETH C.                               13  $   40,600,000  Keep Florida Clean, Inc.                    $   12,000,000
+  SEMINOLE TRIBE OF FLORIDA                     1,217  $   40,448,866  Voters In Charge                            $   17,873,700
+  UNITED STATES SUGAR CORPORATION               2,253  $   39,237,761  Alliance of Florida's Sugar Farmers         $    3,298,429
+  DISNEY WORLDWIDE SERVICES, INC.                 901  $   37,228,243  Voters In Charge                            $   20,305,000
+  FLORIDA POWER & LIGHT COMPANY                 1,049  $   33,166,361  Republican Party of Florida                 $    6,545,554
+  FORWARD FLORIDA                                  87  $   30,178,650  Florida Democratic Party                    $   29,677,345
+  SEMINOLE TRIBE OF FLORIDA INC.                    8  $   30,007,600  Standing Up for Florida, Inc.               $   30,005,100
+  TRULIEVE, INC                                    39  $   29,155,500  Smart & Safe Florida                        $   28,000,000
+  CHARLIE CRIST FOR FLORIDA                        32  $   28,609,250  Florida Democratic Party                    $   28,589,000
+  LET'S GET TO WORK                                 6  $   27,780,368  Let's Get To Work                           $   27,395,368
+  DEMOCRATIC NATIONAL COMMITTEE                   345  $   26,380,630  Florida Democratic Party                    $   26,341,022
+
+================================================================================
+  TOP 20 RECIPIENT CANDIDATES — total contributions received  [FLORIDA]
+================================================================================
+  Candidate                                   St    Office                      Party            Txns  Total Received
+  ------------------------------------------  ----  --------------------------  ------------  -------  --------------
+  JEB BUSH                                    FL    President of the United S…  Republican …   44,968  $   88,338,397
+  CHARLIE CRIST                               FL    Governor                    Florida Dem…  485,764  $   87,406,155
+  RON DESANTIS                                FL    President of the United S…  Republican …  392,023  $   65,686,952
+  RYAN ADAM LIPNER                            FL    President of the United S…  Florida Dem…        3  $   41,000,200
+  TOM GALLAGHER                               FL    Governor                    Republican …   30,741  $   37,315,163
+  ALEX SINK                                   FL    United States Representat…  Florida Dem…   83,388  $   31,650,458
+  RICK SCOTT                                  FL    United States Senator       Republican …   22,211  $   24,099,692
+  BILL MCCOLLUM                               FL    Governor                    Republican …   41,900  $   24,056,395
+  JEFF ATWATER                                FL    Chief Financial Officer     Republican …   23,925  $   20,061,554
+  ANDREW GILLUM                               FL    Governor                    Florida Dem…  248,875  $   19,168,835
+  ADAM H. PUTNAM                              FL    Governor                    Republican …   33,517  $   16,820,745
+  BYRON DONALDS                               FL    Governor                    Republican …   92,999  $   11,331,995
+  JIM DAVIS                                   FL    Governor                    Florida Dem…   28,390  $   10,431,822
+  TOM LEE                                     FL    State Senator               Republican …   12,409  $    8,871,827
+  ASHLEY MOODY                                FL    United States Senator       Republican …    7,055  $    8,802,055
+  BILL MCBRIDE                                FL    Governor                    Florida Dem…   28,552  $    8,761,966
+  GWEN GRAHAM                                 FL    Governor                    Florida Dem…   48,526  $    7,825,470
+  ROD SMITH                                   FL    State Senator               Florida Dem…   15,748  $    7,792,792
+  BUDDY MACKAY                                FL    Governor                    Florida Dem…   16,824  $    7,615,939
+  CHARLES H. BRONSON                          FL    Commissioner of Agricultu…  Republican …    8,765  $    6,369,386
+
+================================================================================
+  TOP 20 NON-CANDIDATE COMMITTEES — total contributions received  [FLORIDA]
+================================================================================
+  St    Committee                                   Type                             Txns  Total Received
+  ----  ------------------------------------------  ----------------------------  -------  --------------
+  FL    Republican Party of Florida                 Party Executive Committee     166,190  $  929,872,110
+  FL    Florida Democratic Party                    Party Executive Committee      95,124  $  454,635,421
+  FL    Empower Parents PAC                         Political Committee            76,046  $  226,114,095
+  FL    Smart & Safe Florida                        Political Committee               934  $  210,742,099
+  FL    Florida Republican Senatorial Campaign C                                   10,194  $  208,966,484
+  FL    Floridians Protecting Freedom, Inc.         Political Committee           103,512  $  121,709,946
+  FL    Let's Get To Work                           Political Committee             5,808  $  107,428,989
+  FL    Friends of Byron Donalds PAC                Political Committee             1,614  $   76,461,944
+  FL    Florida Voters in Charge                    Political Committee                13  $   75,471,098
+  FL    Florida House Republican Campaign Commit                                    6,091  $   70,379,718
+  FL    Realtors Political Advocacy Committee       Political Committee           811,304  $   67,444,571
+  FL    Florida Justice PAC                         Political Committee            96,725  $   52,049,131
+  FL    Florida Democratic Legislative Campaign                                     2,479  $   49,104,024
+  FL    Voters In Charge                            Political Committee               220  $   46,196,771
+  FL    Standing Up for Florida, Inc.               Political Committee                 6  $   40,005,100
+  FL    Forward Florida                             Political Committee            38,703  $   38,883,366
+  FL    Florida Education Champions                 Political Committee                47  $   37,392,232
+  FL    Marsy's Law for Florida                     Political Committee                15  $   37,150,082
+  FL    Charlie Crist for Florida                   Political Committee             1,838  $   30,270,083
+  FL    Florida Grown PC                            Political Committee             4,451  $   29,890,420
+
+================================================================================
+  TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client  [FLORIDA]
+================================================================================
+  Payee                                          Txns  Total Received  Largest Client                                 From Client
+  ------------------------------------------  -------  --------------  ------------------------------------------  --------------
+  RYANONE INC.                                      7  $  280,001,400  Lipner, Ryan Adam                           $  280,001,400
+  MULTI MEDIA SERVIES INC                          78  $  150,110,448  Scott, Rick                                 $  150,110,448
+  EDGE COMMUNICATIONS                             526  $   79,578,712  Levine, Philip                              $   74,803,572
+  FORTUNE MEDIA, INC.                              27  $   62,847,492  Greene, Jeff                                $   62,847,492
+  GHH INCORPORATED                                105  $   51,179,642  Crist, Charlie                              $   51,179,642
+  MCLAUGHLIN & ASSOCIATES                         229  $   46,353,658  McCollum, Bill                              $   15,865,455
+  LUC MEDIA                                       164  $   41,266,910  McBride, Bill                               $   29,351,000
+  MPGH AGENCY                                      49  $   35,681,870  Bush, Jeb                                   $   35,681,870
+  MEDIA STRATEGIES                                 59  $   30,522,394  Sink, Alex                                  $   29,954,394
+  THE VICTORY GROUP, INC.                         959  $   27,277,049  Lee, Tom                                    $    6,018,245
+
+================================================================================
+  ACTIVITY BY YEAR — contribution and expenditure row counts and totals  [FLORIDA]
+================================================================================
+    Year      Cont N        Cont Total      Expn N        Expn Total
+  ------  ----------  ----------------  ----------  ----------------
+    1990           0    $            0           1    $           48
+    1991           0    $            0           1    $          200
+    1992           0    $            0           2    $          146
+    1993           0    $            0          23    $        4,969
+    1994           0    $            0         249    $      373,090
+    1995           6    $       80,000       3,654    $      958,499
+    1996     595,092    $  104,883,764      56,560    $   38,120,968
+    1997     480,101    $   43,098,848       7,159    $    4,053,665
+    1998     763,216    $  155,902,370      53,600    $   61,470,954
+    1999     683,212    $   42,978,799      18,945    $    8,581,584
+    2000     884,639    $  144,290,206     144,687    $  148,626,412
+    2001     643,240    $  105,482,715      33,965    $   24,027,904
+    2002   1,382,607    $  207,595,955     311,757    $  770,416,101
+    2003   1,150,718    $   53,490,947      16,401    $   14,658,005
+    2004   1,655,054    $  163,724,772      42,523    $   37,223,153
+    2005   2,650,348    $  112,599,143      24,091    $   16,064,721
+    2006   1,309,273    $  287,875,186     144,986    $  343,007,666
+    2007   1,069,387    $   88,118,116      17,330    $   16,117,207
+    2008   1,081,990    $  171,284,012      70,853    $   69,336,757
+    2009   1,013,100    $  107,283,678      42,901    $   24,010,861
+    2010   1,165,978    $  342,778,756     161,746    $  445,590,911
+    2011     967,147    $   96,551,688      30,346    $   15,154,013
+    2012     948,323    $  196,585,456     167,098    $  181,530,136
+    2013     848,466    $  148,741,764      35,616    $   18,623,717
+    2014     684,395    $  435,222,044     171,377    $  254,685,959
+    2015     438,729    $  129,825,204      35,773    $   19,930,351
+    2016     515,130    $  261,471,910     155,729    $  218,437,445
+    2017     403,018    $  195,751,119      43,487    $   37,414,949
+    2018     909,257    $  744,833,859     194,831    $  596,564,512
+    2019     448,678    $  204,595,658      24,470    $   16,973,489
+    2020     646,188    $  334,184,136      69,531    $   76,923,971
+    2021     615,570    $  434,299,290      20,106    $   12,265,058
+    2022   1,274,881    $  744,960,963      76,632    $  133,671,557
+    2023     588,271    $  274,997,351      22,721    $   14,436,435
+    2024     748,862    $  782,453,723      59,413    $   64,795,679
+    2025     656,564    $  423,352,570      26,033    $   19,891,938
+    2026     388,727    $  197,541,398      26,062    $   20,913,100
+    2028           0    $            0           1    $          322
+
+================================================================================
+  CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total  [FLORIDA]
+================================================================================
+  Contributor Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  (blank)                         27,610,224    $7,736,874,334     100.0%
+
+================================================================================
+  TOP 10 CONTRIBUTOR STATES — where the money comes from  [FLORIDA]
+================================================================================
+  State                        N             Total    % rows
+  ------------------  ----------  ----------------  --------
+  FL                  18,278,608    $5,887,284,021      66.2%
+  (blank)              1,417,435    $  116,094,224       5.1%
+  CA                     760,690    $  145,460,104       2.8%
+  TX                     698,784    $   64,308,646       2.5%
+  MI                     525,866    $   23,690,612       1.9%
+  NY                     430,596    $  150,294,673       1.6%
+  GA                     415,153    $   51,949,360       1.5%
+  IL                     388,287    $   83,314,344       1.4%
+  PA                     357,195    $   48,564,652       1.3%
+  OH                     349,442    $   21,296,587       1.3%
+
+================================================================================
+  EXPENDITURE TYPE BREAKDOWN — raw codes, counts, and share of total  [FLORIDA]
+================================================================================
+  Transaction Type                         N             Total    % rows
+  ------------------------------  ----------  ----------------  --------
+  MON                              1,652,666    $2,914,101,317      71.5%
+  Other Distribution                 278,606    $  212,802,344      12.0%
+  DIS                                210,842    $  182,743,461       9.1%
+  REF                                 98,806    $   43,321,122       4.3%
+  RMB                                 32,045    $   19,086,317       1.4%
+  X                                   15,948    $  293,453,724       0.7%
+  PCS                                 10,114    $      579,175       0.4%
+  PCW                                  6,230    $      892,524       0.3%
+  TOA                                  3,170    $   31,365,162       0.1%
+  DPP                                  1,089    $   11,257,347       0.0%
+  DFC                                    919    $   10,606,068       0.0%
+  CCP                                    574    $    2,573,050       0.0%
+  IEC                                    415    $      176,461       0.0%
+  mon                                    359    $      357,392       0.0%
+  PPD                                    337    $    1,821,986       0.0%
+  IEI                                    170    $      126,493       0.0%
+  ECC                                    143    $       28,980       0.0%
+  Dis                                     42    $      330,937       0.0%
+  DPV                                     26    $       21,671       0.0%
+  CAN                                      7    $       17,731       0.0%
+  Mon                                      6    $          957       0.0%
+  ECI                                      5    $        7,603       0.0%
+  MCKINNEY, JOE                            3    $          236       0.0%
+  (blank)                                  3    $        1,673       0.0%
+  09/11/1996                               1    $           79       0.0%
+  09/16/1996                               1    $          196       0.0%
+  MOn                                      1    $           84       0.0%
+
+================================================================================
+  10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check  [FLORIDA]
+================================================================================
+  Date          Contributor                         Type    Committee                                       Amount
+  ------------  ----------------------------------  ------  ------------------------------------  ----------------
+  2001-12-03    HUGHES HUBBARD AND REED LLP                 Lipner, Ryan Adam                       $   41,000,000
+  2014-03-06    LET'S GET TO WORK                           Let's Get To Work                       $   27,395,368
+  2024-10-22    TRULIEVE, INC                               Smart & Safe Florida                    $   22,000,000
+  2018-06-27    MARSY�S LAW FOR ALL FOUNDATION              Marsy's Law for Florida                 $   18,350,000
+  2021-06-28    LAS VEGAS SANDS CORP.                       Florida Voters in Charge                $   17,064,000
+  2025-03-06    TRULIEVE INC.                               Smart & Safe Florida                    $   15,000,000
+  2021-10-20    DRAFTKINGS, INC.                            Florida Education Champions             $   12,712,500
+  2021-12-16    LAS VEGAS SANDS CO.                         Florida Voters in Charge                $   12,000,000
+  2024-07-30    GRIFFIN KENNETH C.                          Keep Florida Clean, Inc.                $   12,000,000
+  2022-01-12    LAS VEGAS SANDS CO.                         Florida Voters in Charge                $   12,000,000
+
+================================================================================
+  10 RANDOM CONTRIBUTION ROWS — raw data spot check  [FLORIDA]
+================================================================================
+  Date          Contributor                   T            Amount  Committee                       City                St    Employer                Occupation          
+  ------------  ----------------------------  -----  ------------  ------------------------------  ------------------  ----  ----------------------  --------------------
+  1996-06-30    HERNANDEZ, M R                       $            5  AT&T Florida Political Action…  MIAMI               FL                                                
+  1996-10-10    SMITH, GREGORY B.                    $            8  CIGNA Corporation Political A…  SAN ANTONIO         TX                            TEAM LDR, BUS SEG   
+  1997-08-25    RHS CONSTRUCTION COMPANY, I…         $           25  BusinessForce, Inc.             LONGWOOD            FL                                                
+  1997-08-29    LANPHER, LAWRENCE C.                 $          250  Kirkpatrick & Lockhart Politi…  CHEVY CHASE         ME                            LAWYER              
+  1997-08-31    WALDRIP, THOMAS KEITH                $           10  Compass Bancshares, Inc. Poli…  JACKSONVILLE        FL                                                
+  1997-09-02    HAAR, II RAYMOND AUGUST              $            1  Dade County Police Benevolent…  MIAMI               FL                                                
+  1997-09-02    MONTGOMERY, KENNETH D                $            1  Dade County Police Benevolent…  MIAMI               FL                                                
+  1997-09-02    ROCHE, TOBIAS P                      $            1  Dade County Police Benevolent…  MIAMI               FL                                                
+  1997-09-02    SEGEE, THOMAS A                      $           33  Concerned Associates Employees  COLLEYVILLE         TX                            EXECUTIVE VICE PRESE
+  1997-09-17    BACCARELLA, SHIRLEY BACC             $           10  Republican Party of Florida     RIVIERA BEACH       FL                                                
+
+================================================================================
+  10 MOST RECENT CONTRIBUTIONS — data freshness check  [FLORIDA]
+================================================================================
+  Date          Contributor                       Type            Amount  Committee                         
+  ------------  --------------------------------  ------  --------------  ----------------------------------
+  2026-07-03    ALLEN JOHN                                $        4,000  Jax Deserves Better               
+  2026-07-03    BONZHEIM KARA                             $          120  Apartment Political Action Commit…
+  2026-07-03    DAILY DAVID                               $          250  Apartment Political Action Commit…
+  2026-07-03    FLORIDA EDUCATION ASSOCIATION A…          $       10,000  Empowered Women Govern            
+  2026-07-03    LEBEDEFF DIANE                            $           16  Greater Tarpon Springs Justice Le…
+  2026-07-03    SPRING BARBARA                            $            5  Blue Florida                      
+  2026-07-03    THOMPSON JAY                              $           75  Apartment Political Action Commit…
+  2026-07-03    VAN WYCK ANN                              $           25  Keep Florida Red                  
+  2026-07-02    CADOGAN ANDRE                             $        5,000  Lincoln Reagan Committee          
+  2026-07-02    SWART ELIZABETH                           $          750  Thriving Together                 
+
+================================================================================
+  10 MOST RECENT EXPENDITURES — data freshness check  [FLORIDA]
+================================================================================
+  Date          Payee                                     Amount  Committee                     Type                  
+  ------------  --------------------------------  --------------  ----------------------------  ----------------------
+  2028-12-31                                      $          322  Florida Strong Finish         Other Distribution    
+  2026-12-28                                      $          147  Florida Strong Finish         Other Distribution    
+  2026-11-04    ARNOLD, MATTHEW C                 $        1,000  Hernandez, Octavio E.         MON                   
+  2026-07-17                                      $            1  Garcia, Luis                  MON                   
+  2026-07-02                                      $            0  Anger, Christopher            X                     
+  2026-07-01    KESSLER, BRYAN                    $       24,513  Kessler, Bryan S.             MON                   
+  2026-06-30    FACEBOOK, META PLATFORMS, INC     $            2  Morris, Erik                  MON                   
+  2026-06-29    MULLINS, COURTNEY                 $           13  Myers, Dawn                   DIS                   
+  2026-06-29    FALVEY, ASHLEY                    $           25  Myers, Dawn                   DIS                   
+  2026-06-29    FRY, YVONNE                       $           25  Myers, Dawn                   DIS                   
+

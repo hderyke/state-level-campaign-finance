@@ -1,0 +1,137 @@
+{
+  "state": "MD",
+  "run_at": "2026-07-05T22:46:21.100128",
+  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/maryland/cleaned",
+  "passed": true,
+  "row_counts": {
+    "candidates": 1967,
+    "committees": 2547,
+    "contributions": 3349936,
+    "expenditures": 310415
+  },
+  "sampled_tables": {
+    "contributions": 3349936
+  },
+  "tier1_failures": [],
+  "tier1_fill_rates": {
+    "candidates": {
+      "_total": 1967,
+      "state": 100.0,
+      "person_id": 100.0,
+      "state_filer_id": 100.0,
+      "candidate_name": 100.0
+    },
+    "committees": {
+      "_total": 2547,
+      "state": 100.0,
+      "state_filer_id": 100.0
+    },
+    "contributions": {
+      "_total": 500000,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    },
+    "expenditures": {
+      "_total": 310415,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    }
+  },
+  "tier2_warnings": [
+    {
+      "table": "contributions",
+      "warning": "61 non-empty 'contributor_state' values are not recognised US state/territory codes (0.0%) \u2014 e.g. ['AE', 'AP', 'De', 'MH', 'Md']"
+    },
+    {
+      "table": "contributions",
+      "warning": "93 non-empty 'contributor_zip' values don't match ZIP format (0.0%) \u2014 e.g. ['1060', '1230', '1757', '2012', '2072']"
+    },
+    {
+      "table": "expenditures",
+      "warning": "252 non-empty 'payee_state' values are not recognised US state/territory codes (0.1%) \u2014 e.g. ['AE', 'AP', 'BC', 'BRITISH COLUMBIA', 'Berlin']"
+    },
+    {
+      "table": "expenditures",
+      "warning": "981 non-empty 'payee_zip' values don't match ZIP format (0.3%) \u2014 e.g. ['0185', '0214', '048583', '068914', '1 10777']"
+    }
+  ],
+  "tier2_enrichment": {
+    "candidates": {
+      "total": 1967,
+      "candidate_first": 100.0,
+      "candidate_last": 100.0,
+      "office": 83.3,
+      "district": 0.0,
+      "jurisdiction": 82.5,
+      "party": 84.5,
+      "election_year": 0.0,
+      "incumbent": 0.0
+    },
+    "committees": {
+      "total": 2547,
+      "committee_type": 100.0,
+      "committee_name": 100.0,
+      "candidate_name": 79.7,
+      "treasurer_name": 99.0,
+      "city": 3.2,
+      "zip": 3.2
+    },
+    "contributions": {
+      "total": 500000,
+      "contributor_name": 99.9,
+      "contributor_type": 100.0,
+      "contributor_city": 99.8,
+      "contributor_state": 99.9,
+      "contributor_zip": 99.9,
+      "employer": 0.0,
+      "occupation": 0.0,
+      "candidate_name": 18.0,
+      "office": 16.3,
+      "election_year": 4.5
+    },
+    "expenditures": {
+      "total": 310415,
+      "payee_name": 98.4,
+      "transaction_type": 100.0,
+      "purpose": 99.5,
+      "category": 99.4,
+      "payee_city": 99.1,
+      "payee_state": 99.1,
+      "payee_zip": 99.1,
+      "candidate_name": 59.6,
+      "office": 53.8,
+      "election_year": 20.7
+    }
+  },
+  "tier2_breakdowns": {
+    "committees": {
+      "committee_type": {
+        "Candidate Committee": 1968,
+        "Political Action Committee (PAC)": 239,
+        "Slate Committee": 72,
+        "Participating Organizations Committee": 70,
+        "Public Financing Committee": 64,
+        "Party Central Committee": 54,
+        "Ballot Issue Committee": 24,
+        "Super Political Action Committee (Super PAC)": 24,
+        "Out of State (Non Federal) Committee": 17,
+        "Independent Expenditure": 10,
+        "Legislative Caucus Committee": 4,
+        "Electioneering Communication": 1
+      },
+      "active": {
+        "1": 2545,
+        "0": 2
+      }
+    }
+  },
+  "drift_warnings": []
+}

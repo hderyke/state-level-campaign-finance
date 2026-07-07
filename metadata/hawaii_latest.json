@@ -1,0 +1,128 @@
+{
+  "state": "HI",
+  "run_at": "2026-07-05T20:18:32.050109",
+  "clean_dir": "/Users/henryderyke/projects/state-level campaign finance/data/hawaii/cleaned",
+  "passed": true,
+  "row_counts": {
+    "candidates": 1328,
+    "committees": 2045,
+    "contributions": 243928,
+    "expenditures": 251388
+  },
+  "sampled_tables": {},
+  "tier1_failures": [],
+  "tier1_fill_rates": {
+    "candidates": {
+      "_total": 1328,
+      "state": 100.0,
+      "person_id": 99.9,
+      "state_filer_id": 100.0,
+      "candidate_name": 99.9
+    },
+    "committees": {
+      "_total": 2045,
+      "state": 100.0,
+      "state_filer_id": 100.0
+    },
+    "contributions": {
+      "_total": 243928,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    },
+    "expenditures": {
+      "_total": 251388,
+      "state": 100.0,
+      "committee_name": 100.0,
+      "amount": 100.0,
+      "date": 100.0,
+      "raw_file": 100.0,
+      "row_num": 100.0
+    }
+  },
+  "tier2_warnings": [
+    {
+      "table": "candidates",
+      "warning": "2 non-empty 'election_year' values are outside 1990\u20132030 or non-numeric \u2014 e.g. ['2021/2022']"
+    },
+    {
+      "table": "contributions",
+      "warning": "5 non-empty 'contributor_state' values are not recognised US state/territory codes (0.0%) \u2014 e.g. ['BC', 'C', 'H', 'Hi', 'ca']"
+    },
+    {
+      "table": "contributions",
+      "warning": "1,378 non-empty 'contributor_zip' values don't match ZIP format (0.6%) \u2014 e.g. ['0', '000000', '011420', '024458', '1201']"
+    },
+    {
+      "table": "expenditures",
+      "warning": "34 non-empty 'payee_state' values are not recognised US state/territory codes (0.0%) \u2014 e.g. ['**', 'CI', 'FM', 'Is', 'JP']"
+    },
+    {
+      "table": "expenditures",
+      "warning": "1,543 non-empty 'payee_zip' values don't match ZIP format (0.6%) \u2014 e.g. ['*****', '0', '0000', '000000', '008200']"
+    }
+  ],
+  "tier2_enrichment": {
+    "candidates": {
+      "total": 1328,
+      "candidate_first": 99.8,
+      "candidate_last": 99.9,
+      "office": 99.9,
+      "district": 79.2,
+      "jurisdiction": 34.7,
+      "party": 59.1,
+      "election_year": 100.0,
+      "incumbent": 0.0
+    },
+    "committees": {
+      "total": 2045,
+      "committee_type": 100.0,
+      "committee_name": 100.0,
+      "candidate_name": 64.9,
+      "treasurer_name": 0.0,
+      "city": 0.0,
+      "zip": 0.0
+    },
+    "contributions": {
+      "total": 243928,
+      "contributor_name": 100.0,
+      "contributor_type": 100.0,
+      "contributor_city": 100.0,
+      "contributor_state": 100.0,
+      "contributor_zip": 100.0,
+      "employer": 24.7,
+      "occupation": 25.3,
+      "candidate_name": 54.9,
+      "office": 54.9,
+      "election_year": 99.6
+    },
+    "expenditures": {
+      "total": 251388,
+      "payee_name": 100.0,
+      "transaction_type": 98.7,
+      "purpose": 71.0,
+      "category": 100.0,
+      "payee_city": 100.0,
+      "payee_state": 100.0,
+      "payee_zip": 100.0,
+      "candidate_name": 91.4,
+      "office": 90.0,
+      "election_year": 99.7
+    }
+  },
+  "tier2_breakdowns": {
+    "committees": {
+      "committee_type": {
+        "Candidate Committee": 1328,
+        "Noncandidate Committee": 717
+      },
+      "active": {
+        "(blank)": 2045
+      }
+    }
+  },
+  "drift_warnings": []
+}

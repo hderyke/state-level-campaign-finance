@@ -26,7 +26,7 @@ candidate_name; NC committee_name falls back to noncandidate_committee_name
 SOI + Affidavits are processed first to seed the candidate/committee registry
 with office/district/county/election_year for every registrant, regardless of
 whether they have any transactions yet — this is what gives the candidates
-table high fill rates for tests/validate.py's required fields.
+table high fill rates for src/pipeline/validate.py's required fields.
 
 Output (data/Hawaii/cleaned/):
   contributions.csv.gz, expenditures.csv.gz, loans_debts.csv.gz,

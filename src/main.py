@@ -8,8 +8,8 @@ src/main.py — Single entry point for the campaign finance pipeline.
 
   Data commands
   ─────────────────────────────────────────────────────────────────
-  push <states|all|db>       upload to Cloudflare R2
-  pull <states|all|db>       download from Cloudflare R2
+  push <states|all|db>       upload to S3
+  pull <states|all|db>       download from S3
 
   States:  two-letter abbreviations  AL AK AZ AR CA CO ...
            or 'all' to run every known state
@@ -18,6 +18,8 @@ src/main.py — Single entry point for the campaign finance pipeline.
   ─────────────────────────────────────────────────────────────────
   --daemon           silent mode for scheduled/cron runs
   --no-report        skip HTML report generation after run
+  --fallback         on state failure, restore from S3 successful/ and
+                     aggregate anyway (mix of fresh + fallback data)
 
   Scraper flags (forwarded to the scraper subprocess; orc validates before passing)
   ─────────────────────────────────────────────────────────────────
@@ -55,26 +57,40 @@ src/main.py — Single entry point for the campaign finance pipeline.
 
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime
 
+# Bootstrap: ensure project root is on sys.path before any src.*/cloud.* imports
+_root = Path(__file__).resolve().parents[1]
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
-# =========================== Configuration ===========================
-# Load .env (R2 credentials, etc.) before anything else
-try:
-    from dotenv import load_dotenv
-    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-except ImportError:
-    pass  # dotenv optional — env vars may already be set
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "src" / "pipeline"))
+# run_helpers bootstraps dotenv + sys.path at import time
+from src.run_helpers import PROJECT_ROOT, generate_report, setup_run
 
 from src import orc
-from src import cloudflare
+from src.reporting.logger import get_logger
 
 PIPELINE_COMMANDS = {"sync", "reparse"}
+
+
+def _cloud_s3():
+    """Lazy-load cloud.s3 — only needed for push/pull and --fallback.
+
+    cloud/ holds personal AWS deployment code and is gitignored (not part of
+    the public repo — see .gitignore and repo_reorg notes). Importing it
+    eagerly at module load would break plain `sync`/`reparse` for anyone who
+    clones this repo without their own cloud/ setup, since every command
+    would fail at import time even ones that never touch S3.
+    """
+    try:
+        from cloud import s3
+        return s3
+    except ImportError as e:
+        print("[!] This command needs cloud/s3.py, which isn't included in this "
+              "repo — it's personal AWS deployment code (bring your own bucket).")
+        print(f"    ({e})")
+        sys.exit(1)
 DATA_COMMANDS     = {"push", "pull"}
 ALL_COMMANDS      = PIPELINE_COMMANDS | DATA_COMMANDS
 
@@ -92,19 +108,21 @@ def _print_help():
     print(__doc__)
 
 
-def _parse_args(argv: list[str]) -> tuple[bool, bool, str, list[str], list[str]]:
+def _parse_args(argv: list[str]) -> tuple[bool, bool, bool, str, list[str], list[str]]:
     """
     Parse top-level CLI arguments.
 
     Returns:
         daemon      — True if --daemon was present
         no_report   — True if --no-report was present
+        fallback    — True if --fallback was present
         command     — the pipeline/data command (first non-flag arg)
         state_args  — remaining non-flag args (state abbreviations, 'all', 'db')
         extra_flags — scraper flags to forward via orc
     """
     daemon    = False
     no_report = False
+    fallback  = False
     extra_flags: list[str] = []
     clean_args: list[str]  = []
 
@@ -122,6 +140,10 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, str, list[str], list[str]]
 
         elif a == "--no-report":
             no_report = True
+            i += 1
+
+        elif a == "--fallback":
+            fallback = True
             i += 1
 
         elif a == "--force":
@@ -169,48 +191,51 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, str, list[str], list[str]]
     command   = clean_args[0] if clean_args else ""
     state_args = clean_args[1:]
 
-    return daemon, no_report, command, state_args, extra_flags
+    return daemon, no_report, fallback, command, state_args, extra_flags
 
 
 # ====================== Push / pull dispatch =========================
 
 def _push(targets: list[str]):
-    """Route a push command to the appropriate cloudflare helper."""
+    """Route a push command to the appropriate S3 helper."""
+    s3 = _cloud_s3()
     if not targets:
         print("[!] push requires a target: <states>, all, or db")
         sys.exit(1)
 
     if len(targets) == 1 and targets[0].lower() == "db":
-        db_path = PROJECT_ROOT / "data" / "state-level-cf.db"
-        if not db_path.exists():
-            print(f"[!] Aggregate db not found: {db_path}")
+        if not s3.push_db(PROJECT_ROOT):
             sys.exit(1)
-        cloudflare.push_file(db_path, "data/state-level-cf.db")
 
     elif len(targets) == 1 and targets[0].lower() == "all":
-        cloudflare.push_all(PROJECT_ROOT)
+        s3.push_all(PROJECT_ROOT)
 
     else:
+        failed = []
         for abbr in targets:
             state_name = orc.ABBR_TO_NAME.get(abbr.upper())
             if not state_name:
                 print(f"[!] Unknown state: {abbr}")
                 sys.exit(1)
-            cloudflare.push_state(state_name.capitalize(), PROJECT_ROOT)
+            if not s3.push_state(abbr.upper(), state_name, PROJECT_ROOT):
+                failed.append(abbr.upper())
+        if failed:
+            print(f"\n[!] Push had errors for: {', '.join(failed)}")
+            sys.exit(1)
 
 
 def _pull(targets: list[str]):
-    """Route a pull command to the appropriate cloudflare helper."""
+    """Route a pull command to the appropriate S3 helper."""
+    s3 = _cloud_s3()
     if not targets:
         print("[!] pull requires a target: <states>, all, or db")
         sys.exit(1)
 
     if len(targets) == 1 and targets[0].lower() == "db":
-        db_path = PROJECT_ROOT / "data" / "state-level-cf.db"
-        cloudflare.pull_file("data/state-level-cf.db", db_path)
+        s3.pull_db(PROJECT_ROOT)
 
     elif len(targets) == 1 and targets[0].lower() == "all":
-        cloudflare.pull_all(PROJECT_ROOT)
+        s3.pull_all(PROJECT_ROOT)
 
     else:
         for abbr in targets:
@@ -218,14 +243,83 @@ def _pull(targets: list[str]):
             if not state_name:
                 print(f"[!] Unknown state: {abbr}")
                 sys.exit(1)
-            cloudflare.pull_state(state_name.capitalize(), PROJECT_ROOT)
+            s3.pull_state(abbr.upper(), state_name, PROJECT_ROOT)
+
+
+# ====================== Fallback pipeline ============================
+
+def _has_data(state_name: str) -> bool:
+    """True if cleaned/ has at least one non-empty csv.gz."""
+    cleaned = PROJECT_ROOT / "data" / state_name / "cleaned"
+    if not cleaned.exists():
+        return False
+    return any(f.stat().st_size > 0 for f in cleaned.glob("*.csv.gz"))
+
+
+def _sync_with_fallback(command: str, state_args: list[str],
+                        extra_flags: list[str]) -> bool:
+    """Run pipeline with fallback: failed states are restored from S3 successful/
+    before aggregate runs. Returns True if aggregate succeeded."""
+    import aggregate as _aggregate
+    s3 = _cloud_s3()
+
+    # Same CF_RUN_ID orc.main() just set — these events land in the same
+    # run's log.jsonl, taggable by operation="fallback" for downstream readers
+    # (e.g. src/emailer.py) that need to know which states were rolled back.
+    log = get_logger(None, "fallback")
+
+    results = orc.main(command, state_args, extra_flags=extra_flags,
+                       no_aggregate=True)
+
+    failed = [a for a, ok in results.items() if not ok]
+    fresh  = [a for a, ok in results.items() if ok]
+
+    # Restore failed states from S3
+    fallback_ok, fallback_fail = [], []
+    for abbr in failed:
+        name = orc.ABBR_TO_NAME[abbr]
+        print(f"\n  ↩  {abbr} failed — restoring from S3 successful/...")
+        try:
+            s3.pull_state(abbr, name)
+            if _has_data(name):
+                fallback_ok.append(abbr)
+                print(f"     ✓ {abbr} restored")
+                log._emit("fallback_restore", state_abbr=abbr, status="ok")
+            else:
+                fallback_fail.append(abbr)
+                print(f"     ✗ {abbr} — nothing usable in S3, skipping")
+                log._emit("fallback_restore", state_abbr=abbr, status="no_data")
+        except Exception as e:
+            fallback_fail.append(abbr)
+            print(f"     ✗ {abbr} — S3 pull failed: {e}")
+            log._emit("fallback_restore", state_abbr=abbr, status="error", error=str(e))
+
+    if fallback_fail:
+        print(f"\n  [!] {len(fallback_fail)} state(s) skipped entirely: "
+              f"{', '.join(fallback_fail)}")
+
+    log._emit("fallback_summary", failed=failed, fresh=fresh,
+              fallback_ok=fallback_ok, fallback_fail=fallback_fail)
+
+    runnable = fresh + fallback_ok
+    if not runnable:
+        print("\n[!] No states have usable data — aborting aggregate.")
+        return False
+
+    print(f"\n{'=' * 50}\n  Aggregate\n{'=' * 50}")
+    try:
+        _aggregate.run()
+        return True
+    except Exception as e:
+        print(f"\n[!] Aggregate failed: {e}")
+        return False
 
 
 # ========================== Entry point ==============================
 
 def main():
     """Parse top-level CLI args and dispatch to orc, push, or pull."""
-    daemon, no_report, command, state_args, extra_flags = _parse_args(sys.argv[1:])
+    daemon, no_report, fallback, command, state_args, extra_flags = _parse_args(sys.argv[1:])
 
     if not command or command in ("-h", "--help"):
         _print_help()
@@ -240,26 +334,28 @@ def main():
         print(f"[!] {command} requires at least one target (state abbreviation, all, or db)")
         sys.exit(1)
 
-    # Scraper flags are only meaningful for pipeline commands, not push/pull
     if command in DATA_COMMANDS and extra_flags:
         print(f"[!] Scraper flags {extra_flags} have no effect on {command!r}")
         sys.exit(1)
 
-    # Daemon mode — silence console, subprocesses inherit this
-    if daemon:
-        os.environ["CF_DAEMON"] = "1"
+    if fallback and command not in PIPELINE_COMMANDS:
+        print(f"[!] --fallback only applies to pipeline commands (sync, reparse)")
+        sys.exit(1)
 
-    # Push/pull get named run IDs here; pipeline commands let orc._setup_run_id handle it
-    if command in DATA_COMMANDS and not os.environ.get("CF_RUN_ID"):
-        ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
-        tgt = (state_args[0].lower()
-               if len(state_args) == 1 and state_args[0].lower() in ("all", "db")
-               else "-".join(t.upper() for t in state_args))
-        os.environ["CF_RUN_ID"] = f"{ts}_{command}_{tgt}"
+    # Daemon mode + run ID (push/pull only — pipeline lets orc handle its own run ID)
+    if command in DATA_COMMANDS:
+        setup_run(command, state_args, daemon=daemon)
+    elif daemon:
+        os.environ["CF_DAEMON"] = "1"
 
     try:
         if command in PIPELINE_COMMANDS:
-            orc.main(command, state_args, extra_flags=extra_flags)
+            if fallback:
+                ok = _sync_with_fallback(command, state_args, extra_flags)
+                if not ok:
+                    sys.exit(1)
+            else:
+                orc.main(command, state_args, extra_flags=extra_flags)
 
         elif command == "push":
             _push(state_args)
@@ -268,21 +364,8 @@ def main():
             _pull(state_args)
 
     finally:
-        if AUTO_REPORT and not no_report:
-            run_id = os.environ.get("CF_RUN_ID")
-            if run_id:
-                run_dir  = PROJECT_ROOT / "logs" / "prod" / run_id
-                log_path = run_dir / "log.jsonl"
-                if log_path.exists():
-                    try:
-                        from src.reporting import log_report
-                        report   = log_report.build_report(log_report.load_events(log_path))
-                        html     = log_report.render_html(report, log_path, run_dir=run_dir)
-                        out_path = run_dir / "report.html"
-                        out_path.write_text(html, encoding="utf-8")
-                        print(f"  ✓ report → {out_path.relative_to(PROJECT_ROOT)}")
-                    except Exception as report_err:
-                        print(f"  [!] report generation failed: {report_err}")
+        if AUTO_REPORT:
+            generate_report(os.environ.get("CF_RUN_ID", ""), no_report=no_report)
 
 
 # =============== CLI ======================
