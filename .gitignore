@@ -7,14 +7,22 @@ __pycache__/
 .tmp/
 .idea/
 .venv/
+venv/
 
-#local run data
+#local run data (recreated automatically by the pipeline — see repo_reorg notes)
 data/
-logs/dev/*
-logs/prod/*
-tests/reports/*
+logs/
+metadata/
+
+# personal AWS deployment + operational tooling — not part of the public
+# pipeline; requires your own AWS account/bucket/Lambda/ECS setup to use
+cloud/
+client-facing/
+src/daemon.py
 
 # credentials — never commit
 .env
-venv/
+
+# personal AI-agent workflow notes — not needed to use the pipeline
+CLAUDE.md
 
