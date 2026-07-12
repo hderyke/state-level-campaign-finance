@@ -365,7 +365,12 @@ def _run(log, t0: float, years: list[int] | None):
                     "district":       district,
                     "party":          party,
                     "election_year":  yr_str,
-                    "amended":        "Y" if _clean(row.get("AMMEND", "")) == "Y" else "N",
+                    # Normalized to "1"/"0" rather than PA's raw "Y"/"N" —
+                    # columns.py documents this field as inconsistent
+                    # across states (0/1 vs Y/N vs empty), and 0/1 is the
+                    # convention the rest of the pipeline already expects
+                    # (validate.py's amended check flags anything else).
+                    "amended":        "1" if _clean(row.get("AMMEND", "")) == "Y" else "0",
                     "terminated":     _clean(row.get("TERMINATE", "")) == "Y",
                     "city":           _clean(row.get("CITY", "")),
                     "zip":            utils.clean_zip(row.get("ZIPCODE", "")),
