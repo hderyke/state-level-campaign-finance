@@ -19,6 +19,7 @@ metadata/
 cloud/
 client-facing/
 src/daemon.py
+src/emailer.py
 
 # credentials — never commit
 .env

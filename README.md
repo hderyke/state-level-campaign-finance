@@ -226,6 +226,14 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 | Iowa (IA) | ✅ | ✅ | Individual PDFs via IECDB API |
 | Kansas (KS) | ✅ | ✅ | Individual PDFs from KPDC static index pages; name_hash ID; no party data in source |
 | Kentucky (KY) | ✅ | ✅ | KREF flat CSV exports; per-party candidate exports for party data; per-year contributions + expenditures; name_hash ID |
+| Louisiana (LA) | ✅ | ✅ | Bulk CSVs in 4-year ranges; no committee_type in source; person_id from stable FilerNumber |
+| Maine (ME) | ⚠️ | ⚠️ | In progress; occupation/employer enrichment requires a per-transaction detail-page scrape via Playwright (~400K pages) |
+| Maryland (MD) | ✅ | ✅ | POST JSON bulk export API (MDCRIS); committee person_id = min Filing Entity Id per (candidate_name, office, district) |
+| Massachusetts (MA) | ✅ | ✅ | Direct download from Azure Blob Storage (OCPF); committee person_id = min CPF ID per (candidate_name, office, district) |
+| Michigan (MI) | ✅ | ✅ | REST/JSON API for transactions + HTMX session search for entities (MiTN); committee person_id = min cfr_com_id per (candidate_name, office, district) |
+| Minnesota (MN) | ✅ | ✅ | Bulk CSVs + viewer API for entities (WAF blocks datacenter IPs for entity POSTs); contributor_state inferred from ZIP prefix |
+| Mississippi (MS) | ✅ | ✅ | Playwright required (WAF blocks non-browser traffic, not just datacenter IPs); GUID-based filer IDs; candidate↔committee linking via name-token + office-tiebreak heuristic (no shared filer ID between the two in source data) |
+| Pennsylvania (PA) | ✅ | ✅ | Plain HTTP zip-per-year download (2000–present, ~25M contribution rows); no shared filer ID between a candidate and their own money committee in source data — hand-verified override table links the largest statewide committees, smaller ones remain unlinked |
 
 **Key:** ✅ Done &nbsp; ⚠️ Partial / known issues &nbsp; ❌ Broken
 

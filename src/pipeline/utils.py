@@ -99,9 +99,23 @@ def _numeric_id(fid: str) -> int:
     "CC12091" / "NC20717" reg_no values) prefix the number with letters —
     strip any non-digit characters before parsing. Raises ValueError if no
     digits remain, same as int() would for a fully non-numeric string.
+
+    Bounded to 12 digits (matching the zfill(12) _make_person_id pads
+    base_id to): a GUID-style state_filer_id (e.g. Mississippi's EntityId)
+    can leave a 20+ digit number after stripping non-digits, which silently
+    overflows the BIGINT person_id column and gets dropped without error at
+    tabulate time — confirmed on MS, where this caused 1,227 of 1,503
+    candidates (82%), including the sitting governor, to vanish between
+    parse and tabulate with zero errors anywhere in the pipeline. Values
+    already within 12 digits (every state's actual numeric filer IDs) are
+    returned unchanged, so this only changes behavior for oversized inputs
+    that would otherwise overflow.
     """
     digits = re.sub(r"\D", "", fid or "")
-    return int(digits)
+    n = int(digits)
+    if n > 999_999_999_999:   # 12 nines — the width _make_person_id pads to
+        n = n % 1_000_000_000_000
+    return n
 
 
 def _normalize_name(name: str) -> str:

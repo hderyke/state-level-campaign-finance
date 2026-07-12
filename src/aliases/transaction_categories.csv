@@ -218,3 +218,31 @@ MN,Interest Income,Other
 MN,Loan Payable,
 MN,Return Excess Contribution,Refund
 MN,Other Receipt,Other
+# == Mississippi =================================================================
+# transaction_type is set by the parser itself (not passed through from a raw
+# field) based on whether the source row's InKind amount is populated.
+MS,Monetary,Monetary
+MS,In-Kind,In-Kind
+# == Pennsylvania =================================================================
+# transaction_type is PA DOS's raw "Section" code identifying which part of
+# Schedule I/II a contribution came from (contrib.txt), passed through as-is.
+# Parts A-D = Schedule I (contributions); Parts F-G = Schedule II (in-kind).
+PA,IA,Monetary
+PA,IB,Monetary
+PA,IC,Monetary
+PA,ID,Monetary
+# 24-hour expedited reports (large contributions close to an election) — still
+# monetary, just filed on a different schedule/timeline.
+PA,24Hrs,Monetary
+PA,IIF,In-Kind
+PA,IIG,In-Kind
+# IF/IG (58 rows total, <0.001%) don't match any Section code in DOS's
+# published spec (Parts A-D, F-G) — likely a data-entry drop of one "I" from
+# IIF/IIG. Mapped on that guess rather than left unexplained; negligible
+# volume either way.
+PA,IF,In-Kind
+PA,IG,In-Kind
+# Folded into contributions.csv.gz from receipt.txt (Schedule I Part E) by
+# the parser itself, not a raw DOS code — refunds/interest/returned checks,
+# not solicited contributions.
+PA,Other Receipt,Other

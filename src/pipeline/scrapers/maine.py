@@ -16,13 +16,27 @@ Stages:
      office, party, treasurer, and financing type.
      → data/Maine/raw/me_filer_profiles.csv
 
-  3. Transaction pages: paginate /public/activities filtered by year
-     (2018–present, 20 rows/page, all types combined). The parser
-     routes rows to contributions/expenditures/loans_debts.
+  3. Transaction pages: paginate /public/activities filtered by a date
+     window (2018–present, 20 rows/page, all types combined). The
+     server hard-caps any single query at 10,000 reachable rows — see
+     MAX_ROWS below — so a plain per-year query silently truncates any
+     year with more than 10,000 true matches. Windows are recursively
+     bisected by date (and, as a last resort, by amount range) to stay
+     under the cap. The parser routes rows to
+     contributions/expenditures/loans_debts.
      → data/Maine/raw/me_transactions_{year}.csv
 
 Limitations:
   - Server caps at 20 rows/page; no bulk CSV export for transactions.
+  - **Hard 10,000-row cap per query.** The page footer ("Displaying
+    items X-Y of Z in total") silently clamps Z to 10,000 once the true
+    match count exceeds it, and requesting a page beyond the resulting
+    500-page ceiling redirects back to page 500 rather than erroring —
+    there is no error signal, just truncated data if unhandled.
+    Confirmed empirically: a 2018 query with 100,060 true matches still
+    displayed "of 10000 in total". The TRUE total is available instead
+    from "Returned X records using Y filters" at the top of the page;
+    see MAX_ROWS / _fetch_window() in the transaction sweep section.
   - List view provides: filer_name, transaction_type, contributor/payee,
     date, amount, transaction_id. Contributor address, employer, and
     occupation require per-transaction detail pages (~400K requests)
@@ -35,7 +49,7 @@ import random
 import re
 import sys
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -392,19 +406,183 @@ def scrape_filer_profiles(page, log, force: bool = False) -> int:
 
 # ====================== transaction sweep =============================
 
+# Server-enforced ceiling on how many rows of a single /public/activities
+# query are reachable via pagination. The footer text ("Displaying items
+# X-Y of Z in total") silently clamps Z to this value once the true match
+# count exceeds it — confirmed empirically: a 2018 date-window query with
+# 100,060 true matches still showed "of 10000 in total", and navigating
+# directly to page 501 (which would be item 10,001) redirects back to page
+# 500 rather than erroring. There is no error signal for a truncated query
+# beyond this cap — the old code silently accepted the clamped total.
+MAX_ROWS = 10_000
+
+# Fallback split dimension for the (so far unobserved) case where a single
+# calendar day still exceeds MAX_ROWS on its own, so date bisection alone
+# can't get under the cap. In cents, for q[amount_cents_gteq]/_lteq — the
+# only other filter dimension the search form exposes besides date and
+# transaction type. Boundaries are generous; most Maine transactions are
+# small-dollar retail contributions, so the bulk of any single day's volume
+# should land in the first band.
+AMOUNT_BANDS_CENTS = [
+    ("le100",   "",       "10000"),    # <= $100.00
+    ("100to1k", "10001",  "100000"),   # $100.01 - $1,000.00
+    ("gt1k",    "100001", ""),         # > $1,000.00
+]
+
+
+def _parse_true_total(html: str) -> int:
+    """Extract the TRUE match count from 'Returned X records using Y
+    filters' at the top of the page. This is deliberately NOT the same as
+    _parse_total() (used for the filer list), which reads the pagination
+    footer — that footer is the value the server clamps to MAX_ROWS once
+    the true count exceeds it. See MAX_ROWS above."""
+    m = re.search(r"Returned\s+([\d,]+)\s+records", html)
+    return int(m.group(1).replace(",", "")) if m else 0
+
+
+def _activities_url(date_from: date, date_to: date,
+                    amount_gteq: str = "", amount_lteq: str = "") -> str:
+    url = (
+        f"{BASE_URL}/public/activities"
+        f"?q%5Bdate_gteq%5D={date_from:%Y-%m-%d}"
+        f"&q%5Bdate_lteq%5D={date_to:%Y-%m-%d}"
+    )
+    if amount_gteq:
+        url += f"&q%5Bamount_cents_gteq%5D={amount_gteq}"
+    if amount_lteq:
+        url += f"&q%5Bamount_cents_lteq%5D={amount_lteq}"
+    return url
+
+
+def _goto_retry(page_holder: list, make_page, url: str, log, label: str) -> str:
+    """Navigate to url via _goto(), restarting the browser context once on a
+    renderer crash and giving up (returning "") after a second failure.
+
+    page_holder is a one-element [(ctx, page)] list rather than a plain
+    (ctx, page) tuple so that a mid-fetch context restart — needed because
+    _fetch_window() recurses and every recursive call must see the same
+    live context — is visible to every caller without threading extra
+    return values through the whole call chain.
+    """
+    for attempt in range(2):
+        ctx, pg = page_holder[0]
+        try:
+            return _goto(pg, url)
+        except Exception as e:
+            err_str = str(e).lower()
+            if attempt == 0 and (
+                "crashed" in err_str or "closed" in err_str or "target" in err_str
+            ):
+                log.warning(f"  Page crash at {label}: {e!s:.120} — restarting browser")
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+                page_holder[0] = make_page()
+            else:
+                log.warning(f"  Skipping {label} after retry: {e!s:.80}")
+                return ""
+    return ""
+
+
+def _fetch_window(page_holder: list, make_page, date_from: date, date_to: date,
+                  log, depth: int = 0,
+                  amount_gteq: str = "", amount_lteq: str = "") -> list[dict]:
+    """Recursively fetch every transaction in [date_from, date_to].
+
+    Probes the window's TRUE total (_parse_true_total). If it's within
+    MAX_ROWS, paginates the window normally and returns all rows. If it's
+    over the cap, bisects the window at its midpoint date and recurses on
+    each half — same strategy as florida.py's date-chunk splitting, adapted
+    to Maine's plain GET date-range filter instead of a form-fill flow.
+
+    If a single calendar day is still over the cap on its own (date bisection
+    exhausted), falls back to splitting that day by amount range
+    (AMOUNT_BANDS_CENTS). If a query is already inside an amount band and
+    STILL over the cap — no further split axis available — accepts the
+    truncated first MAX_ROWS rows and logs a loud warning rather than
+    silently losing data with no trace.
+    """
+    label    = f"{date_from}..{date_to}"
+    url_base = _activities_url(date_from, date_to, amount_gteq, amount_lteq)
+    html     = _goto_retry(page_holder, make_page, f"{url_base}&page=1", log, f"{label} probe")
+    if not html:
+        return []
+
+    true_total = _parse_true_total(html)
+    if true_total == 0:
+        return []
+
+    if true_total <= MAX_ROWS:
+        rows = _parse_transaction_page(html)
+        total_pages = max((true_total + 19) // 20, 1)
+        if total_pages > 1:
+            with logging_redirect_tqdm(loggers=[log._log]):
+                with tqdm(desc=f"  me txn {label}", unit="pg", total=total_pages,
+                          initial=1, dynamic_ncols=True, leave=False) as bar:
+                    for pg_num in range(2, total_pages + 1):
+                        pg_html = _goto_retry(page_holder, make_page,
+                                              f"{url_base}&page={pg_num}", log,
+                                              f"{label} pg{pg_num}")
+                        rows += _parse_transaction_page(pg_html)
+                        bar.update(1)
+        return rows
+
+    if date_from < date_to:
+        mid = date_from + (date_to - date_from) // 2
+        log.warning(f"    [!] {label} ({true_total:,} true rows) over the "
+                   f"{MAX_ROWS:,}-row cap — splitting at {mid}")
+        left  = _fetch_window(page_holder, make_page, date_from, mid, log,
+                              depth + 1, amount_gteq, amount_lteq)
+        right = _fetch_window(page_holder, make_page, mid + timedelta(days=1), date_to, log,
+                              depth + 1, amount_gteq, amount_lteq)
+        return left + right
+
+    if not (amount_gteq or amount_lteq):
+        log.warning(f"    [!] {label} ({true_total:,} true rows) over the "
+                   f"{MAX_ROWS:,}-row cap at 1-day resolution — splitting by amount")
+        rows: list[dict] = []
+        for _band_label, amin, amax in AMOUNT_BANDS_CENTS:
+            rows += _fetch_window(page_holder, make_page, date_from, date_to, log,
+                                  depth + 1, amin, amax)
+        return rows
+
+    # Already inside an amount band and still over the cap — no split axis
+    # left. Accept the first MAX_ROWS and warn loudly rather than fail
+    # silently; this has not been observed in practice.
+    log.warning(f"    [!] {label} amount band [{amount_gteq or 0}-{amount_lteq or 'inf'}]c "
+               f"({true_total:,} true rows) still over the {MAX_ROWS:,}-row cap with no "
+               f"split axis left — accepting truncated data")
+    rows = _parse_transaction_page(html)
+    total_pages = max((MAX_ROWS + 19) // 20, 1)
+    with logging_redirect_tqdm(loggers=[log._log]):
+        with tqdm(desc=f"  me txn {label} (truncated)", unit="pg", total=total_pages,
+                  initial=1, dynamic_ncols=True, leave=False) as bar:
+            for pg_num in range(2, total_pages + 1):
+                pg_html = _goto_retry(page_holder, make_page,
+                                      f"{url_base}&page={pg_num}", log,
+                                      f"{label} pg{pg_num}")
+                rows += _parse_transaction_page(pg_html)
+                bar.update(1)
+    return rows
+
+
 def scrape_transactions(make_page, log, force: bool = False,
                         start_year: int | None = None,
                         end_year: int | None = None) -> int:
     """make_page() -> (context, page): factory called once per year so the
     browser is restarted between years to avoid renderer OOM crashes."""
-    """Paginate /public/activities by year, all transaction types combined.
+    """Fetch /public/activities for each year, all transaction types combined.
 
     Writes one CSV per year: me_transactions_{year}.csv
     Each row: filer_name, transaction_type, source_payee, date, amount,
               transaction_id (UUID from the row's href).
 
-    Year filtering in the URL uses Ransack date predicates:
-      q[date_gteq]=YYYY-01-01 & q[date_lteq]=YYYY-12-31
+    Year filtering uses Ransack date predicates (q[date_gteq]/q[date_lteq]),
+    delegated per-year to _fetch_window() (Jan 1 - Dec 31), which recursively
+    bisects the window by date if the year's true match count is over
+    MAX_ROWS — see that function's docstring and the module docstring's
+    "Hard 10,000-row cap per query" note for why this is necessary.
 
     Incremental runs skip years already in the manifest (except current year,
     which is always re-fetched). Year range flags wipe the relevant manifest
@@ -456,65 +634,25 @@ def scrape_transactions(make_page, log, force: bool = False,
         log.file_download_start(filename=out_path.name)
         t_year = time.perf_counter()
 
-        # Fresh browser context per year — avoids renderer OOM after ~80 min
-        yr_ctx, yr_page = make_page()
+        # Fresh browser context per year — avoids renderer OOM after ~80 min.
+        # page_holder lets _fetch_window()'s recursive calls see (and, on a
+        # renderer crash, replace) the same live context — see _goto_retry().
+        page_holder = [make_page()]
 
         try:
-            # Ransack date filter — returns ALL transaction types for the year
-            url_base = (
-                f"{BASE_URL}/public/activities"
-                f"?q%5Bdate_gteq%5D={year}-01-01"
-                f"&q%5Bdate_lteq%5D={year}-12-31"
+            year_rows = _fetch_window(
+                page_holder, make_page,
+                date(year, 1, 1), date(year, 12, 31),
+                log,
             )
 
-            # Page 1 — also used to determine total count for this year
-            html        = _goto(yr_page, f"{url_base}&page=1")
-            total       = _parse_total(html)
-            year_rows   = _parse_transaction_page(html)
-
-            if total == 0 and not year_rows:
+            if not year_rows:
                 log.file_download_skip(filename=out_path.name)
                 continue
 
-            total_pages = max((total + 19) // 20, 1)
-
-            with logging_redirect_tqdm(loggers=[log._log]):
-                with tqdm(desc=f"  me txn {year}", unit="pg",
-                          total=total_pages, initial=1, dynamic_ncols=True) as bar:
-                    for pg in range(2, total_pages + 1):
-                        page_url = f"{url_base}&page={pg}"
-                        html = ""
-                        for attempt in range(2):
-                            try:
-                                html = _goto(yr_page, page_url)
-                                break
-                            except Exception as e:
-                                err_str = str(e).lower()
-                                if attempt == 0 and (
-                                    "crashed" in err_str or "closed" in err_str
-                                    or "target" in err_str
-                                ):
-                                    # Specific page crashed the renderer —
-                                    # restart context and retry once.
-                                    log.warning(
-                                        f"  Page crash at {year} pg {pg}: {e!s:.120} — restarting browser"
-                                    )
-                                    try:
-                                        yr_ctx.close()
-                                    except Exception:
-                                        pass
-                                    yr_ctx, yr_page = make_page()
-                                else:
-                                    log.warning(
-                                        f"  Skipping {year} pg {pg} after retry: {e!s:.80}"
-                                    )
-                                    break
-                        year_rows += _parse_transaction_page(html)
-                        bar.update(1)
-
         finally:
             try:
-                yr_ctx.close()
+                page_holder[0][0].close()
             except Exception:
                 pass
 

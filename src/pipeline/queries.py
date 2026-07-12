@@ -132,14 +132,31 @@ def run(state: str):
         print(f"  {trunc(r[0],c1):<{c1}}  {trunc(r[1] or '',c2):<{c2}}  {trunc(r[2] or '',c3):<{c3}}  {trunc(r[3] or '',c4):<{c4}}  {r[4]:>{c5},}  {fmt_money(r[5]):>{c6}}")
 
     # ── 3. Top 20 non-candidate committees ───────────────────────────────────
-    # Excludes committees whose name matches a known candidate_name.
+    # Excludes committees whose name matches a known candidate_name, AND
+    # (added — see PA "Shapiro for Pennsylvania" double-counting fix,
+    # 2026-07-12) committees that utils.assign_committee_person_ids has
+    # already linked to a candidate via person_id. The name-match check
+    # alone only catches committees that are *literally named* the same
+    # as their candidate's own registration (e.g. a self-referential
+    # "TOM CORBETT FOR GOVERNOR" candidate_name with no separate
+    # candidate row to differ from) — it misses committees correctly
+    # linked to a *differently-named* candidate row (e.g. "Shapiro for
+    # Pennsylvania" linked to candidate "SHAPIRO, JOSHUA D"), which
+    # were showing up in both this table and "Recipient Candidates"
+    # simultaneously, double-counting the same dollars. person_id is a
+    # stronger, pre-existing, cross-state signal for "this committee IS
+    # some candidate's own committee" and only ever removes rows here
+    # (a committee with no real candidate link never gets a person_id),
+    # so this doesn't change behavior for genuinely independent PACs.
     section("TOP 20 NON-CANDIDATE COMMITTEES — total contributions received", state)
     rows = con.execute("""
         WITH cmte_types AS (
             -- One row per committee_name: prefer a non-blank type, take MAX alphabetically
             SELECT LOWER(TRIM(committee_name)) AS name_key,
                    MAX(CASE WHEN committee_type IS NOT NULL AND committee_type != ''
-                            THEN committee_type END) AS committee_type
+                            THEN committee_type END) AS committee_type,
+                   MAX(CASE WHEN person_id IS NOT NULL
+                            THEN 1 ELSE 0 END) AS linked_to_candidate
             FROM committees
             GROUP BY LOWER(TRIM(committee_name))
         )
@@ -151,6 +168,7 @@ def run(state: str):
         WHERE TRY_CAST(co.amount AS DOUBLE) IS NOT NULL
           AND co.committee_name IS NOT NULL AND co.committee_name != ''
           AND (ct.committee_type IS NULL OR ct.committee_type NOT ILIKE 'Candidate%')
+          AND (ct.linked_to_candidate IS NULL OR ct.linked_to_candidate = 0)
           AND NOT EXISTS (
               SELECT 1 FROM candidates ca
               WHERE LOWER(TRIM(ca.candidate_name)) = LOWER(TRIM(co.committee_name))

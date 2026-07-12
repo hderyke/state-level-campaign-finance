@@ -255,3 +255,47 @@ MN,Other,
 # "Unknown/Null" and county-registration labels are data-quality artifacts — suppress
 MN,Unknown/Null,
 MN,Registered with Hennepin County,
+# == Mississippi ================================================================
+# ContributorType is free-text, converted from filed PDFs per the portal's own
+# disclaimer ("errors may occur when converting reports filed by paper to a
+# searchable format") — 80+ distinct raw values, many one-off typos/garbage
+# (e.g. "Ms 's alabamaasa", a bare first name "Robert"). Only values covering
+# the bulk of rows (top ~15, >99% of the 95,800 contributions) are mapped;
+# the long tail of rare variants is left unmapped rather than guessed.
+MS,Individual,Individual
+MS,individual,Individual
+MS,Ind,Individual
+MS,Corporation,Organization
+MS,Corp,Organization
+MS,PAC,PAC
+MS,Pac,PAC
+MS,Political Committee (PAC),PAC
+MS,LimitedLiabilityCompany,Organization
+MS,Limited Liability Company,Organization
+MS,Limited Liability Corp,Organization
+MS,LLC,Organization
+MS,LLP,Organization
+MS,PLLC,Organization
+MS,PC,Organization
+MS,PA,Organization
+MS,P.A.,Organization
+MS,LP,Organization
+MS,Limited Partnership,Organization
+MS,Partnership,Organization
+MS,Business,Organization
+MS,Association,Organization
+MS,Campaign Committee,Candidate Committee
+# "Loan"/"In Kind"/"(See PDF Image)"/"Undefined"/"Other" describe the
+# transaction, not who the contributor is — not a contributor category
+MS,Loan,
+MS,In Kind,
+MS,In-Kind,
+MS,In Kind Contribution,
+MS,(See PDF Image),
+MS,Undefined,
+MS,Other,
+# == Pennsylvania =================================================================
+# PA DOS's contrib.txt has no contributor-type field at all (individual vs.
+# PAC vs. party committee etc. isn't distinguished in the source) — parser
+# leaves contributor_type blank for all PA contributions (0.0% fill, expected
+# by design, not a bug). Nothing to map here.

@@ -223,3 +223,28 @@ MI,District Political Party,Party Committee
 MN,Candidate Committee,Candidate Committee
 MN,PAC,PAC
 MN,Party Committee,Party Committee
+# == Mississippi ================================================================
+# OrganizationType from CandidateNameSearch (entities.json). "Policical" is a
+# genuine typo in the source data, not a transcription error on our end.
+MS,Candidate Committee,Candidate Committee
+MS,Political Committee (PAC),PAC
+MS,Policical Initiative Committee,Ballot Measure
+# == Pennsylvania ===============================================================
+# committee_type is parser-derived from raw FILERTYPE (1/2/3), not a free-text
+# source field — see FILER_TYPE_LABEL in parsers/pennsylvania.py.
+PA,Candidate,Candidate Committee
+# FILERTYPE=2 "Committee" is PA's single catch-all code for every non-candidate,
+# non-lobbyist committee (PACs, party committees, ballot committees) — the
+# source data doesn't distinguish them further, so PAC is the closest generic
+# bucket. Some "Committee" rows are actually a candidate's own money committee
+# (e.g. "Shapiro for Pennsylvania") now correctly linked via candidate_name/
+# person_id (see PA_COMMITTEE_CANDIDATE_OVERRIDE in the parser) but still
+# showing committee_type=PAC here — CA/GA have a precedent aggregate.py
+# override (state=X AND committee_type='PAC' AND candidate_name != '' ->
+# 'Candidate Committee') that hasn't been applied to PA yet; flagged in
+# docs/states/pennsylvania.md, not done in this pass.
+PA,Committee,PAC
+PA,Lobbyist,Other
+# FILERTYPE "4" is an undocumented raw code (105 rows, <1%) not covered by
+# DOS's published FILERTYPE list (1/2/3) — suppressed rather than guessed at.
+PA,4,

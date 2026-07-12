@@ -319,3 +319,13 @@ MN,Independent Expenditure For,Independent Expenditure
 MN,Independent Expenditure Against,Independent Expenditure
 MN,In-Kind,In-Kind
 MN,In-Kind IE,In-Kind
+# == Mississippi =================================================================
+# ExpenditureSearch exposes no field that distinguishes expenditure type (no
+# in-kind flag, no category code — only a free-text Description/"purpose").
+# The parser leaves transaction_type blank for all MS expenditures, so there
+# is nothing to map here.
+# == Pennsylvania =================================================================
+# PA DOS's expense.txt has no expenditure-type or category field (only
+# EXPDESC free text, passed through as `purpose`) — parser leaves
+# transaction_type and category blank for all PA expenditures (0.0% fill,
+# expected by design, not a bug). Nothing to map here.
