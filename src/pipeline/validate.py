@@ -38,6 +38,22 @@ csv.field_size_limit(10 * 1024 * 1024)  # 10 MB should be more than enough
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.reporting.logger import get_logger
 
+# ── States without a real filer ID in their source data ───────────────────────
+# Read from src/aliases/states.csv's has_filer_id column (0 = no numeric filer ID
+# anywhere in the source; state_filer_id is structurally unfillable for these
+# states). Kept in one place so adding/removing a state here doesn't require
+# touching validate.py — just flip the column in states.csv.
+_STATES_CSV = Path(__file__).resolve().parents[2] / "src" / "aliases" / "states.csv"
+with open(_STATES_CSV, encoding="utf-8") as _f:
+    STATES_WITHOUT_FILER_ID = {
+        row["name"].strip().lower()
+        for row in csv.DictReader(_f)
+        # states.csv rows without a has_filer_id column (e.g. a state registered
+        # before this column existed) get None from DictReader, not "1" — default
+        # defensively to "has a filer ID" rather than crashing on .strip().
+        if (row.get("has_filer_id") or "1").strip() == "0"
+    }
+
 # ── State name → abbreviation map ─────────────────────────────────────────────
 STATE_ABBR = {
     "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
@@ -68,21 +84,16 @@ TIER1_PASS_RATE  = 0.99                   # value-level checks pass if ≥99.5% 
 
 # Required columns per table — tier 1 value-level checks (must be ≥99.5% filled)
 REQUIRED_COLS = {
-    "candidates":    ["state", "person_id", "state_filer_id", "candidate_name"],
+    "candidates":    ["state", "state_filer_id", "candidate_name"],
     "committees":    ["state", "state_filer_id"],
     "contributions": ["state", "committee_name", "amount", "date", "raw_file", "row_num"],
     "expenditures":  ["state", "committee_name", "amount", "date", "raw_file", "row_num"],
 }
 
-# States whose parsers use id_model="name_hash" (see utils.assign_person_ids):
-# person_id is derived purely from MD5(state + candidate_name), so state_filer_id
-# is not load-bearing for identity resolution in these states. Keep this set in
-# sync with each parser's assign_person_ids(id_model=...) call.
-NAME_HASH_STATES = {"alaska", "idaho", "kansas", "kentucky"}
-
 # Per-table columns that get downgraded from a tier-1 failure to a tier-2 warning
-# for states in NAME_HASH_STATES — these are columns where REQUIRED_COLS demands
-# a fill rate that the source data structurally can't provide for those states.
+# for states in STATES_WITHOUT_FILER_ID — these are columns where REQUIRED_COLS
+# demands a fill rate that the source data structurally can't provide for those
+# states (no numeric filer ID anywhere in the source, period).
 TIER1_OPTIONAL_FOR_NAME_HASH = {
     "candidates": {"state_filer_id"},
     "committees": {"state_filer_id"},
@@ -469,7 +480,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
             pass
 
     tables = ["candidates", "committees", "contributions", "expenditures"]
-    is_name_hash  = state_lower in NAME_HASH_STATES
+    lacks_filer_id = state_lower in STATES_WITHOUT_FILER_ID
     all_rows      = {}
     row_counts    = {}
     sampled_tables = {}   # table → total row count when sampling was applied
@@ -508,16 +519,15 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
             if col == "state":
                 continue
             fill_errors = check_required_filled(table, rows, col)
-            if (fill_errors and is_name_hash
+            if (fill_errors and lacks_filer_id
                     and col in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set())):
-                # Documented structural gap for name_hash states (person_id does
-                # not depend on this column) — downgrade to a tier-2 warning.
+                # Documented structural gap — this state's source data has no
+                # numeric filer ID at all — downgrade to a tier-2 warning.
                 for e in fill_errors:
                     tier2_warnings.append({
                         "table":   table,
-                        "warning": f"{e} — expected for id_model=name_hash "
-                                   f"(person_id does not depend on state_filer_id; "
-                                   f"see docs/states/{state_lower}.md)",
+                        "warning": f"{e} — expected, this state's source data has "
+                                   f"no filer ID (see docs/states/{state_lower}.md)",
                     })
             else:
                 checks.append((f"fill:{col}", fill_errors))
@@ -618,7 +628,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
         any_downgraded = False
         for field in required:
             rate       = rates[field]
-            downgraded = (is_name_hash and rate < TIER1_PASS_RATE * 100
+            downgraded = (lacks_filer_id and rate < TIER1_PASS_RATE * 100
                           and field in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set()))
             if downgraded:
                 ok = "↓"
@@ -627,7 +637,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
                 ok = "✓" if rate >= TIER1_PASS_RATE * 100 else "✗"
             print(f"    {field:<25} {_bar(rate)}  {rate:5.1f}%  {ok}")
         if any_downgraded:
-            print(f"    ↓ = tier-2 (id_model=name_hash; see docs/states/{state_lower}.md)")
+            print(f"    ↓ = tier-2 (no filer ID in source data; see docs/states/{state_lower}.md)")
         print()
 
 

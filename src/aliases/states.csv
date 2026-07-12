@@ -1,51 +1,51 @@
-abbr,name,fips
-AK,Alaska,02
-AL,Alabama,01
-AR,Arkansas,05
-AZ,Arizona,04
-CA,California,06
-CO,Colorado,08
-CT,Connecticut,09
-DE,Delaware,10
-FL,Florida,12
-GA,Georgia,13
-HI,Hawaii,15
-IA,Iowa,19
-ID,Idaho,16
-IL,Illinois,17
-IN,Indiana,18
-KS,Kansas,20
-KY,Kentucky,21
-LA,Louisiana,22
-MA,Massachusetts,25
-MD,Maryland,24
-ME,Maine,23
-MI,Michigan,26
-MN,Minnesota,27
-MO,Missouri,29
-MS,Mississippi,28
-MT,Montana,30
-NC,North Carolina,37
-ND,North Dakota,38
-NE,Nebraska,31
-NH,New Hampshire,33
-NJ,New Jersey,34
-NM,New Mexico,35
-NV,Nevada,32
-NY,New York,36
-OH,Ohio,39
-OK,Oklahoma,40
-OR,Oregon,41
-PA,Pennsylvania,42
-RI,Rhode Island,44
-SC,South Carolina,45
-SD,South Dakota,46
-TN,Tennessee,47
-TX,Texas,48
-UT,Utah,49
-VA,Virginia,51
-VT,Vermont,50
-WA,Washington,53
-WI,Wisconsin,55
-WV,West Virginia,54
-WY,Wyoming,56
+abbr,name,fips,has_filer_id
+AK,Alaska,02,0
+AL,Alabama,01,1
+AR,Arkansas,05,1
+AZ,Arizona,04,1
+CA,California,06,1
+CO,Colorado,08,1
+CT,Connecticut,09,1
+DE,Delaware,10,1
+FL,Florida,12,1
+GA,Georgia,13,1
+HI,Hawaii,15,1
+IA,Iowa,19,1
+ID,Idaho,16,0
+IL,Illinois,17,1
+IN,Indiana,18,1
+KS,Kansas,20,0
+KY,Kentucky,21,0
+LA,Louisiana,22,1
+MA,Massachusetts,25,1
+MD,Maryland,24,1
+ME,Maine,23,1
+MI,Michigan,26,1
+MN,Minnesota,27,1
+MO,Missouri,29,1
+MS,Mississippi,28,1
+MT,Montana,30,1
+NC,North Carolina,37,1
+ND,North Dakota,38,1
+NE,Nebraska,31,1
+NH,New Hampshire,33,1
+NJ,New Jersey,34,1
+NM,New Mexico,35,1
+NV,Nevada,32,1
+NY,New York,36,1
+OH,Ohio,39,1
+OK,Oklahoma,40,1
+OR,Oregon,41,1
+PA,Pennsylvania,42,1
+RI,Rhode Island,44,1
+SC,South Carolina,45,1
+SD,South Dakota,46,1
+TN,Tennessee,47,1
+TX,Texas,48,1
+UT,Utah,49,1
+VA,Virginia,51,1
+VT,Vermont,50,1
+WA,Washington,53,1
+WI,Wisconsin,55,1
+WV,West Virginia,54,1
+WY,Wyoming,56,1

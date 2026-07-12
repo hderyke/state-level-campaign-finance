@@ -10,10 +10,14 @@ The superset approach means a single DuckDB table can hold data from every
 state without schema conflicts.
 
 Per-state CSVs and .db files include state_filer_id (needed by
-assign_person_ids to compute person_id).  The aggregate combined DB drops
-it via the *_AGG lists below — person_id is the universal join key there,
-and state_filer_id is inconsistent across states.  Raw source traceability
-is preserved via raw_file + row_num.
+assign_person_ids to compute person_id) and person_id itself. The aggregate
+combined DB (state-level-cf.db) drops both via the *_AGG lists below —
+state_filer_id is inconsistent across states, and person_id was retired
+from validation/aggregation/the API/frontend (2026-07-10) since the
+person/committee/name_hash id_model split made it an unreliable identity
+across cycles and sources in practice. Both fields remain in the per-state
+DBs; the master db identifies candidates/committees by name + state instead.
+Raw source traceability is preserved via raw_file + row_num.
 """
 
 # ============================= committees =============================
@@ -192,11 +196,15 @@ COLUMN_TYPES = {
 
 # ====================== Aggregate-DB column lists ======================
 # Used by aggregate.py when building state-level-cf.db.
-# Drops state_filer_id — it is inconsistent across states and its join
-# responsibilities are covered by person_id on candidates and committees.
+# Drops state_filer_id (inconsistent across states — kept per-state only, for
+# traceability) and person_id (retired from the master db: the id_model split
+# — person/committee/name_hash — made it an unreliable cross-cycle identity in
+# practice; see docs. Identification in the master db is by candidate_name /
+# committee_name / state instead. state_filer_id still lives in the per-state
+# DBs for states where it's a real, meaningful ID.)
 
-CANDIDATES_AGG    = [c for c in CANDIDATES if c != "state_filer_id"]
-COMMITTEES_AGG    = [c for c in COMMITTEES if c not in ("state_filer_id", "active")]
+CANDIDATES_AGG    = [c for c in CANDIDATES if c not in ("state_filer_id", "person_id")]
+COMMITTEES_AGG    = [c for c in COMMITTEES if c not in ("state_filer_id", "active", "person_id")]
 
 # CONTRIBUTIONS_AGG adds transaction_category (derived normalization) after transaction_type.
 # contributor_type is kept but aggregate.py replaces raw values with canonical ones.

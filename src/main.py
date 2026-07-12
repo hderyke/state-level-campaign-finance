@@ -197,31 +197,43 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, bool, str, list[str], list
 # ====================== Push / pull dispatch =========================
 
 def _push(targets: list[str]):
-    """Route a push command to the appropriate S3 helper."""
+    """Route a push command to the appropriate S3 helper.
+
+    `db` can be combined with state abbrs (or `all`) in one call, e.g.
+    `push AL AR AZ db` — states/`all` are pushed first, `db` last, all within
+    the same CF_RUN_ID. That's what lets daemon.py produce a single unified
+    push report (states first, db at the bottom) instead of two separate
+    runs/attachments. `db` alone or `all` alone still work as before.
+    """
     s3 = _cloud_s3()
     if not targets:
         print("[!] push requires a target: <states>, all, or db")
         sys.exit(1)
 
-    if len(targets) == 1 and targets[0].lower() == "db":
+    push_db_too = any(t.lower() == "db" for t in targets)
+    other       = [t for t in targets if t.lower() != "db"]
+
+    failed = []
+
+    if other:
+        if len(other) == 1 and other[0].lower() == "all":
+            s3.push_all(PROJECT_ROOT)
+        else:
+            for abbr in other:
+                state_name = orc.ABBR_TO_NAME.get(abbr.upper())
+                if not state_name:
+                    print(f"[!] Unknown state: {abbr}")
+                    sys.exit(1)
+                if not s3.push_state(abbr.upper(), state_name, PROJECT_ROOT):
+                    failed.append(abbr.upper())
+
+    if push_db_too:
         if not s3.push_db(PROJECT_ROOT):
-            sys.exit(1)
+            failed.append("DB")
 
-    elif len(targets) == 1 and targets[0].lower() == "all":
-        s3.push_all(PROJECT_ROOT)
-
-    else:
-        failed = []
-        for abbr in targets:
-            state_name = orc.ABBR_TO_NAME.get(abbr.upper())
-            if not state_name:
-                print(f"[!] Unknown state: {abbr}")
-                sys.exit(1)
-            if not s3.push_state(abbr.upper(), state_name, PROJECT_ROOT):
-                failed.append(abbr.upper())
-        if failed:
-            print(f"\n[!] Push had errors for: {', '.join(failed)}")
-            sys.exit(1)
+    if failed:
+        print(f"\n[!] Push had errors for: {', '.join(failed)}")
+        sys.exit(1)
 
 
 def _pull(targets: list[str]):
