@@ -240,7 +240,7 @@ def _run(log, t0: float):
         # amended — that's a real, known signal, unlike filing_id (no
         # confirmed stable filing identifier exists in the scraped data,
         # so that column is left blank/restval "" downstream).
-        amended = "Y" if parts["amendment_date"] else "N"
+        amended = "1" if parts["amendment_date"] else ""
         cand_by_uid[uid] = {
             "candidate_name": cand_name,
             "office":         office,
