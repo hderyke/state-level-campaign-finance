@@ -248,3 +248,17 @@ PA,Lobbyist,Other
 # FILERTYPE "4" is an undocumented raw code (105 rows, <1%) not covered by
 # DOS's published FILERTYPE list (1/2/3) — suppressed rather than guessed at.
 PA,4,
+# == Montana ===================================================================
+# CERS committeeTypeDescr, from the committee search UI's own dropdown options.
+MT,Ballot Issue,Ballot Measure
+MT,Disbanded Montana PAC,PAC
+MT,Disbanded Montana Party,Party Committee
+MT,Federal Action,PAC
+MT,Federal Party,Party Committee
+MT,Incidental,Organization
+MT,Incidental - Local Government,Organization
+MT,Independent,Independent Expenditure
+MT,Joint Fundraising Committee,PAC
+MT,Minor Party Qualification,Party Committee
+MT,Political Party,Party Committee
+MT,Undetermined,Other

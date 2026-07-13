@@ -246,3 +246,11 @@ PA,IG,In-Kind
 # the parser itself, not a raw DOS code — refunds/interest/returned checks,
 # not solicited contributions.
 PA,Other Receipt,Other
+# == Montana ===================================================================
+# CERS "Amount Type" (C5/C6/C4 schedule) / derived cashAmt-vs-inKindAmt flag
+# (C7 line items) is CA (cash), IK (in-kind), or Mixed (both present on one
+# line). Mixed doesn't fit either canonical bucket alone — mapped to Other
+# rather than guessed toward one side.
+MT,CA,Monetary
+MT,IK,In-Kind
+MT,Mixed,Other

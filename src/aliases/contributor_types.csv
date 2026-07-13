@@ -299,3 +299,24 @@ MS,Other,
 # PAC vs. party committee etc. isn't distinguished in the source) — parser
 # leaves contributor_type blank for all PA contributions (0.0% fill, expected
 # by design, not a bug). Nothing to map here.
+# == Montana ===================================================================
+# CERS "Contribution Type" is a numeric code (1-9) describing the source of
+# the money on the C5/C6/C4 periodic schedule export. Codes 2 (Unitemized)
+# and 3 (Loans) don't map cleanly onto the canonical contributor_type
+# vocabulary (a loan isn't a donor category) — left unmapped rather than
+# guessed. C7 last-minute-notice rows use "Individual"/"Committee"/"Loan"
+# instead (derived by the parser from which API sub-list a row came from,
+# not a raw CERS field) — "Loan" is left unmapped there too, for the same
+# reason.
+MT,1,Candidate
+MT,2,
+MT,3,
+MT,4,Other
+MT,5,PAC
+MT,6,Party
+MT,7,Committee
+MT,8,Committee
+MT,9,Individual
+MT,Individual,Individual
+MT,Committee,Committee
+MT,Loan,

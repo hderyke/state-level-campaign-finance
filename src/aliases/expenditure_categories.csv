@@ -329,3 +329,8 @@ MN,In-Kind IE,In-Kind
 # EXPDESC free text, passed through as `purpose`) — parser leaves
 # transaction_type and category blank for all PA expenditures (0.0% fill,
 # expected by design, not a bug). Nothing to map here.
+# == Montana ======================================================================
+# "Expenditure Type" on the C5/C6/C4 schedule export is a numeric code whose
+# meanings were not confirmed against a live sample (see docs/states/montana.md)
+# — left entirely unmapped rather than guessed. Same for C7E's
+# lineItemCompositeDescr free-text field. Revisit once a real scrape exists.
