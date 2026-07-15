@@ -1,5 +1,5 @@
 state,raw,canonical
-# == Alabama ===================================================================
+# == Alabama ===================================================================,,
 AL,Cash (Itemized),Monetary
 AL,Cash (Non-Itemized),Monetary
 AL,Non-Itemized Employee Payroll Contribution,Monetary
@@ -10,14 +10,14 @@ AL,Other (Itemized),Other
 AL,Other (Non-Itemized),Other
 AL,Return Contribution / Check,Refund
 AL,Refund,Refund
-# == Alaska ====================================================================
+# == Alaska ====================================================================,,
 AK,Income,Monetary
-# == Arkansas ==================================================================
+# == Arkansas ==================================================================,,
 AR,Itemized Monetary,Monetary
 AR,Non-Itemized Monetary,Monetary
 AR,Itemized Nonmoney,In-Kind
 AR,Non - Itemized Nonmoney,In-Kind
-# == Arizona ===================================================================
+# == Arizona ===================================================================,,
 AZ,Contribution from Individuals,Monetary
 AZ,CCEC $5 Qualifying Contribution,Monetary
 AZ,In-State Contributions $100 or Less,Monetary
@@ -60,7 +60,7 @@ AZ,Submit $5 Qualifying Contributions to SOS,Transfer
 AZ,Receive Shared Expense Payment from Committee,Transfer
 AZ,Other Income,Other
 AZ,Non-Contribution Income,Other
-# == California ================================================================
+# == California ================================================================,,
 CA,I,Monetary
 CA,X,In-Kind
 CA,N,In-Kind
@@ -69,8 +69,8 @@ CA,T,Transfer
 CA,F,Other
 CA,M,Other
 CA,0,
-# == Connecticut ===============================================================
-# CT transaction_type is the Receipt Type field.
+# == Connecticut ===============================================================,,
+# CT transaction_type is the Receipt Type field.,,
 CT,Itemized Contributions from Individuals,Monetary
 CT,Total Contributions From Small Contributors,Monetary
 CT,Advertising Book Proceeds,Monetary
@@ -92,7 +92,7 @@ CT,Non Monetary Receipts of Organization Expenditures,In-Kind
 CT,Loans Received,Loan
 CT,Interest from Authorized Accounts,Other
 CT,Refund Telephone,Refund
-# == Delaware ==================================================================
+# == Delaware ==================================================================,,
 DE,Check,Monetary
 DE,Credit Card,Monetary
 DE,Cash,Monetary
@@ -111,8 +111,8 @@ DE,Expense Reimbursement,Refund
 DE,Refund/Rebate,Refund
 DE,Forgiven,Other
 DE,Total of Contributions not exceeding $100,Monetary
-# == Georgia ===================================================================
-# transaction_type is stored as "Type – Sub Type" e.g. "Contribution – Itemized Contribution"
+# == Georgia ===================================================================,,
+"# transaction_type is stored as ""Type – Sub Type"" e.g. ""Contribution – Itemized Contribution""",,
 GA,Contribution – Itemized Contribution,Monetary
 GA,Contribution – Unitemized Contribution,Monetary
 GA,Contribution – Anonymous Contribution,Monetary
@@ -121,35 +121,35 @@ GA,Return Contribution – Itemized Contribution,Refund
 GA,Return Contribution – Unitemized Contribution,Refund
 GA,Return Contribution,Refund
 GA,Interest Earned (Non-Investment Account),Other
-# Legacy (media.ethics.ga.gov, 2006-2024) — transaction_type is "Contribution – Type"
-# where Type is just "Monetary" or "In-Kind" (no itemization-level sub type).
+# Legacy (media.ethics.ga.gov," 2006-2024) — transaction_type is ""Contribution – Type""",
+"# where Type is just ""Monetary"" or ""In-Kind"" (no itemization-level sub type).",,
 GA,Contribution – Monetary,Monetary
 GA,Contribution – In-Kind,In-Kind
-# == Iowa ======================================================================
-# Iowa parser hard-codes transaction_type: "Monetary" for Sch-A cash contributions
-# and "In-Kind" for Sch-E in-kind contributions. No raw values from the source.
+# == Iowa ======================================================================,,
+"# Iowa parser hard-codes transaction_type: ""Monetary"" for Sch-A cash contributions",,
+"# and ""In-Kind"" for Sch-E in-kind contributions. No raw values from the source.",,
 IA,Monetary,Monetary
 IA,In-Kind,In-Kind
-# == Illinois ==================================================================
-# D2Part codes (Schedule A "part" of ISBE's contribution form). 3A (loans
-# received) is diverted to loans_debts.csv and not included here.
+# == Illinois ==================================================================,,
+"# D2Part codes (Schedule A ""part"" of ISBE's contribution form). 3A (loans",,
+# received) is diverted to loans_debts.csv and not included here.,,
 IL,1A,Monetary
 IL,2A,Monetary
 IL,4A,Other
 IL,5A,In-Kind
-# == Indiana ===================================================================
-# transaction_type comes from the Type field in contributions_{YYYY}.csv.
-# Loan/Debt rows are diverted to loans_debts.csv and not included here.
+# == Indiana ===================================================================,,
+# transaction_type comes from the Type field in contributions_{YYYY}.csv.,,
+# Loan/Debt rows are diverted to loans_debts.csv and not included here.,,
 IN,Direct,Monetary
 IN,Unitemized,Monetary
 IN,In-Kind,In-Kind
 IN,Interest,Other
 IN,Misc,
 IN,Missing,
-# == Colorado ==================================================================
-# transaction_type comes from ContributionType in contributions_{YYYY}.csv.
-# LLC rows had "Monetary (Itemized) - LLC Contribution (Total Amount: X.XX)" —
-# the parser strips the " - LLC Contribution..." suffix before writing.
+# == Colorado ==================================================================,,
+# transaction_type comes from ContributionType in contributions_{YYYY}.csv.,,
+"# LLC rows had ""Monetary (Itemized) - LLC Contribution (Total Amount: X.XX)"" —",,
+"# the parser strips the "" - LLC Contribution..."" suffix before writing.",,
 CO,Monetary (Itemized),Monetary
 CO,Monetary (Non-Itemized),Monetary
 CO,Non-Monetary (Itemized),In-Kind
@@ -158,33 +158,33 @@ CO,Non-Monetary (Coordinated),In-Kind
 CO,Returned Contributions,Refund
 CO,Other Receipts,
 CO,Non-Aggregated Receipts,
-# == Maine =====================================================================
-# transaction_type values from the /public/activities list view display strings
+# == Maine =====================================================================,,
+# transaction_type values from the /public/activities list view display strings,,
 ME,Monetary Contribution,Monetary
 ME,In-Kind Contribution,In-Kind
 ME,Transfer from Previous Campaign,Other
-# Public Funding = Maine Clean Elections Act disbursements to the candidate
+# Public Funding = Maine Clean Elections Act disbursements to the candidate,,
 ME,Public Funding,Other
-# Returned expenditures/loans received — categorized as Other (not new money in)
+# Returned expenditures/loans received — categorized as Other (not new money in),,
 ME,Returned Expenditure,Other
 ME,Returned Independent Expenditure,Other
 ME,Loan,Other
 ME,Loan Forgiveness,Other
-# == Louisiana =================================================================
-# ContributionType from contributions CSVs. CONTRIB = standard monetary
-# contribution. Other values TBD after first parse run.
+# == Louisiana =================================================================,,
+# ContributionType from contributions CSVs. CONTRIB = standard monetary,,
+# contribution. Other values TBD after first parse run.,,
 LA,CONTRIB,Monetary
 LA,INKIND,In-Kind
-# == Maryland ==================================================================
-# Transaction Type from TCON files. Loan* types are routed to loans_debts by the
-# parser and won't appear in contributions — mapped here for completeness.
+# == Maryland ==================================================================,,
+# Transaction Type from TCON files. Loan* types are routed to loans_debts by the,,
+# parser and won't appear in contributions — mapped here for completeness.,,
 MD,Contribution,Monetary
 MD,Return Contribution,Refund
 MD,Loan Received,
 MD,Loan Forgiven,
 MD,Loan Payment,
-# == Massachusetts ==============================================================
-# transaction_type in contributions = Record_Type_ID description from the parser.
+# == Massachusetts ==============================================================,,
+# transaction_type in contributions = Record_Type_ID description from the parser.,,
 MA,Individual Contribution,Monetary
 MA,Committee Contribution,Monetary
 MA,Union/Association Contribution,Monetary
@@ -195,22 +195,22 @@ MA,Individual In-Kind Contribution,In-Kind
 MA,Committee In-Kind Contribution,In-Kind
 MA,Union/Association In-Kind Contribution,In-Kind
 MA,Corporate In-Kind Contribution,In-Kind
-# == Michigan ==================================================================
-# contribtype in contribution files (payment type, not donor type)
+# == Michigan ==================================================================,,
+# contribtype in contribution files (payment type, not donor type),
 MI,Direct Contributions,Monetary
 MI,Direct Contributions - Private Funds,Monetary
-# Loan rows are diverted to loans_debts at parse time — suppress here to avoid
-# any residual rows in contributions that might slip through
+# Loan rows are diverted to loans_debts at parse time — suppress here to avoid,,
+# any residual rows in contributions that might slip through,,
 MI,Direct Contributions - Loan,
-# receipttype values from receipt files
+# receipttype values from receipt files,,
 MI,Goods/Services Purchased,In-Kind
 MI,Transfer,Monetary
 MI,Other,Monetary
-# == Minnesota =================================================================
-# "Receipt type" from mn_contributions.csv — parser sets transaction_type from this field.
-# "Loan Payable" rows are diverted to loans_debts at parse time; suppress residuals.
-# In-Kind rows: parser overwrites transaction_type to "In-Kind" when "In kind?" == Y.
-# Confirm exact strings after first parse run; common values listed here.
+# == Minnesota =================================================================,,
+"# ""Receipt type"" from mn_contributions.csv — parser sets transaction_type from this field.",,
+"# ""Loan Payable"" rows are diverted to loans_debts at parse time; suppress residuals.",,
+"# In-Kind rows: parser overwrites transaction_type to ""In-Kind"" when ""In kind?"" == Y.",,
+# Confirm exact strings after first parse run; common values listed here.,,
 MN,Donation,Monetary
 MN,In-Kind,In-Kind
 MN,Non-Itemized,Monetary
@@ -218,39 +218,50 @@ MN,Interest Income,Other
 MN,Loan Payable,
 MN,Return Excess Contribution,Refund
 MN,Other Receipt,Other
-# == Mississippi =================================================================
-# transaction_type is set by the parser itself (not passed through from a raw
-# field) based on whether the source row's InKind amount is populated.
+# == Mississippi =================================================================,,
+# transaction_type is set by the parser itself (not passed through from a raw,,
+# field) based on whether the source row's InKind amount is populated.,,
 MS,Monetary,Monetary
 MS,In-Kind,In-Kind
-# == Pennsylvania =================================================================
-# transaction_type is PA DOS's raw "Section" code identifying which part of
-# Schedule I/II a contribution came from (contrib.txt), passed through as-is.
-# Parts A-D = Schedule I (contributions); Parts F-G = Schedule II (in-kind).
+# == Pennsylvania =================================================================,,
+"# transaction_type is PA DOS's raw ""Section"" code identifying which part of",,
+# Schedule I/II a contribution came from (contrib.txt), passed through as-is.,
+# Parts A-D = Schedule I (contributions); Parts F-G = Schedule II (in-kind).,,
 PA,IA,Monetary
 PA,IB,Monetary
 PA,IC,Monetary
 PA,ID,Monetary
-# 24-hour expedited reports (large contributions close to an election) — still
-# monetary, just filed on a different schedule/timeline.
+# 24-hour expedited reports (large contributions close to an election) — still,,
+# monetary, just filed on a different schedule/timeline.,
 PA,24Hrs,Monetary
 PA,IIF,In-Kind
 PA,IIG,In-Kind
-# IF/IG (58 rows total, <0.001%) don't match any Section code in DOS's
-# published spec (Parts A-D, F-G) — likely a data-entry drop of one "I" from
-# IIF/IIG. Mapped on that guess rather than left unexplained; negligible
-# volume either way.
+# IF/IG (58 rows total, <0.001%) don't match any Section code in DOS's,
+# published spec (Parts A-D," F-G) — likely a data-entry drop of one ""I"" from",
+# IIF/IIG. Mapped on that guess rather than left unexplained; negligible,,
+# volume either way.,,
 PA,IF,In-Kind
 PA,IG,In-Kind
-# Folded into contributions.csv.gz from receipt.txt (Schedule I Part E) by
+# Folded into contributions.csv.gz from receipt.txt (Schedule I Part E) by,,
 # the parser itself, not a raw DOS code — refunds/interest/returned checks,
-# not solicited contributions.
+# not solicited contributions.,,
 PA,Other Receipt,Other
-# == Montana ===================================================================
-# CERS "Amount Type" (C5/C6/C4 schedule) / derived cashAmt-vs-inKindAmt flag
+# == Montana ===================================================================,,
+"# CERS ""Amount Type"" (C5/C6/C4 schedule) / derived cashAmt-vs-inKindAmt flag",,
 # (C7 line items) is CA (cash), IK (in-kind), or Mixed (both present on one
-# line). Mixed doesn't fit either canonical bucket alone — mapped to Other
-# rather than guessed toward one side.
+# line). Mixed doesn't fit either canonical bucket alone — mapped to Other,,
+# rather than guessed toward one side.,,
 MT,CA,Monetary
 MT,IK,In-Kind
 MT,Mixed,Other
+# == Ohio ======================================================================,,
+# transaction_type = SHORT_DESCRIPTION from the bulk contribution files (a real,,
+# schedule code," e.g. ""31-A  Stmt of Contribution""). Whitespace in these codes",
+# is exactly as it appears in the source (double spaces after the number are,,
+# real, not a typo) — match on the raw value as-is.,
+# Only codes observed in a sampled 2026 candidate-committee file are listed,,
+# below; expect more from other years and from the (unverified) PAC/Party files.,,
+OH,31-A  Stmt of Contribution,Monetary
+OH,31-E FR Contributions,Monetary
+OH,31-J-1 In-Kind Cont Rcvd,In-Kind
+OH,31-A-2  Other Income,Other

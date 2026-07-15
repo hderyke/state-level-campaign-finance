@@ -1,322 +1,328 @@
-state,raw,canonical
-# == Alabama ===================================================================
-AL,Individual,Individual
-AL,Group/Business/Corporation,Organization
-AL,Group / Business / Corporation,Organization
-AL,PAC,PAC
-AL,Lending Institution,Organization
-AL,None,
-AL,Other,
-AL,Returned (Cash Only),
-AL,In-Kind (Itemized),
-# == Alaska ====================================================================
-# Alaska contributor_type is an APOC registration status, not a contributor category.
+state,raw,canonical,
+# == Alabama ===================================================================,,,
+AL,Individual,Individual,
+AL,Group/Business/Corporation,Organization,
+AL,Group / Business / Corporation,Organization,
+AL,PAC,PAC,
+AL,Lending Institution,Organization,
+AL,None,,
+AL,Other,,
+AL,Returned (Cash Only),,
+AL,In-Kind (Itemized),,
+# == Alaska ====================================================================,,,
+# Alaska contributor_type is an APOC registration status, not a contributor category.,,
 # Candidate = any registered APOC entity (individuals, PACs, campaign committees, self-funders)
-# Group = unregistered/small contributors (individuals and orgs under reporting threshold)
-# Entity = large donors acting through a business entity
-# None map cleanly to canonical categories — all suppressed in aggregate.
-AK,Group,
-AK,Candidate,
-AK,Entity,
-# == Arkansas ==================================================================
-AR,Individual,Individual
-AR,Business/Organization/Unlisted PAC,Organization
-AR,Political Action Committee,PAC
-AR,Candidate,Candidate
-AR,County Political Party Committee,Party
-AR,Political Party,Party
-AR,Independent Expenditure Committee,PAC
-# == Arizona ===================================================================
-# contributor_type is set from TransactionType in the raw API response.
-AZ,Contribution from Individuals,Individual
-AZ,CCEC $5 Qualifying Contribution,Individual
-AZ,In-State Contributions $100 or Less,Individual
-AZ,In-Kind Cont. from Individual,Individual
-AZ,Refund Contribution from Individual,Individual
-AZ,Contributions from PACs,PAC
-AZ,Contributions from Candidate Committees,PAC
-AZ,Contribution from Candidate or Family,Candidate
-AZ,In-Kind Cont. Candidate or Family,Candidate
-AZ,Contributions from Corps and LLCs,Organization
-AZ,Corp and LLC In-Kind Contribution,Organization
-AZ,Contributions from Partnerships,Organization
-AZ,Contributions from Labor Organizations,Organization
-AZ,Labor Org In-Kind Contribution,Organization
-AZ,Contributions from Parties,Party
-AZ,Non-Contribution Income,
-AZ,Receive CCEC Funding,
-AZ,Receive Interest/Dividends,
-AZ,Receive Loan from Individual,
-AZ,Receive Loan from Candidate or Family Member,
-AZ,Receive Shared Expense Payment from Committee,
-AZ,Transfer in Surplus from Prev Committee,
-AZ,Submit $5 Qualifying Contributions to SOS,
-AZ,Payment on Individual Loan,
-AZ,Payment on Candidate/Family Loan,
-AZ,Refund Contribution Less than $50,
-AZ,Refund Non-Contribution Income,
-AZ,Refund Contributions from Corps and LLCs,
-# == California ================================================================
-CA,IND,Individual
-CA,OTH,Organization
-CA,COM,PAC
-CA,SCC,PAC
-CA,PTY,Party
-CA,BNM,Organization
-CA,RCP,
-CA,OFF,
-CA,Com,PAC
-# == Connecticut ===============================================================
-# CT contributor_type is the Receipt Type field — no separate contributor category.
-CT,Itemized Contributions from Individuals,Individual
-CT,Total Contributions From Small Contributors,Individual
-CT,In Kind Contribution,Individual
-CT,In Kind NCC,Individual
-CT,In Kind NCC Associated with a House Party,Individual
-CT,Misc. Monetary NCC,Individual
-CT,Advertising Book Proceeds,Individual
-CT,Tag Sale Proceeds,Individual
-CT,Receipts from other Indiv or Other Committees,Individual
-CT,Contributions from Other Committees,Committee
-CT,Reimbursements and Distribution of Surplus,Committee
-CT,Transfer from Labor Union or Other Treasury,Organization
-CT,Non Monetary Receipts of Organization Expenditures,Organization
-CT,Transfer from Affiliated Business Treasury,Organization
-CT,Personal Funds of Candidate,Candidate
-CT,Expenses Paid by Candidate,Candidate
-CT,Public Grants,Government
-CT,Loans Received,
-CT,Interest from Authorized Accounts,
-CT,Anonymous Contributions,
-CT,Refund Telephone,
-# == Delaware ==================================================================
-DE,Individual,Individual
-DE,Self (Candidate),Individual
-DE,Business/Group/Organization,Organization
-DE,Corporation  Partnership  and Other Entity,Organization
-DE,Non-Profit Organization,Organization
-DE,Labor Union,Organization
-DE,PAC Committee,PAC
-DE,Political Action Committee,PAC
-DE,Candidate Committee,Candidate Committee
-DE,Political Committee,Party Committee
-DE,Out-of-State or Federal Committee,Other
-DE,Dem or Rep National Sub-Committees,Other
-DE,3rd Party Advertiser,Other
-DE,Total of Contributions not exceeding $100,Other
-DE,Total of Expenditures not exceeding $100,
-# == Georgia ===================================================================
-GA,Individual,Individual
-GA,Corporation / Business / Unregistered Committee,Organization
-GA,Non-Candidate Committee,PAC
-GA,Candidate / Candidate Committee,Candidate Committee
-GA,Self,Individual
-GA,Lobbyist,Individual
-GA,Spouse / Dependent Child,Individual
-# == Iowa ======================================================================
-# Iowa Sch-A has no contributor_type column — contributor_type is left blank.
-# No alias entries needed.
-# == Illinois ==================================================================
-IL,Individual,Individual
-IL,Organization,Organization
-# == Indiana ===================================================================
-# ContributorType from contributions_{YYYY}.csv. Creditor/Recipient/Borrower
-# are accounting roles (debt repayment), not donor categories — suppressed.
-IN,Individual,Individual
-IN,Other Organization,Organization
-IN,Political Action Committee,PAC
-IN,Corporation,Organization
-IN,Political Action,PAC
-IN,Labor Organization,Organization
-IN,Creditor,
-IN,Recipient,
-IN,Borrower,
-# == Colorado ==================================================================
-# ContributorType from contributions_{YYYY}.csv. Parser writes "Business" for
-# LLC members (ContributorType is the individual member name in those rows).
-CO,Individual,Individual
-CO,Business,Organization
-CO,Political Committee,PAC
-CO,Corporation,Organization
-CO,Small Donor Committee,PAC
-CO,Candidate,Candidate
-CO,Political Party Committee,Party Committee
-CO,Candidate Committee,Candidate Committee
-CO,527 Political Organization,PAC
-CO,Labor Union,Organization
-CO,Independent Expenditure Committee,PAC
-CO,Federal PAC,PAC
-CO,Other,
-CO,Unknown,
-# == Idaho =====================================================================
-# Parser hardcodes "Person"/"Company" for ES (electronic submission) records;
-# older "Contributor Type" raw values require data to enumerate fully.
-ID,Person,Individual
-ID,Company,Organization
-# == Kentucky ==================================================================
-# KREF Contribution Type field. Several types are accounting/internal entries
-# with no external donor — contributor_name is set by parser per type:
-#   BALANCE_CARRYFORWARD: contributor_name = committee_name (parser fix)
-#   UNITEMIZED/ANONYMOUS/CASH: no contributor name available
-#   INTEREST/INCOME_TAX_CHECKOFF: government/investment income, not a donor
-KY,INDIVIDUAL,Individual
-KY,UNITEMIZED,
-KY,CANDIDATE,Candidate
-KY,BALANCE_CARRYFORWARD,
-KY,KYPAC,PAC
-KY,CASH,
-KY,OTHER,
-KY,FEDERALPAC,PAC
-KY,ANONYMOUS,
-KY,INTEREST,
-KY,CONTRIBUTINGORGANIZATION,Organization
-KY,CANDIDATE_DEBT_ASSUMPTION,
-KY,EXECUTIVECOMM,Party
-KY,INCOME_TAX_CHECKOFF,
-KY,OTHER_CANDIDATES,Candidate
-KY,CAUCUS_CAMP_COMM,PAC
-KY,OUT_OF_STATE_PACS,PAC
-KY,OTHER_CAMP_COMM,Candidate Committee
-KY,AUTHORIZED_ENTITY,Organization
-KY,INCOME_TAX_CHECKOFF_OTHER_INT,
-KY,AFFILIATE,Organization
-KY,GOVERNOR,Candidate
-KY,EXEC_COMM_UNITEM,
-KY,NATIONAL_EXECUTIVE_COMMITTEE,Party
-KY,LT_GOVERNOR,Candidate
-KY,EXEC_COMM_CASH,
-KY,CAUCUS_CAMP_COMM_CASH,
-# == Louisiana =================================================================
-# ContributorTypeCode from contributions CSVs.
-# Core types
-LA,IND,Individual
-LA,I,Individual
-LA,BUS,Organization
-LA,LEG,Organization
-LA,ORG,Organization
-LA,FIN,Organization
-LA,BAN,Organization
-LA,CAN,Candidate
-LA,PAC,PAC
-LA,COM,PAC
-LA,PCM,PAC
-LA,PCC,PAC
-LA,PTY,Party Committee
-# Officer/role codes (individual acting in official capacity for an entity)
-LA,CHR,Organization
-LA,TRE,Organization
-LA,PRE,Organization
-LA,OFF,Organization
-LA,DTR,Organization
-LA,SCM,Organization
-LA,LBY,Individual
-# Miscellaneous / suppressed
-LA,OTH,
-LA,ANO,
-LA,BNM,
-LA,BEN,
-LA,R/E,Organization
-# == Maryland ==================================================================
-MD,Individual,Individual
-MD,Self,Individual
-MD,Spouse,Individual
-MD,Business/Group/Organization,Organization
-MD,Non-Profit Organization,Organization
-MD,Labor Union,Organization
-MD,Political Action Committee,PAC
-MD,Political Club,PAC
-MD,Federal Committee,PAC
-MD,Candidate Committee,Candidate Committee
-MD,Public Financing,
-# == Massachusetts ==============================================================
-# contributor_type is derived from Record_Type_ID in the parser.
-MA,Individual,Individual
-MA,Committee,Committee
-MA,Union/Association,Organization
-MA,Business/Corporation,Organization
-MA,Other,Other
-# == Michigan ==================================================================
-# MI contributor_type is derived at parse time from name fields (Individual/Organization),
-# not from contribtype (which describes payment type, not donor type). Pass through as-is.
-MI,Individual,Individual
-MI,Organization,Organization
-# == Minnesota =================================================================
-# "Contrib type" from mn_contributions.csv — MN uses entity registration type as contributor type.
-# Confirm exact strings after first parse run; common values listed here.
-MN,Individual,Individual
-MN,Political Committee/Fund,Committee
-MN,Party Unit,Party Committee
-MN,Candidate Committee,Candidate Committee
-MN,Lobbyist,Individual
-# "Self" = candidate self-funding
-MN,Self,Individual
-MN,Corporation,Organization
-MN,Other,
-# "Unknown/Null" and county-registration labels are data-quality artifacts — suppress
-MN,Unknown/Null,
-MN,Registered with Hennepin County,
-# == Mississippi ================================================================
-# ContributorType is free-text, converted from filed PDFs per the portal's own
-# disclaimer ("errors may occur when converting reports filed by paper to a
-# searchable format") — 80+ distinct raw values, many one-off typos/garbage
-# (e.g. "Ms 's alabamaasa", a bare first name "Robert"). Only values covering
-# the bulk of rows (top ~15, >99% of the 95,800 contributions) are mapped;
-# the long tail of rare variants is left unmapped rather than guessed.
-MS,Individual,Individual
-MS,individual,Individual
-MS,Ind,Individual
-MS,Corporation,Organization
-MS,Corp,Organization
-MS,PAC,PAC
-MS,Pac,PAC
-MS,Political Committee (PAC),PAC
-MS,LimitedLiabilityCompany,Organization
-MS,Limited Liability Company,Organization
-MS,Limited Liability Corp,Organization
-MS,LLC,Organization
-MS,LLP,Organization
-MS,PLLC,Organization
-MS,PC,Organization
-MS,PA,Organization
-MS,P.A.,Organization
-MS,LP,Organization
-MS,Limited Partnership,Organization
-MS,Partnership,Organization
-MS,Business,Organization
-MS,Association,Organization
-MS,Campaign Committee,Candidate Committee
-# "Loan"/"In Kind"/"(See PDF Image)"/"Undefined"/"Other" describe the
-# transaction, not who the contributor is — not a contributor category
-MS,Loan,
-MS,In Kind,
-MS,In-Kind,
-MS,In Kind Contribution,
-MS,(See PDF Image),
-MS,Undefined,
-MS,Other,
-# == Pennsylvania =================================================================
-# PA DOS's contrib.txt has no contributor-type field at all (individual vs.
-# PAC vs. party committee etc. isn't distinguished in the source) — parser
-# leaves contributor_type blank for all PA contributions (0.0% fill, expected
-# by design, not a bug). Nothing to map here.
-# == Montana ===================================================================
-# CERS "Contribution Type" is a numeric code (1-9) describing the source of
-# the money on the C5/C6/C4 periodic schedule export. Codes 2 (Unitemized)
-# and 3 (Loans) don't map cleanly onto the canonical contributor_type
-# vocabulary (a loan isn't a donor category) — left unmapped rather than
-# guessed. C7 last-minute-notice rows use "Individual"/"Committee"/"Loan"
-# instead (derived by the parser from which API sub-list a row came from,
-# not a raw CERS field) — "Loan" is left unmapped there too, for the same
-# reason.
-MT,1,Candidate
-MT,2,
-MT,3,
-MT,4,Other
-MT,5,PAC
-MT,6,Party
-MT,7,Committee
-MT,8,Committee
-MT,9,Individual
-MT,Individual,Individual
-MT,Committee,Committee
-MT,Loan,
+# Group = unregistered/small contributors (individuals and orgs under reporting threshold),,,
+# Entity = large donors acting through a business entity,,,
+# None map cleanly to canonical categories — all suppressed in aggregate.,,,
+AK,Group,,
+AK,Candidate,,
+AK,Entity,,
+# == Arkansas ==================================================================,,,
+AR,Individual,Individual,
+AR,Business/Organization/Unlisted PAC,Organization,
+AR,Political Action Committee,PAC,
+AR,Candidate,Candidate,
+AR,County Political Party Committee,Party,
+AR,Political Party,Party,
+AR,Independent Expenditure Committee,PAC,
+# == Arizona ===================================================================,,,
+# contributor_type is set from TransactionType in the raw API response.,,,
+AZ,Contribution from Individuals,Individual,
+AZ,CCEC $5 Qualifying Contribution,Individual,
+AZ,In-State Contributions $100 or Less,Individual,
+AZ,In-Kind Cont. from Individual,Individual,
+AZ,Refund Contribution from Individual,Individual,
+AZ,Contributions from PACs,PAC,
+AZ,Contributions from Candidate Committees,PAC,
+AZ,Contribution from Candidate or Family,Candidate,
+AZ,In-Kind Cont. Candidate or Family,Candidate,
+AZ,Contributions from Corps and LLCs,Organization,
+AZ,Corp and LLC In-Kind Contribution,Organization,
+AZ,Contributions from Partnerships,Organization,
+AZ,Contributions from Labor Organizations,Organization,
+AZ,Labor Org In-Kind Contribution,Organization,
+AZ,Contributions from Parties,Party,
+AZ,Non-Contribution Income,,
+AZ,Receive CCEC Funding,,
+AZ,Receive Interest/Dividends,,
+AZ,Receive Loan from Individual,,
+AZ,Receive Loan from Candidate or Family Member,,
+AZ,Receive Shared Expense Payment from Committee,,
+AZ,Transfer in Surplus from Prev Committee,,
+AZ,Submit $5 Qualifying Contributions to SOS,,
+AZ,Payment on Individual Loan,,
+AZ,Payment on Candidate/Family Loan,,
+AZ,Refund Contribution Less than $50,,
+AZ,Refund Non-Contribution Income,,
+AZ,Refund Contributions from Corps and LLCs,,
+# == California ================================================================,,,
+CA,IND,Individual,
+CA,OTH,Organization,
+CA,COM,PAC,
+CA,SCC,PAC,
+CA,PTY,Party,
+CA,BNM,Organization,
+CA,RCP,,
+CA,OFF,,
+CA,Com,PAC,
+# == Connecticut ===============================================================,,,
+# CT contributor_type is the Receipt Type field — no separate contributor category.,,,
+CT,Itemized Contributions from Individuals,Individual,
+CT,Total Contributions From Small Contributors,Individual,
+CT,In Kind Contribution,Individual,
+CT,In Kind NCC,Individual,
+CT,In Kind NCC Associated with a House Party,Individual,
+CT,Misc. Monetary NCC,Individual,
+CT,Advertising Book Proceeds,Individual,
+CT,Tag Sale Proceeds,Individual,
+CT,Receipts from other Indiv or Other Committees,Individual,
+CT,Contributions from Other Committees,Committee,
+CT,Reimbursements and Distribution of Surplus,Committee,
+CT,Transfer from Labor Union or Other Treasury,Organization,
+CT,Non Monetary Receipts of Organization Expenditures,Organization,
+CT,Transfer from Affiliated Business Treasury,Organization,
+CT,Personal Funds of Candidate,Candidate,
+CT,Expenses Paid by Candidate,Candidate,
+CT,Public Grants,Government,
+CT,Loans Received,,
+CT,Interest from Authorized Accounts,,
+CT,Anonymous Contributions,,
+CT,Refund Telephone,,
+# == Delaware ==================================================================,,,
+DE,Individual,Individual,
+DE,Self (Candidate),Individual,
+DE,Business/Group/Organization,Organization,
+DE,Corporation  Partnership  and Other Entity,Organization,
+DE,Non-Profit Organization,Organization,
+DE,Labor Union,Organization,
+DE,PAC Committee,PAC,
+DE,Political Action Committee,PAC,
+DE,Candidate Committee,Candidate Committee,
+DE,Political Committee,Party Committee,
+DE,Out-of-State or Federal Committee,Other,
+DE,Dem or Rep National Sub-Committees,Other,
+DE,3rd Party Advertiser,Other,
+DE,Total of Contributions not exceeding $100,Other,
+DE,Total of Expenditures not exceeding $100,,
+# == Georgia ===================================================================,,,
+GA,Individual,Individual,
+GA,Corporation / Business / Unregistered Committee,Organization,
+GA,Non-Candidate Committee,PAC,
+GA,Candidate / Candidate Committee,Candidate Committee,
+GA,Self,Individual,
+GA,Lobbyist,Individual,
+GA,Spouse / Dependent Child,Individual,
+# == Iowa ======================================================================,,,
+# Iowa Sch-A has no contributor_type column — contributor_type is left blank.,,,
+# No alias entries needed.,,,
+# == Illinois ==================================================================,,,
+IL,Individual,Individual,
+IL,Organization,Organization,
+# == Indiana ===================================================================,,,
+# ContributorType from contributions_{YYYY}.csv. Creditor/Recipient/Borrower,,,
+# are accounting roles (debt repayment), not donor categories — suppressed.,,
+IN,Individual,Individual,
+IN,Other Organization,Organization,
+IN,Political Action Committee,PAC,
+IN,Corporation,Organization,
+IN,Political Action,PAC,
+IN,Labor Organization,Organization,
+IN,Creditor,,
+IN,Recipient,,
+IN,Borrower,,
+# == Colorado ==================================================================,,,
+"# ContributorType from contributions_{YYYY}.csv. Parser writes ""Business"" for",,,
+# LLC members (ContributorType is the individual member name in those rows).,,,
+CO,Individual,Individual,
+CO,Business,Organization,
+CO,Political Committee,PAC,
+CO,Corporation,Organization,
+CO,Small Donor Committee,PAC,
+CO,Candidate,Candidate,
+CO,Political Party Committee,Party Committee,
+CO,Candidate Committee,Candidate Committee,
+CO,527 Political Organization,PAC,
+CO,Labor Union,Organization,
+CO,Independent Expenditure Committee,PAC,
+CO,Federal PAC,PAC,
+CO,Other,,
+CO,Unknown,,
+# == Idaho =====================================================================,,,
+"# Parser hardcodes ""Person""/""Company"" for ES (electronic submission) records;",,,
+"# older ""Contributor Type"" raw values require data to enumerate fully.",,,
+ID,Person,Individual,
+ID,Company,Organization,
+# == Kentucky ==================================================================,,,
+# KREF Contribution Type field. Several types are accounting/internal entries,,,
+# with no external donor — contributor_name is set by parser per type:,,,
+#   BALANCE_CARRYFORWARD: contributor_name = committee_name (parser fix),,,
+#   UNITEMIZED/ANONYMOUS/CASH: no contributor name available,,,
+#   INTEREST/INCOME_TAX_CHECKOFF: government/investment income, not a donor,,
+KY,INDIVIDUAL,Individual,
+KY,UNITEMIZED,,
+KY,CANDIDATE,Candidate,
+KY,BALANCE_CARRYFORWARD,,
+KY,KYPAC,PAC,
+KY,CASH,,
+KY,OTHER,,
+KY,FEDERALPAC,PAC,
+KY,ANONYMOUS,,
+KY,INTEREST,,
+KY,CONTRIBUTINGORGANIZATION,Organization,
+KY,CANDIDATE_DEBT_ASSUMPTION,,
+KY,EXECUTIVECOMM,Party,
+KY,INCOME_TAX_CHECKOFF,,
+KY,OTHER_CANDIDATES,Candidate,
+KY,CAUCUS_CAMP_COMM,PAC,
+KY,OUT_OF_STATE_PACS,PAC,
+KY,OTHER_CAMP_COMM,Candidate Committee,
+KY,AUTHORIZED_ENTITY,Organization,
+KY,INCOME_TAX_CHECKOFF_OTHER_INT,,
+KY,AFFILIATE,Organization,
+KY,GOVERNOR,Candidate,
+KY,EXEC_COMM_UNITEM,,
+KY,NATIONAL_EXECUTIVE_COMMITTEE,Party,
+KY,LT_GOVERNOR,Candidate,
+KY,EXEC_COMM_CASH,,
+KY,CAUCUS_CAMP_COMM_CASH,,
+# == Louisiana =================================================================,,,
+# ContributorTypeCode from contributions CSVs.,,,
+# Core types,,,
+LA,IND,Individual,
+LA,I,Individual,
+LA,BUS,Organization,
+LA,LEG,Organization,
+LA,ORG,Organization,
+LA,FIN,Organization,
+LA,BAN,Organization,
+LA,CAN,Candidate,
+LA,PAC,PAC,
+LA,COM,PAC,
+LA,PCM,PAC,
+LA,PCC,PAC,
+LA,PTY,Party Committee,
+# Officer/role codes (individual acting in official capacity for an entity),,,
+LA,CHR,Organization,
+LA,TRE,Organization,
+LA,PRE,Organization,
+LA,OFF,Organization,
+LA,DTR,Organization,
+LA,SCM,Organization,
+LA,LBY,Individual,
+# Miscellaneous / suppressed,,,
+LA,OTH,,
+LA,ANO,,
+LA,BNM,,
+LA,BEN,,
+LA,R/E,Organization,
+# == Maryland ==================================================================,,,
+MD,Individual,Individual,
+MD,Self,Individual,
+MD,Spouse,Individual,
+MD,Business/Group/Organization,Organization,
+MD,Non-Profit Organization,Organization,
+MD,Labor Union,Organization,
+MD,Political Action Committee,PAC,
+MD,Political Club,PAC,
+MD,Federal Committee,PAC,
+MD,Candidate Committee,Candidate Committee,
+MD,Public Financing,,
+# == Massachusetts ==============================================================,,,
+# contributor_type is derived from Record_Type_ID in the parser.,,,
+MA,Individual,Individual,
+MA,Committee,Committee,
+MA,Union/Association,Organization,
+MA,Business/Corporation,Organization,
+MA,Other,Other,
+# == Michigan ==================================================================,,,
+# MI contributor_type is derived at parse time from name fields (Individual/Organization),,,
+# not from contribtype (which describes payment type, not donor type). Pass through as-is.,,
+MI,Individual,Individual,
+MI,Organization,Organization,
+# == Minnesota =================================================================,,,
+"# ""Contrib type"" from mn_contributions.csv — MN uses entity registration type as contributor type.",,,
+# Confirm exact strings after first parse run; common values listed here.,,,
+MN,Individual,Individual,
+MN,Political Committee/Fund,Committee,
+MN,Party Unit,Party Committee,
+MN,Candidate Committee,Candidate Committee,
+MN,Lobbyist,Individual,
+"# ""Self"" = candidate self-funding",,,
+MN,Self,Individual,
+MN,Corporation,Organization,
+MN,Other,,
+"# ""Unknown/Null"" and county-registration labels are data-quality artifacts — suppress",,,
+MN,Unknown/Null,,
+MN,Registered with Hennepin County,,
+# == Mississippi ================================================================,,,
+# ContributorType is free-text, converted from filed PDFs per the portal's own,,
+"# disclaimer (""errors may occur when converting reports filed by paper to a",,,
+"# searchable format"") — 80+ distinct raw values", many one-off typos/garbage,,
+"# (e.g. ""Ms 's alabamaasa"""," a bare first name ""Robert""). Only values covering",,
+# the bulk of rows (top ~15, >99% of the 95,800 contributions) are mapped;,
+# the long tail of rare variants is left unmapped rather than guessed.,,,
+MS,Individual,Individual,
+MS,individual,Individual,
+MS,Ind,Individual,
+MS,Corporation,Organization,
+MS,Corp,Organization,
+MS,PAC,PAC,
+MS,Pac,PAC,
+MS,Political Committee (PAC),PAC,
+MS,LimitedLiabilityCompany,Organization,
+MS,Limited Liability Company,Organization,
+MS,Limited Liability Corp,Organization,
+MS,LLC,Organization,
+MS,LLP,Organization,
+MS,PLLC,Organization,
+MS,PC,Organization,
+MS,PA,Organization,
+MS,P.A.,Organization,
+MS,LP,Organization,
+MS,Limited Partnership,Organization,
+MS,Partnership,Organization,
+MS,Business,Organization,
+MS,Association,Organization,
+MS,Campaign Committee,Candidate Committee,
+"# ""Loan""/""In Kind""/""(See PDF Image)""/""Undefined""/""Other"" describe the",,,
+# transaction, not who the contributor is — not a contributor category,,
+MS,Loan,,
+MS,In Kind,,
+MS,In-Kind,,
+MS,In Kind Contribution,,
+MS,(See PDF Image),,
+MS,Undefined,,
+MS,Other,,
+# == Pennsylvania =================================================================,,,
+# PA DOS's contrib.txt has no contributor-type field at all (individual vs.,,,
+# PAC vs. party committee etc. isn't distinguished in the source) — parser,,,
+# leaves contributor_type blank for all PA contributions (0.0% fill, expected,,
+# by design, not a bug). Nothing to map here.,,
+# == Montana ===================================================================,,,
+"# CERS ""Contribution Type"" is a numeric code (1-9) describing the source of",,,
+# the money on the C5/C6/C4 periodic schedule export. Codes 2 (Unitemized),,,
+# and 3 (Loans) don't map cleanly onto the canonical contributor_type,,,
+# vocabulary (a loan isn't a donor category) — left unmapped rather than,,,
+"# guessed. C7 last-minute-notice rows use ""Individual""/""Committee""/""Loan""",,,
+# instead (derived by the parser from which API sub-list a row came from,,,
+"# not a raw CERS field) — ""Loan"" is left unmapped there too", for the same,,
+# reason.,,,
+MT,1,Candidate,
+MT,2,,
+MT,3,,
+MT,4,Other,
+MT,5,PAC,
+MT,6,Party,
+MT,7,Committee,
+MT,8,Committee,
+MT,9,Individual,
+MT,Individual,Individual,
+MT,Committee,Committee,
+MT,Loan,,
+# == Ohio ======================================================================,,,
+# Derived by the parser from which of the individual name fields (FIRST_NAME/,,,
+# LAST_NAME/etc) or NON_INDIVIDUAL is populated on each row — not a raw source,,,
+# column, so these two values are the parser's own vocabulary.,,
+OH,Individual,Individual,
+OH,Non-Individual,Organization,
