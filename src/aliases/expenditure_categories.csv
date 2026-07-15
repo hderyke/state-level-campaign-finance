@@ -1,331 +1,343 @@
-state,raw,canonical
-# == Alabama ===================================================================
-# AL transaction_type describes itemization level only — no expense categories.
-# Everything maps to Monetary; None is dirty/blank.
-AL,Itemized,Monetary
-AL,Non-Itemized,Monetary
-AL,Itemized Line of Credit Expenditure,Monetary
-AL,Non-Itemized Line of Credit Expenditure,Monetary
-AL,None,
-# == Alaska ====================================================================
-# AK has a single type for all expenditures.
-AK,Expenditure,Monetary
-# == Arkansas ==================================================================
-AR,Itemized Monetary,Monetary
-AR,Non-Itemized Monetary,Monetary
-AR,Itemized Administrative Expenses,Monetary
-AR,Non-Itemized Administrative Expenses,Monetary
-AR,Itemized Monetary Contributions to Candidates and Committees,Contribution
-AR,Non-Itemized Monetary Contributions to Candidates and Committees,Contribution
-AR,Itemized Nonmoney Contributions made to Candidates and Committees,In-Kind
-AR,None,
-# == Arizona ===================================================================
-AZ,Operating Expense - Pay Cash/Check,Monetary
-AZ,Operating Expense - Purchase on Terms/Credit,Monetary
-AZ,Other Expenses - Pay Cash/Check,Monetary
-AZ,Other Expenses - Purchase on Terms/Credit,Monetary
-AZ,Small Expenses (Paid Cash),Monetary
-AZ,Small Expenses (Paid Credit),Monetary
-AZ,Pay Another Committee for Shared Expense,Monetary
-AZ,Contribute to another Committee,Contribution
-AZ,Contribute to a Candidate Committee,Contribution
-AZ,Contribute to a PAC,Contribution
-AZ,Contribute to a Party,Contribution
-AZ,Give money to a Partnership,Contribution
-AZ,Give money to a Corporation/LLC,Contribution
-AZ,Give money to a Labor Organization,Contribution
-AZ,Expend Individual In-Kind Contribution,In-Kind
-AZ,Expend Business In-Kind Contribution,In-Kind
-AZ,Expend Personal In-Kind Contribution,In-Kind
-AZ,Expend In-Kind Contribution from Committee,In-Kind
-AZ,Expend Candidate/Family In-Kind Contribution,In-Kind
-AZ,Expend Labor Org In-Kind Contribution,In-Kind
-AZ,Expend Corp and LLC In-Kind Contribution,In-Kind
-AZ,Expend PAC In-Kind Contribution,In-Kind
-AZ,Expend Party In-Kind Contribution,In-Kind
-AZ,Expend Candidate Committee In-Kind Contrib,In-Kind
-AZ,Expend Non-Contribution In-Kind Income,In-Kind
-AZ,In-Kind Contribution to PACs,In-Kind
-AZ,In-Kind Contribution to Corps and LLCs,In-Kind
-AZ,In-Kind Contribution to Cand Comms,In-Kind
-AZ,In-Kind Contribution to Partnerships,In-Kind
-AZ,In-Kind Contribution to Parties,In-Kind
-AZ,Independent Expenditure - Pay Cash/Check,Independent Expenditure
-AZ,Independent Expenditure - Purchase on Terms/Credit,Independent Expenditure
-AZ,Ind. Expend. (Non-Recall) - cash,Independent Expenditure
-AZ,Recall Ind. Expend. - Pay Cash/Check,Independent Expenditure
-AZ,Ballot Measure Expend. - Pay Cash/Check,Independent Expenditure
-AZ,Rebate or Refund from Operating Expense,Refund
-AZ,Rebate or Refund From Other Expenses,Refund
-AZ,Rebate or Refund from Independent Expenditure,Refund
-AZ,Refund From Contribution to Committee,Refund
-AZ,Refund from Contrib to a Cand Committee,Refund
-AZ,Refund from Contribution to a PAC,Refund
-AZ,Refund from Contribution to a Party,Refund
-AZ,Refund of Small Cash Expense,Refund
-AZ,Lend to Committee,Loan
-AZ,Loan to an Individual,Loan
-AZ,Loan to a Corporation/LLC,Loan
-AZ,Receive Loan Payment,Loan
-AZ,Receive Payment-Loan to Individual,Loan
-AZ,Receive Payment-Loan to Corp/LLC,Loan
-AZ,Dispose of Remaining Surplus,Transfer
-AZ,Transfer In Previous Committee Debt,Transfer
-AZ,Transfer Out General to Primary,Transfer
-AZ,Transfer Out Primary to General,Transfer
-AZ,Receive Credit - Operating Expense Bill,
-AZ,Receive Credit - Other Expenses Bill,
-AZ,Receive Credit - Independent Expenditure Bill,
-AZ,None,
-# == California ================================================================
-# FPPC Schedule E/D/F codes. Clean 3-letter codes only — all other values → NULL.
-CA,MON,Monetary
-CA,OFC,Monetary
-CA,PRO,Monetary
-CA,CNS,Monetary
-CA,FND,Monetary
-CA,SAL,Monetary
-CA,MTG,Monetary
-CA,LIT,Monetary
-CA,TRS,Monetary
-CA,TRC,Monetary
-CA,POS,Monetary
-CA,TEL,Monetary
-CA,WEB,Monetary
-CA,CVC,Monetary
-CA,VOT,Monetary
-CA,CMP,Monetary
-CA,RAD,Monetary
-CA,PRT,Monetary
-CA,MBR,Monetary
-CA,POL,Monetary
-CA,PHO,Monetary
-CA,FIL,Monetary
-CA,PET,Monetary
-CA,LEG,Monetary
-CA,CTB,Contribution
-CA,IKD,In-Kind
-CA,IND,Independent Expenditure
-CA,RFD,Refund
-CA,TSF,Transfer
-CA,LON,Loan
-# == Colorado ==================================================================
-# CO has the best human-readable categories. Unknown/Other/Misc → NULL (can't classify).
-CO,Advertising,Monetary
-CO,Bank Fees,Monetary
-CO,Consultant & Professional Services,Monetary
-CO,Employee Services,Monetary
-CO,Entertainment,Monetary
-CO,Food, Beverages and Meals,Monetary
-CO,Fundraising Expenses,Monetary
-CO,Gifts,Monetary
-CO,Office Equipment & Supplies,Monetary
-CO,Rent & Utilities,Monetary
-CO,Telephone,Monetary
-CO,Travel & Lodging,Monetary
-CO,Miscellaneous,
-CO,Other,
-CO,Unknown,
-CO,Contributions,Contribution
-CO,Returned Expenditure,Refund
-CO,Donation for Independent Expenditures,Independent Expenditure
-# == Connecticut ===============================================================
-# CT expenditure types use a free-text code+description format. Only the top
-# codes by frequency are mapped here; the hundreds of typo/abbreviation variants
-# are left unmapped (NULL in aggregate) rather than guessed.
-# Contributions to other committees
-CT,CNTRB(Contributions to another committee),Contribution
-CT,CNTRB(),Contribution
-CT,POC(Payment to another committee),Contribution
-CT,CEF(Payment to Citizens Election Fund (CEF)),Contribution
-# Refunds and surplus
-CT,REF(Contributor returns or other revenue refunds),Refund
-CT,SRPLS(Surplus distribution in connection with the termination of the committee),Refund
-# Loans
-CT,LOAN(Payment of committee's loan),Loan
-# Operating expenses — mapped to Monetary
+state,raw,canonical,,
+# == Alabama ===================================================================,,,,
+# AL transaction_type describes itemization level only — no expense categories.,,,,
+# Everything maps to Monetary; None is dirty/blank.,,,,
+AL,Itemized,Monetary,,
+AL,Non-Itemized,Monetary,,
+AL,Itemized Line of Credit Expenditure,Monetary,,
+AL,Non-Itemized Line of Credit Expenditure,Monetary,,
+AL,None,,,
+# == Alaska ====================================================================,,,,
+# AK has a single type for all expenditures.,,,,
+AK,Expenditure,Monetary,,
+# == Arkansas ==================================================================,,,,
+AR,Itemized Monetary,Monetary,,
+AR,Non-Itemized Monetary,Monetary,,
+AR,Itemized Administrative Expenses,Monetary,,
+AR,Non-Itemized Administrative Expenses,Monetary,,
+AR,Itemized Monetary Contributions to Candidates and Committees,Contribution,,
+AR,Non-Itemized Monetary Contributions to Candidates and Committees,Contribution,,
+AR,Itemized Nonmoney Contributions made to Candidates and Committees,In-Kind,,
+AR,None,,,
+# == Arizona ===================================================================,,,,
+AZ,Operating Expense - Pay Cash/Check,Monetary,,
+AZ,Operating Expense - Purchase on Terms/Credit,Monetary,,
+AZ,Other Expenses - Pay Cash/Check,Monetary,,
+AZ,Other Expenses - Purchase on Terms/Credit,Monetary,,
+AZ,Small Expenses (Paid Cash),Monetary,,
+AZ,Small Expenses (Paid Credit),Monetary,,
+AZ,Pay Another Committee for Shared Expense,Monetary,,
+AZ,Contribute to another Committee,Contribution,,
+AZ,Contribute to a Candidate Committee,Contribution,,
+AZ,Contribute to a PAC,Contribution,,
+AZ,Contribute to a Party,Contribution,,
+AZ,Give money to a Partnership,Contribution,,
+AZ,Give money to a Corporation/LLC,Contribution,,
+AZ,Give money to a Labor Organization,Contribution,,
+AZ,Expend Individual In-Kind Contribution,In-Kind,,
+AZ,Expend Business In-Kind Contribution,In-Kind,,
+AZ,Expend Personal In-Kind Contribution,In-Kind,,
+AZ,Expend In-Kind Contribution from Committee,In-Kind,,
+AZ,Expend Candidate/Family In-Kind Contribution,In-Kind,,
+AZ,Expend Labor Org In-Kind Contribution,In-Kind,,
+AZ,Expend Corp and LLC In-Kind Contribution,In-Kind,,
+AZ,Expend PAC In-Kind Contribution,In-Kind,,
+AZ,Expend Party In-Kind Contribution,In-Kind,,
+AZ,Expend Candidate Committee In-Kind Contrib,In-Kind,,
+AZ,Expend Non-Contribution In-Kind Income,In-Kind,,
+AZ,In-Kind Contribution to PACs,In-Kind,,
+AZ,In-Kind Contribution to Corps and LLCs,In-Kind,,
+AZ,In-Kind Contribution to Cand Comms,In-Kind,,
+AZ,In-Kind Contribution to Partnerships,In-Kind,,
+AZ,In-Kind Contribution to Parties,In-Kind,,
+AZ,Independent Expenditure - Pay Cash/Check,Independent Expenditure,,
+AZ,Independent Expenditure - Purchase on Terms/Credit,Independent Expenditure,,
+AZ,Ind. Expend. (Non-Recall) - cash,Independent Expenditure,,
+AZ,Recall Ind. Expend. - Pay Cash/Check,Independent Expenditure,,
+AZ,Ballot Measure Expend. - Pay Cash/Check,Independent Expenditure,,
+AZ,Rebate or Refund from Operating Expense,Refund,,
+AZ,Rebate or Refund From Other Expenses,Refund,,
+AZ,Rebate or Refund from Independent Expenditure,Refund,,
+AZ,Refund From Contribution to Committee,Refund,,
+AZ,Refund from Contrib to a Cand Committee,Refund,,
+AZ,Refund from Contribution to a PAC,Refund,,
+AZ,Refund from Contribution to a Party,Refund,,
+AZ,Refund of Small Cash Expense,Refund,,
+AZ,Lend to Committee,Loan,,
+AZ,Loan to an Individual,Loan,,
+AZ,Loan to a Corporation/LLC,Loan,,
+AZ,Receive Loan Payment,Loan,,
+AZ,Receive Payment-Loan to Individual,Loan,,
+AZ,Receive Payment-Loan to Corp/LLC,Loan,,
+AZ,Dispose of Remaining Surplus,Transfer,,
+AZ,Transfer In Previous Committee Debt,Transfer,,
+AZ,Transfer Out General to Primary,Transfer,,
+AZ,Transfer Out Primary to General,Transfer,,
+AZ,Receive Credit - Operating Expense Bill,,,
+AZ,Receive Credit - Other Expenses Bill,,,
+AZ,Receive Credit - Independent Expenditure Bill,,,
+AZ,None,,,
+# == California ================================================================,,,,
+# FPPC Schedule E/D/F codes. Clean 3-letter codes only — all other values → NULL.,,,,
+CA,MON,Monetary,,
+CA,OFC,Monetary,,
+CA,PRO,Monetary,,
+CA,CNS,Monetary,,
+CA,FND,Monetary,,
+CA,SAL,Monetary,,
+CA,MTG,Monetary,,
+CA,LIT,Monetary,,
+CA,TRS,Monetary,,
+CA,TRC,Monetary,,
+CA,POS,Monetary,,
+CA,TEL,Monetary,,
+CA,WEB,Monetary,,
+CA,CVC,Monetary,,
+CA,VOT,Monetary,,
+CA,CMP,Monetary,,
+CA,RAD,Monetary,,
+CA,PRT,Monetary,,
+CA,MBR,Monetary,,
+CA,POL,Monetary,,
+CA,PHO,Monetary,,
+CA,FIL,Monetary,,
+CA,PET,Monetary,,
+CA,LEG,Monetary,,
+CA,CTB,Contribution,,
+CA,IKD,In-Kind,,
+CA,IND,Independent Expenditure,,
+CA,RFD,Refund,,
+CA,TSF,Transfer,,
+CA,LON,Loan,,
+# == Colorado ==================================================================,,,,
+# CO has the best human-readable categories. Unknown/Other/Misc → NULL (can't classify).,,,,
+CO,Advertising,Monetary,,
+CO,Bank Fees,Monetary,,
+CO,Consultant & Professional Services,Monetary,,
+CO,Employee Services,Monetary,,
+CO,Entertainment,Monetary,,
+CO,Food, Beverages and Meals,Monetary,
+CO,Fundraising Expenses,Monetary,,
+CO,Gifts,Monetary,,
+CO,Office Equipment & Supplies,Monetary,,
+CO,Rent & Utilities,Monetary,,
+CO,Telephone,Monetary,,
+CO,Travel & Lodging,Monetary,,
+CO,Miscellaneous,,,
+CO,Other,,,
+CO,Unknown,,,
+CO,Contributions,Contribution,,
+CO,Returned Expenditure,Refund,,
+CO,Donation for Independent Expenditures,Independent Expenditure,,
+# == Connecticut ===============================================================,,,,
+# CT expenditure types use a free-text code+description format. Only the top,,,,
+# codes by frequency are mapped here; the hundreds of typo/abbreviation variants,,,,
+# are left unmapped (NULL in aggregate) rather than guessed.,,,,
+# Contributions to other committees,,,,
+CT,CNTRB(Contributions to another committee),Contribution,,
+CT,CNTRB(),Contribution,,
+CT,POC(Payment to another committee),Contribution,,
+CT,CEF(Payment to Citizens Election Fund (CEF)),Contribution,,
+# Refunds and surplus,,,,
+CT,REF(Contributor returns or other revenue refunds),Refund,,
+CT,SRPLS(Surplus distribution in connection with the termination of the committee),Refund,,
+# Loans,,,,
+CT,LOAN(Payment of committee's loan),Loan,,
+# Operating expenses — mapped to Monetary,,,,
 CT,BNK(Bank fees, interest charges, or penalties),Monetary
-CT,WAGE(Wages and benefits paid to the committee's staff),Monetary
-CT,RMB(Reimbursement - formerly RCW),Monetary
-CT,WEB(Costs related to accessing and having a presence on the web),Monetary
-CT,CNSLT(Payments to a professional consultant),Monetary
-CT,OVHD(Overhead operating costs),Monetary
-CT,FOOD(Paid directly to a vendor for food and beverage),Monetary
-CT,PRNT(Cost of printing, photocopying or reproducing literature),Monetary
-CT,POST(Postage),Monetary
-CT,FNDR *(Expenses associated with holding a committee fundraiser),Monetary
-CT,FNDR(Expenses associated with holding a committee fundraiser),Monetary
-CT,A-OTH(Other advertising for which no specific advertise code exists),Monetary
-CT,A-OTH(Other advertising),Monetary
-CT,OFFICE(Office Supplies),Monetary
+CT,WAGE(Wages and benefits paid to the committee's staff),Monetary,,
+CT,RMB(Reimbursement - formerly RCW),Monetary,,
+CT,WEB(Costs related to accessing and having a presence on the web),Monetary,,
+CT,CNSLT(Payments to a professional consultant),Monetary,,
+CT,OVHD(Overhead operating costs),Monetary,,
+CT,FOOD(Paid directly to a vendor for food and beverage),Monetary,,
+CT,PRNT(Cost of printing, photocopying or reproducing literature),Monetary,
+CT,POST(Postage),Monetary,,
+CT,FNDR *(Expenses associated with holding a committee fundraiser),Monetary,,
+CT,FNDR(Expenses associated with holding a committee fundraiser),Monetary,,
+CT,A-OTH(Other advertising for which no specific advertise code exists),Monetary,,
+CT,A-OTH(Other advertising),Monetary,,
+CT,OFFICE(Office Supplies),Monetary,,
 CT,A-SIGN(Cost of preparing, printing, producing or distributing lawn or billboard signs),Monetary
-CT,A-WEB(Advertise on the World Wide Web),Monetary
-CT,A-DM(Advertise through direct mail),Monetary
-CT,A-DM(Advertisie through direct mail),Monetary
-CT,RCW(Reimburse committee workers),Monetary
-CT,A-NEWS(Advertise through a newspaper),Monetary
-CT,A-NEWS(Adevertise through a newspaper),Monetary
-CT,CHAR(Payment to tax exempt charitable organization),Monetary
-CT,TRVL(Transportation and lodging costs),Monetary
-CT,A-ATM(Advertise using Automated telephone/fax message),Monetary
-CT,A-PH-BNK(Use of phone banks),Monetary
-CT,POLLS(Costs associated with conducting polls and surveys),Monetary
-CT,A-RAD(Advertise on radio),Monetary
+CT,A-WEB(Advertise on the World Wide Web),Monetary,,
+CT,A-DM(Advertise through direct mail),Monetary,,
+CT,A-DM(Advertisie through direct mail),Monetary,,
+CT,RCW(Reimburse committee workers),Monetary,,
+CT,A-NEWS(Advertise through a newspaper),Monetary,,
+CT,A-NEWS(Adevertise through a newspaper),Monetary,,
+CT,CHAR(Payment to tax exempt charitable organization),Monetary,,
+CT,TRVL(Transportation and lodging costs),Monetary,,
+CT,A-ATM(Advertise using Automated telephone/fax message),Monetary,,
+CT,A-PH-BNK(Use of phone banks),Monetary,,
+CT,POLLS(Costs associated with conducting polls and surveys),Monetary,,
+CT,A-RAD(Advertise on radio),Monetary,,
 CT,EFV *(Equipment, Furniture, and vehicles),Monetary
-CT,A-TV(Advertise on television),Monetary
-CT,CCP(Any payment of a Credit Card bill),Monetary
-CT,ATT *(Fee for attending a fundraiser),Monetary
-CT,ATT(Fee for attending a fundraiser),Monetary
-CT,PTY-BLDG(Party building activities (For Party and PACs use only)),Monetary
-CT,A-MAG(Advertise through a magazine),Monetary
-CT,PBA-OTH *(Other Party building expenditures (For Party and PACs use only)),Monetary
-CT,PBA-OTH(Other Party building expenditures (For Party and PACs use only)),Monetary
-CT,GIFT(Purchase of items to be given as a gift),Monetary
-CT,Gift *(Purchase of items to be given as a gift),Monetary
-CT,PETTY(Petty cash fund),Monetary
-CT,PBA-ATT *(Attendance or admission fee (For Party and PACs use only)),Monetary
-CT,PBA-ATT(Attendance or admission fee (For Party and PACs use only)),Monetary
-CT,INAUG(Costs of hosting an inaugral event),Monetary
-CT,INAUG(Costs of hosting an inaugural event),Monetary
-CT,PBA-TRVL *(Travel and lodging (For Party and PACs use only)),Monetary
-CT,PBA-TRVL(Travel and lodging (For Party and PACs use only)),Monetary
-CT,TRAIN(Campaign training events (For PAC use only)),Monetary
+CT,A-TV(Advertise on television),Monetary,,
+CT,CCP(Any payment of a Credit Card bill),Monetary,,
+CT,ATT *(Fee for attending a fundraiser),Monetary,,
+CT,ATT(Fee for attending a fundraiser),Monetary,,
+CT,PTY-BLDG(Party building activities (For Party and PACs use only)),Monetary,,
+CT,A-MAG(Advertise through a magazine),Monetary,,
+CT,PBA-OTH *(Other Party building expenditures (For Party and PACs use only)),Monetary,,
+CT,PBA-OTH(Other Party building expenditures (For Party and PACs use only)),Monetary,,
+CT,GIFT(Purchase of items to be given as a gift),Monetary,,
+CT,Gift *(Purchase of items to be given as a gift),Monetary,,
+CT,PETTY(Petty cash fund),Monetary,,
+CT,PBA-ATT *(Attendance or admission fee (For Party and PACs use only)),Monetary,,
+CT,PBA-ATT(Attendance or admission fee (For Party and PACs use only)),Monetary,,
+CT,INAUG(Costs of hosting an inaugral event),Monetary,,
+CT,INAUG(Costs of hosting an inaugural event),Monetary,,
+CT,PBA-TRVL *(Travel and lodging (For Party and PACs use only)),Monetary,,
+CT,PBA-TRVL(Travel and lodging (For Party and PACs use only)),Monetary,,
+CT,TRAIN(Campaign training events (For PAC use only)),Monetary,,
 CT,EFV(Equipment, Furniture, and vehicles),Monetary
-CT,NULL,
-# == Delaware ==================================================================
-DE,Contributions,Contribution
-DE,Independent Expenditures,Independent Expenditure
-DE,In-Kind,In-Kind
-DE,Media,Monetary
-DE,Printing and Campaign Materials,Monetary
-DE,Fund Raiser,Monetary
-DE,Field Expenses,Monetary
-DE,Salaries and Other compensation,Monetary
-DE,Rent and Other Office expenses,Monetary
-DE,Postage,Monetary
-DE,Other Expenses,Monetary
-DE,Total of Expenditures not exceeding $100,Monetary
-DE,Non-Candidate Loan Payment,Monetary
-DE,Candidate Loan Payment,Monetary
-DE,Reimburse,Monetary
-DE,Direct Mailing by Mail House (R),Monetary
-DE,Purchase of Equipment,Monetary
-DE,Return Contributions,Refund
-DE,Expense Reimbursement,Refund
-DE,Data Conversion,Monetary
-# == Georgia ===================================================================
-GA,Expenditure – Itemized Expenditure,Monetary
-GA,Expenditure – Unitemized Expenditure,Monetary
-GA,Expenditure – Reimbursement,Monetary
-GA,Expenditure – Credit Card,Monetary
-GA,Expenditure – In-Kind Expenditure,In-Kind
-GA,Return Expenditure – Itemized Expenditure,Refund
-GA,Return Expenditure – Unitemized Expenditure,Refund
-# Legacy (media.ethics.ga.gov, 2006-2024) — transaction_type is Expenditure – Type
-# where Type is Expenditure or In-Kind (Reimbursement/Credit Card already
-# match the rows above).
-GA,Expenditure – Expenditure,Monetary
-GA,Expenditure – In-Kind,In-Kind
-# == Iowa ======================================================================
-# Iowa parser hard-codes transaction_type: "Monetary" for all Sch-B expenditures.
-IA,Monetary,Monetary
-# == Illinois ==================================================================
-# D2Part codes (Schedule B 'part' of ISBE's expenditure form). 7B (loans made)
-# is diverted to loans_debts.csv and not included here.
-IL,6B,Monetary
-IL,8B,Monetary
-IL,9B,Independent Expenditure
-# == Kentucky ==================================================================
-# KREF Expenditure Type field (transaction_type column in expenditures).
-# ITC = Income Tax Checkoff disbursement; DEBT_ASSUMPTION = accounting transfer.
-KY,MONETARY,Monetary
-KY,NONE,
-KY,INKIND,In-Kind
-KY,DEBT_ASSUMPTION,
-KY,TRANSFER,Transfer
-KY,ITC,
-# == Maine =====================================================================
-ME,Expenditure,Monetary
-ME,Independent Expenditure,Independent Expenditure
-ME,Returned Contribution,Monetary
-ME,Debt Payment,Monetary
-ME,Loan Payment,Monetary
-# == Louisiana =================================================================
-# Schedule codes from expenditures CSVs. These appear on multiple form types:
-#   F102 (Candidate):  E-1 = contrib to others, E-2 = operational
-#   F202 (Committee):  E-1 = contrib to candidate, E-2 = operational,
-#                      E-3 = independent expenditure
-#   F305 (Other Person): A = operational, C = operational,
-#                        D = operational, D-2 = contribution to committee
-# B   = Loans and debts repaid (Schedule B, all form types)
-# E-4 = Administrative/filing fees
-LA,E-1,Contribution
-LA,E-2,Monetary
-LA,E-3,Independent Expenditure
-LA,E-4,Monetary
-LA,A,Monetary
-LA,C,Monetary
-LA,D,Monetary
-LA,D-1,Monetary
-LA,D-2,Contribution
-LA,B,Monetary
-# == Maryland ==================================================================
-# Transaction Type from TEXP files. Outstanding Obligation types are debt
-# obligations, not cash expenditures.
-MD,Expenditure,Monetary
-MD,Independent Expenditure / Electioneering Communication,Independent Expenditure
-MD,Outstanding Obligation,Other
-MD,Outstanding Obligation Payment,Monetary
-MD,Outstanding Obligation Forgiven,Other
-MD,Return Expenditure,Refund
-# == Massachusetts ==============================================================
-# transaction_type in expenditures = Record_Type_ID description from the parser.
-MA,Expenditure,Monetary
-MA,Contribution to Registered Committee,Contribution
-MA,Reimbursement,Monetary
-MA,Credit Card Payment,Monetary
-MA,Vendor Payment,Monetary
-MA,Bank-Reported Expenditure,Monetary
-MA,Independent Expenditure,Independent Expenditure
-MA,Administrative Expense,Monetary
-MA,Merchant Provider Fee,Monetary
-MA,Out-of-Pocket Candidate Expense,Monetary
-# == Michigan ==================================================================
-MI,Direct Expenditures,Monetary
-MI,Direct Expenditures - Public Funds,Monetary
-MI,Direct Expenditures - Debt/Loan Repayment,Monetary
-MI,GOTV Expenditures,Monetary
-MI,Incidental Expenditures (Incumbent Only),Monetary
-MI,In-Kind Expenditures,In-Kind
-MI,Independent Expenditures,Independent Expenditure
-# Loan rows routed to loans_debts at parse time — suppress residuals
-MI,Direct Expenditures - Loan Owed to/Given By,
-# SUPP appears in IE filings for ballot question support/oppose activity
-MI,SUPP,Other
-# Refund/Rebate rows written as negative-amount expenditures by the parser
-MI,Refund/Rebate,Other
-# == Minnesota =================================================================
-# "Type" from mn_expenditures.csv — expenditure type codes from the CFB.
-# IE "Type" values from mn_ind_expenditures.csv: parser prefixes "For" or "Against".
-# Confirm exact strings after first parse run; common values listed here.
-MN,General Expenditure,Monetary
-MN,Campaign Expenditure,Monetary
-MN,Non-Campaign Disbursement,Monetary
-MN,Other Disbursement,Monetary
-MN,Ballot Question Expenditure,Other
-MN,Contribution,Contribution
-MN,Contribution to Another Committee,Contribution
-MN,Independent Expenditure For,Independent Expenditure
-MN,Independent Expenditure Against,Independent Expenditure
-MN,In-Kind,In-Kind
-MN,In-Kind IE,In-Kind
-# == Mississippi =================================================================
-# ExpenditureSearch exposes no field that distinguishes expenditure type (no
-# in-kind flag, no category code — only a free-text Description/"purpose").
-# The parser leaves transaction_type blank for all MS expenditures, so there
-# is nothing to map here.
-# == Pennsylvania =================================================================
-# PA DOS's expense.txt has no expenditure-type or category field (only
-# EXPDESC free text, passed through as `purpose`) — parser leaves
-# transaction_type and category blank for all PA expenditures (0.0% fill,
-# expected by design, not a bug). Nothing to map here.
+CT,NULL,,,
+# == Delaware ==================================================================,,,,
+DE,Contributions,Contribution,,
+DE,Independent Expenditures,Independent Expenditure,,
+DE,In-Kind,In-Kind,,
+DE,Media,Monetary,,
+DE,Printing and Campaign Materials,Monetary,,
+DE,Fund Raiser,Monetary,,
+DE,Field Expenses,Monetary,,
+DE,Salaries and Other compensation,Monetary,,
+DE,Rent and Other Office expenses,Monetary,,
+DE,Postage,Monetary,,
+DE,Other Expenses,Monetary,,
+DE,Total of Expenditures not exceeding $100,Monetary,,
+DE,Non-Candidate Loan Payment,Monetary,,
+DE,Candidate Loan Payment,Monetary,,
+DE,Reimburse,Monetary,,
+DE,Direct Mailing by Mail House (R),Monetary,,
+DE,Purchase of Equipment,Monetary,,
+DE,Return Contributions,Refund,,
+DE,Expense Reimbursement,Refund,,
+DE,Data Conversion,Monetary,,
+# == Georgia ===================================================================,,,,
+GA,Expenditure – Itemized Expenditure,Monetary,,
+GA,Expenditure – Unitemized Expenditure,Monetary,,
+GA,Expenditure – Reimbursement,Monetary,,
+GA,Expenditure – Credit Card,Monetary,,
+GA,Expenditure – In-Kind Expenditure,In-Kind,,
+GA,Return Expenditure – Itemized Expenditure,Refund,,
+GA,Return Expenditure – Unitemized Expenditure,Refund,,
+# Legacy (media.ethics.ga.gov, 2006-2024) — transaction_type is Expenditure – Type,,,
+# where Type is Expenditure or In-Kind (Reimbursement/Credit Card already,,,,
+# match the rows above).,,,,
+GA,Expenditure – Expenditure,Monetary,,
+GA,Expenditure – In-Kind,In-Kind,,
+# == Iowa ======================================================================,,,,
+"# Iowa parser hard-codes transaction_type: ""Monetary"" for all Sch-B expenditures.",,,,
+IA,Monetary,Monetary,,
+# == Illinois ==================================================================,,,,
+# D2Part codes (Schedule B 'part' of ISBE's expenditure form). 7B (loans made),,,,
+# is diverted to loans_debts.csv and not included here.,,,,
+IL,6B,Monetary,,
+IL,8B,Monetary,,
+IL,9B,Independent Expenditure,,
+# == Kentucky ==================================================================,,,,
+# KREF Expenditure Type field (transaction_type column in expenditures).,,,,
+# ITC = Income Tax Checkoff disbursement; DEBT_ASSUMPTION = accounting transfer.,,,,
+KY,MONETARY,Monetary,,
+KY,NONE,,,
+KY,INKIND,In-Kind,,
+KY,DEBT_ASSUMPTION,,,
+KY,TRANSFER,Transfer,,
+KY,ITC,,,
+# == Maine =====================================================================,,,,
+ME,Expenditure,Monetary,,
+ME,Independent Expenditure,Independent Expenditure,,
+ME,Returned Contribution,Monetary,,
+ME,Debt Payment,Monetary,,
+ME,Loan Payment,Monetary,,
+# == Louisiana =================================================================,,,,
+# Schedule codes from expenditures CSVs. These appear on multiple form types:,,,,
+#   F102 (Candidate):  E-1 = contrib to others, E-2 = operational,,,
+#   F202 (Committee):  E-1 = contrib to candidate, E-2 = operational,,,
+#                      E-3 = independent expenditure,,,,
+#   F305 (Other Person): A = operational, C = operational,,,
+#                        D = operational, D-2 = contribution to committee,,,
+# B   = Loans and debts repaid (Schedule B, all form types),,,
+# E-4 = Administrative/filing fees,,,,
+LA,E-1,Contribution,,
+LA,E-2,Monetary,,
+LA,E-3,Independent Expenditure,,
+LA,E-4,Monetary,,
+LA,A,Monetary,,
+LA,C,Monetary,,
+LA,D,Monetary,,
+LA,D-1,Monetary,,
+LA,D-2,Contribution,,
+LA,B,Monetary,,
+# == Maryland ==================================================================,,,,
+# Transaction Type from TEXP files. Outstanding Obligation types are debt,,,,
+# obligations, not cash expenditures.,,,
+MD,Expenditure,Monetary,,
+MD,Independent Expenditure / Electioneering Communication,Independent Expenditure,,
+MD,Outstanding Obligation,Other,,
+MD,Outstanding Obligation Payment,Monetary,,
+MD,Outstanding Obligation Forgiven,Other,,
+MD,Return Expenditure,Refund,,
+# == Massachusetts ==============================================================,,,,
+# transaction_type in expenditures = Record_Type_ID description from the parser.,,,,
+MA,Expenditure,Monetary,,
+MA,Contribution to Registered Committee,Contribution,,
+MA,Reimbursement,Monetary,,
+MA,Credit Card Payment,Monetary,,
+MA,Vendor Payment,Monetary,,
+MA,Bank-Reported Expenditure,Monetary,,
+MA,Independent Expenditure,Independent Expenditure,,
+MA,Administrative Expense,Monetary,,
+MA,Merchant Provider Fee,Monetary,,
+MA,Out-of-Pocket Candidate Expense,Monetary,,
+# == Michigan ==================================================================,,,,
+MI,Direct Expenditures,Monetary,,
+MI,Direct Expenditures - Public Funds,Monetary,,
+MI,Direct Expenditures - Debt/Loan Repayment,Monetary,,
+MI,GOTV Expenditures,Monetary,,
+MI,Incidental Expenditures (Incumbent Only),Monetary,,
+MI,In-Kind Expenditures,In-Kind,,
+MI,Independent Expenditures,Independent Expenditure,,
+# Loan rows routed to loans_debts at parse time — suppress residuals,,,,
+MI,Direct Expenditures - Loan Owed to/Given By,,,
+# SUPP appears in IE filings for ballot question support/oppose activity,,,,
+MI,SUPP,Other,,
+# Refund/Rebate rows written as negative-amount expenditures by the parser,,,,
+MI,Refund/Rebate,Other,,
+# == Minnesota =================================================================,,,,
+"# ""Type"" from mn_expenditures.csv — expenditure type codes from the CFB.",,,,
+"# IE ""Type"" values from mn_ind_expenditures.csv: parser prefixes ""For"" or ""Against"".",,,,
+# Confirm exact strings after first parse run; common values listed here.,,,,
+MN,General Expenditure,Monetary,,
+MN,Campaign Expenditure,Monetary,,
+MN,Non-Campaign Disbursement,Monetary,,
+MN,Other Disbursement,Monetary,,
+MN,Ballot Question Expenditure,Other,,
+MN,Contribution,Contribution,,
+MN,Contribution to Another Committee,Contribution,,
+MN,Independent Expenditure For,Independent Expenditure,,
+MN,Independent Expenditure Against,Independent Expenditure,,
+MN,In-Kind,In-Kind,,
+MN,In-Kind IE,In-Kind,,
+# == Mississippi =================================================================,,,,
+# ExpenditureSearch exposes no field that distinguishes expenditure type (no,,,,
+# in-kind flag," no category code — only a free-text Description/""purpose"").",,,
+# The parser leaves transaction_type blank for all MS expenditures, so there,,,
+# is nothing to map here.,,,,
+# == Pennsylvania =================================================================,,,,
+# PA DOS's expense.txt has no expenditure-type or category field (only,,,,
+# EXPDESC free text, passed through as `purpose`) — parser leaves,,,
+# transaction_type and category blank for all PA expenditures (0.0% fill,,,,
+# expected by design, not a bug). Nothing to map here.,,,
+# == Montana ======================================================================,,,,
+"# ""Expenditure Type"" on the C5/C6/C4 schedule export is a numeric code whose",,,,
+# meanings were not confirmed against a live sample (see docs/states/montana.md),,,,
+# — left entirely unmapped rather than guessed. Same for C7E's,,,,
+# lineItemCompositeDescr free-text field. Revisit once a real scrape exists.,,,,
+# == Ohio ======================================================================,,,,
+# Same pattern as transaction_categories.csv but for expenditures' SHORT_DESCRIPTION.,,,,
+# Only codes observed in a sampled 2026 candidate-committee file are listed below.,,,,
+OH,31-B  Stmt of Expenditures,Monetary,,
+OH,31-F  FR Expenditures,Monetary,,
+OH,31-J-2  In-Kind Cont Made,In-Kind,,
+OH,31-U  Ind Exp by committee,Independent Expenditure,,

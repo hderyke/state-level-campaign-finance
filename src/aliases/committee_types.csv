@@ -1,250 +1,271 @@
-state,raw,canonical
-# == Alabama ===================================================================
-AL,Principal Campaign Committee,Candidate Committee
-AL,Political Action Committee,PAC
-AL,None,Other
-# == Alaska ====================================================================
-AK,Candidate,Candidate Committee
-AK,Controlled,Candidate Committee
-AK,PAC,PAC
-AK,Special Interest,PAC
-AK,Political Party,Party Committee
-AK,Independent Expenditure,Independent Expenditure
-AK,Ballot Proposition,Ballot Measure
-AK,Initiative Proposal,Ballot Measure
-AK,Entity,Other
-AK,Group,Other
-# == Arizona ===================================================================
-AZ,Candidate (not participating in Clean Elections),Candidate Committee
-AZ,Candidate (participating in Clean Elections),Candidate Committee
-AZ,Candidate (Exploratory),Candidate Committee
-AZ,$500 Threshold (Candidate),Candidate Committee
-AZ,Political Action Committee,PAC
-AZ,Political Action Committee (Standing),PAC
-AZ,Political Action Committee (Legacy),PAC
-AZ,Political Action Committee (Mega),PAC
-AZ,Political Action Committee (Mega Standing),PAC
-AZ,Segregated Fund,PAC
-AZ,Segregated Fund (Standing),PAC
-AZ,Segregated Fund (Multicandidate PAC),PAC
-AZ,Political Party,Party Committee
-AZ,Political Party (Standing),Party Committee
-AZ,New Party,Party Committee
-AZ,Independent Expenditures,Independent Expenditure
-AZ,Independent Expenditures (Individual),Independent Expenditure
-AZ,Independent Expenditures (Corp/LLC/Labor Org),Independent Expenditure
-AZ,Independent Expenditures (Standing),Independent Expenditure
-AZ,Independent Exp. (Standing) (Multicandidate PAC),Independent Expenditure
-AZ,Support/Oppose (Candidate),Independent Expenditure
-AZ,Support/Oppose (Ballot Measure),Ballot Measure
-AZ,Support/Oppose (Special Election Ballot Measure),Ballot Measure
-AZ,Recall,Ballot Measure
-AZ,Political Organization,Other
-AZ,Officeholder Expenses,Other
-AZ,$500 Threshold (Non-Candidate),Other
-AZ,None,Other
-# == Arkansas ==================================================================
-AR,Candidate,Candidate Committee
-AR,Exploratory Committee,Candidate Committee
-AR,Political Action Committee,PAC
-AR,County Political Party Committee,Party Committee
-AR,Political Party,Party Committee
-AR,Independent Expenditure Filer (Committee),Independent Expenditure
-AR,Independent Expenditure Filer (Individual),Independent Expenditure
-AR,Independent Expenditure Filer (Other Entity),Independent Expenditure
-# == California ================================================================
-# CA committee_type describes filing roles, not committee categories.
-# RECIPIENT COMMITTEE is the primary filer type; others are support roles.
-# RECIPIENT COMMITTEE is a catch-all filer type shared by both PACs and
-# candidate-controlled committees in CAL-ACCESS. The parser reclassifies
-# rows with cd.cand_name populated to Candidate Committee at parse time
-# (parsers/california.py). See STEYER FOR GOVERNOR 2026, WHITMAN 2010, etc.
-CA,CANDIDATE/OFFICEHOLDER,Candidate Committee
-CA,RECIPIENT COMMITTEE,PAC
-CA,MAJOR DONOR/INDEPENDENT EXPENDITURE COMMITTEE,Independent Expenditure
-CA,INITIATIVE,Ballot Measure
-CA,PROPOSITION,Ballot Measure
-CA,PROPONENT,Ballot Measure
-CA,SLATE MAILER ORGANIZATIONS,Other
-CA,TREASURER/RESPONSIBLE OFFICER,Other
-CA,CLIENT,Other
-CA,LOBBYIST,Other
-CA,FIRM,Other
-CA,EMPLOYER,Other
-CA,PAYMENT TO INFLUENCE,Other
-CA,PREPAID ACCOUNT,Other
-CA,NOT DEFINED,Other
-CA,INDIVIDUAL,Other
-# == Colorado ==================================================================
-CO,Candidate,Candidate Committee
-CO,Candidate Committee,Candidate Committee
-CO,Political Committee,PAC
-CO,Small Donor Committee,PAC
-CO,Federal PAC,PAC
-CO,Political Party Committee,Party Committee
-CO,Independent Expenditure Committee,Independent Expenditure
-CO,Issue Committee,Ballot Measure
-CO,Small Scale Issue Committee,Ballot Measure
-CO,527 Political Organization,Other
-# == Connecticut ===============================================================
-CT,Candidate Committee,Candidate Committee
-CT,Exploratory Committee,Candidate Committee
-CT,Political Action Committee,PAC
-CT,Party Committee,Party Committee
-CT,NO,
-# == Delaware ==================================================================
-DE,Candidate Committee,Candidate Committee
-DE,Political Action Committee,PAC
-DE,Political Committee,Party Committee
-DE,3rd Party Advertiser,Other
-DE,Certification of Intention,Other
-# == Georgia ===================================================================
-# Two sources feed committees.csv:
-#  - candidates.csv rows with a committeeName: the candidate's own campaign
-#    committee (candidate_name/office/district populated). Parser writes
-#    "Candidate Committee" directly (fixed 2026-06-13; prior runs wrote "PAC").
-#  - public_committees.csv (GetCommitteeDetails): genuinely non-candidate
-#    PACs/IECs/party/leadership committees, candidate_name blank.
-GA,Candidate Committee,Candidate Committee
-GA,PAC,PAC
-GA,Political Action Committee / Non-Political Action Committee,PAC
-GA,Leadership Committee,PAC
-GA,Independent Committee,Independent Expenditure
-GA,Political Party Committee,Party Committee
-GA,County or Municipal Ballot Question Committee,Ballot Measure
-GA,Individual Committee / Other (Non-PAC),Other
-# Legacy (media.ethics.ga.gov, 2006-2024) — raw CommitteeType from
+state,raw,canonical,,,,
+# == Alabama ===================================================================,,,,,,
+AL,Principal Campaign Committee,Candidate Committee,,,,
+AL,Political Action Committee,PAC,,,,
+AL,None,Other,,,,
+# == Alaska ====================================================================,,,,,,
+AK,Candidate,Candidate Committee,,,,
+AK,Controlled,Candidate Committee,,,,
+AK,PAC,PAC,,,,
+AK,Special Interest,PAC,,,,
+AK,Political Party,Party Committee,,,,
+AK,Independent Expenditure,Independent Expenditure,,,,
+AK,Ballot Proposition,Ballot Measure,,,,
+AK,Initiative Proposal,Ballot Measure,,,,
+AK,Entity,Other,,,,
+AK,Group,Other,,,,
+# == Arizona ===================================================================,,,,,,
+AZ,Candidate (not participating in Clean Elections),Candidate Committee,,,,
+AZ,Candidate (participating in Clean Elections),Candidate Committee,,,,
+AZ,Candidate (Exploratory),Candidate Committee,,,,
+AZ,$500 Threshold (Candidate),Candidate Committee,,,,
+AZ,Political Action Committee,PAC,,,,
+AZ,Political Action Committee (Standing),PAC,,,,
+AZ,Political Action Committee (Legacy),PAC,,,,
+AZ,Political Action Committee (Mega),PAC,,,,
+AZ,Political Action Committee (Mega Standing),PAC,,,,
+AZ,Segregated Fund,PAC,,,,
+AZ,Segregated Fund (Standing),PAC,,,,
+AZ,Segregated Fund (Multicandidate PAC),PAC,,,,
+AZ,Political Party,Party Committee,,,,
+AZ,Political Party (Standing),Party Committee,,,,
+AZ,New Party,Party Committee,,,,
+AZ,Independent Expenditures,Independent Expenditure,,,,
+AZ,Independent Expenditures (Individual),Independent Expenditure,,,,
+AZ,Independent Expenditures (Corp/LLC/Labor Org),Independent Expenditure,,,,
+AZ,Independent Expenditures (Standing),Independent Expenditure,,,,
+AZ,Independent Exp. (Standing) (Multicandidate PAC),Independent Expenditure,,,,
+AZ,Support/Oppose (Candidate),Independent Expenditure,,,,
+AZ,Support/Oppose (Ballot Measure),Ballot Measure,,,,
+AZ,Support/Oppose (Special Election Ballot Measure),Ballot Measure,,,,
+AZ,Recall,Ballot Measure,,,,
+AZ,Political Organization,Other,,,,
+AZ,Officeholder Expenses,Other,,,,
+AZ,$500 Threshold (Non-Candidate),Other,,,,
+AZ,None,Other,,,,
+# == Arkansas ==================================================================,,,,,,
+AR,Candidate,Candidate Committee,,,,
+AR,Exploratory Committee,Candidate Committee,,,,
+AR,Political Action Committee,PAC,,,,
+AR,County Political Party Committee,Party Committee,,,,
+AR,Political Party,Party Committee,,,,
+AR,Independent Expenditure Filer (Committee),Independent Expenditure,,,,
+AR,Independent Expenditure Filer (Individual),Independent Expenditure,,,,
+AR,Independent Expenditure Filer (Other Entity),Independent Expenditure,,,,
+# == California ================================================================,,,,,,
+# CA committee_type describes filing roles, not committee categories.,,,,,
+# RECIPIENT COMMITTEE is the primary filer type; others are support roles.,,,,,,
+# RECIPIENT COMMITTEE is a catch-all filer type shared by both PACs and,,,,,,
+# candidate-controlled committees in CAL-ACCESS. The parser reclassifies,,,,,,
+# rows with cd.cand_name populated to Candidate Committee at parse time,,,,,,
+# (parsers/california.py). See STEYER FOR GOVERNOR 2026, WHITMAN 2010, etc.,,,,
+CA,CANDIDATE/OFFICEHOLDER,Candidate Committee,,,,
+CA,RECIPIENT COMMITTEE,PAC,,,,
+CA,MAJOR DONOR/INDEPENDENT EXPENDITURE COMMITTEE,Independent Expenditure,,,,
+CA,INITIATIVE,Ballot Measure,,,,
+CA,PROPOSITION,Ballot Measure,,,,
+CA,PROPONENT,Ballot Measure,,,,
+CA,SLATE MAILER ORGANIZATIONS,Other,,,,
+CA,TREASURER/RESPONSIBLE OFFICER,Other,,,,
+CA,CLIENT,Other,,,,
+CA,LOBBYIST,Other,,,,
+CA,FIRM,Other,,,,
+CA,EMPLOYER,Other,,,,
+CA,PAYMENT TO INFLUENCE,Other,,,,
+CA,PREPAID ACCOUNT,Other,,,,
+CA,NOT DEFINED,Other,,,,
+CA,INDIVIDUAL,Other,,,,
+# == Colorado ==================================================================,,,,,,
+CO,Candidate,Candidate Committee,,,,
+CO,Candidate Committee,Candidate Committee,,,,
+CO,Political Committee,PAC,,,,
+CO,Small Donor Committee,PAC,,,,
+CO,Federal PAC,PAC,,,,
+CO,Political Party Committee,Party Committee,,,,
+CO,Independent Expenditure Committee,Independent Expenditure,,,,
+CO,Issue Committee,Ballot Measure,,,,
+CO,Small Scale Issue Committee,Ballot Measure,,,,
+CO,527 Political Organization,Other,,,,
+# == Connecticut ===============================================================,,,,,,
+CT,Candidate Committee,Candidate Committee,,,,
+CT,Exploratory Committee,Candidate Committee,,,,
+CT,Political Action Committee,PAC,,,,
+CT,Party Committee,Party Committee,,,,
+CT,NO,,,,,
+# == Delaware ==================================================================,,,,,,
+DE,Candidate Committee,Candidate Committee,,,,
+DE,Political Action Committee,PAC,,,,
+DE,Political Committee,Party Committee,,,,
+DE,3rd Party Advertiser,Other,,,,
+DE,Certification of Intention,Other,,,,
+# == Georgia ===================================================================,,,,,,
+# Two sources feed committees.csv:,,,,,,
+#  - candidates.csv rows with a committeeName: the candidate's own campaign,,,,,,
+#    committee (candidate_name/office/district populated). Parser writes,,,,,,
+"#    ""Candidate Committee"" directly (fixed 2026-06-13; prior runs wrote ""PAC"").",,,,,,
+#  - public_committees.csv (GetCommitteeDetails): genuinely non-candidate,,,,,,
+#    PACs/IECs/party/leadership committees, candidate_name blank.,,,,,
+GA,Candidate Committee,Candidate Committee,,,,
+GA,PAC,PAC,,,,
+GA,Political Action Committee / Non-Political Action Committee,PAC,,,,
+GA,Leadership Committee,PAC,,,,
+GA,Independent Committee,Independent Expenditure,,,,
+GA,Political Party Committee,Party Committee,,,,
+GA,County or Municipal Ballot Question Committee,Ballot Measure,,,,
+GA,Individual Committee / Other (Non-PAC),Other,,,,
+# Legacy (media.ethics.ga.gov, 2006-2024) — raw CommitteeType from,,,,,
 # legacy_committees_type{1,3,4,5,6,7,8}.csv (type2 already covered above by
-# "Independent Committee").
-GA,Political Action Committee,PAC
-GA,Constitutional Amendment or Statewide Referendum,Ballot Measure
-GA,County or Municipal Ballot Question,Ballot Measure
-GA,Recall Election - Name of Public Officer & Office Held,Other
-GA,Political Party,Party Committee
-GA,Individual,Other
-GA,Corporation,Other
-# == Iowa ======================================================================
-# committee_type comes from the PDF header "Committee Type:" field.
-IA,State House,Candidate Committee
-IA,State Senate,Candidate Committee
-IA,Statewide,Candidate Committee
-IA,County,Candidate Committee
-IA,City,Candidate Committee
-IA,School,Candidate Committee
-IA,Judicial,Candidate Committee
-IA,Iowa PAC,PAC
-IA,PAC,PAC
-IA,Political Party,Party Committee
-IA,Candidate,Candidate Committee
-# == Illinois ==================================================================
-# TypeOfCommittee is often blank; the parser infers "Candidate" for ~13K
-# blank rows that ARE linked to a candidate via CmteCandidateLinks.txt. The
-# remaining ~6K unlinked blanks stay blank and are unmapped here.
-IL,Candidate,Candidate Committee
-IL,Political Action,PAC
-IL,Political Party,Party Committee
-IL,Ballot Initiative,Ballot Measure
-IL,Independent Expenditure,Independent Expenditure
-IL,Limited Activity Committee,Other
-# == Indiana ===================================================================
-# committee_type comes from entities.csv (scraped from CommitteeDetail.aspx).
-IN,Candidate,Candidate Committee
-IN,Political Action,PAC
-IN,Regular Party,Party Committee
-IN,Legislative Caucus,Party Committee
-IN,System,
-# == Kentucky ==================================================================
-# KREF committee_type from the committees API endpoint.
-# Issues Committees are independent advocacy committees (functionally PAC-like
-# but not candidate-specific); in KY statute they are a distinct filer category.
-# Caucus Campaign Committees are legislative caucus collective fundraising entities.
-KY,Campaign Committee,Candidate Committee
-KY,State Pac,PAC
-KY,Issues Committee,PAC
-KY,Executive Committee,Party Committee
-KY,Independent Expenditure-Only Committee,Independent Expenditure
-KY,Inaugural Committee,Other
-KY,Exploratory Committee,Candidate Committee
-KY,Contributing Organization,Organization
-KY,Caucus Campaign Committee,PAC
-KY,Executive Committee Building Fund,Party Committee
-# == Maine =====================================================================
-ME,Candidate,Candidate Committee
-ME,Political Action Committee,PAC
-ME,Party Committee,Party Committee
-ME,Ballot Question Committee,Ballot Measure
-ME,Gubernatorial Transition And Inaugural Committee,Other
-# Personal financial disclosure filers are not campaign committees — suppressed
-ME,Legislative Personal Filer,
-ME,Personal Financial Disclosure Filer - Executive,
-# == Louisiana =================================================================
-# Louisiana does not provide committee_type in bulk CSVs — field is left blank
-# by parser. Filer type (candidate vs PAC) is inferred from FilerFirstName
-# presence, not from a committee_type column. No mappings needed here.
-# == Maryland ==================================================================
-MD,Candidate Committee,Candidate Committee
-MD,Political Action Committee (PAC),PAC
-MD,Super Political Action Committee (Super PAC),PAC
-MD,Party Central Committee,Party Committee
-MD,Legislative Caucus Committee,Party Committee
-MD,Independent Expenditure,Independent Expenditure
-MD,Electioneering Communication,Independent Expenditure
-MD,Ballot Issue Committee,Ballot Measure
-MD,Slate Committee,Other
-MD,Out of State (Non Federal) Committee,Other
-MD,Participating Organizations Committee,Other
-MD,Public Financing Committee,Other
-# == Massachusetts ==============================================================
-# Account type codes from all_filers.txt → canonical labels.
-# D/U/Z/z/N/O are candidate-type accounts (various vintages of the registration system).
-MA,Candidate Committee,Candidate Committee
-MA,PAC,PAC
-MA,Independent Expenditure,Independent Expenditure
-MA,Party Committee,Party Committee
-MA,Ballot Measure,Ballot Measure
-MA,Other,Other
-# == Michigan ==================================================================
-# com_type values from transaction files; committee_type labels from entity search
-MI,Candidate,Candidate Committee
-MI,Political,PAC
-# "Independent" in MI = committees not affiliated with a candidate or party (non-IE PACs)
-MI,Independent,PAC
-MI,Caucus,PAC
-MI,Ballot Question,Ballot Measure
-MI,Independent Expenditure,Independent Expenditure
-MI,Qualifying Political Party,Party Committee
-MI,State Political Party,Party Committee
-MI,County Political Party,Party Committee
-MI,District Political Party,Party Committee
-# == Minnesota =================================================================
-# RegisteredEntityType (PCC/PCF/PTU) is mapped to canonical values at parse time
-# so the per-state DB query works without alias expansion. Aliases here are no-ops
-# for the aggregate DB but kept for completeness.
-MN,Candidate Committee,Candidate Committee
-MN,PAC,PAC
-MN,Party Committee,Party Committee
-# == Mississippi ================================================================
-# OrganizationType from CandidateNameSearch (entities.json). "Policical" is a
-# genuine typo in the source data, not a transcription error on our end.
-MS,Candidate Committee,Candidate Committee
-MS,Political Committee (PAC),PAC
-MS,Policical Initiative Committee,Ballot Measure
-# == Pennsylvania ===============================================================
-# committee_type is parser-derived from raw FILERTYPE (1/2/3), not a free-text
-# source field — see FILER_TYPE_LABEL in parsers/pennsylvania.py.
-PA,Candidate,Candidate Committee
-# FILERTYPE=2 "Committee" is PA's single catch-all code for every non-candidate,
-# non-lobbyist committee (PACs, party committees, ballot committees) — the
-# source data doesn't distinguish them further, so PAC is the closest generic
-# bucket. Some "Committee" rows are actually a candidate's own money committee
-# (e.g. "Shapiro for Pennsylvania") now correctly linked via candidate_name/
-# person_id (see PA_COMMITTEE_CANDIDATE_OVERRIDE in the parser) but still
-# showing committee_type=PAC here — CA/GA have a precedent aggregate.py
-# override (state=X AND committee_type='PAC' AND candidate_name != '' ->
-# 'Candidate Committee') that hasn't been applied to PA yet; flagged in
-# docs/states/pennsylvania.md, not done in this pass.
-PA,Committee,PAC
-PA,Lobbyist,Other
-# FILERTYPE "4" is an undocumented raw code (105 rows, <1%) not covered by
-# DOS's published FILERTYPE list (1/2/3) — suppressed rather than guessed at.
-PA,4,
+"# ""Independent Committee"").",,,,,,
+GA,Political Action Committee,PAC,,,,
+GA,Constitutional Amendment or Statewide Referendum,Ballot Measure,,,,
+GA,County or Municipal Ballot Question,Ballot Measure,,,,
+GA,Recall Election - Name of Public Officer & Office Held,Other,,,,
+GA,Political Party,Party Committee,,,,
+GA,Individual,Other,,,,
+GA,Corporation,Other,,,,
+# == Iowa ======================================================================,,,,,,
+"# committee_type comes from the PDF header ""Committee Type:"" field.",,,,,,
+IA,State House,Candidate Committee,,,,
+IA,State Senate,Candidate Committee,,,,
+IA,Statewide,Candidate Committee,,,,
+IA,County,Candidate Committee,,,,
+IA,City,Candidate Committee,,,,
+IA,School,Candidate Committee,,,,
+IA,Judicial,Candidate Committee,,,,
+IA,Iowa PAC,PAC,,,,
+IA,PAC,PAC,,,,
+IA,Political Party,Party Committee,,,,
+IA,Candidate,Candidate Committee,,,,
+# == Illinois ==================================================================,,,,,,
+"# TypeOfCommittee is often blank; the parser infers ""Candidate"" for ~13K",,,,,,
+# blank rows that ARE linked to a candidate via CmteCandidateLinks.txt. The,,,,,,
+# remaining ~6K unlinked blanks stay blank and are unmapped here.,,,,,,
+IL,Candidate,Candidate Committee,,,,
+IL,Political Action,PAC,,,,
+IL,Political Party,Party Committee,,,,
+IL,Ballot Initiative,Ballot Measure,,,,
+IL,Independent Expenditure,Independent Expenditure,,,,
+IL,Limited Activity Committee,Other,,,,
+# == Indiana ===================================================================,,,,,,
+# committee_type comes from entities.csv (scraped from CommitteeDetail.aspx).,,,,,,
+IN,Candidate,Candidate Committee,,,,
+IN,Political Action,PAC,,,,
+IN,Regular Party,Party Committee,,,,
+IN,Legislative Caucus,Party Committee,,,,
+IN,System,,,,,
+# == Kentucky ==================================================================,,,,,,
+# KREF committee_type from the committees API endpoint.,,,,,,
+# Issues Committees are independent advocacy committees (functionally PAC-like,,,,,,
+# but not candidate-specific); in KY statute they are a distinct filer category.,,,,,,
+# Caucus Campaign Committees are legislative caucus collective fundraising entities.,,,,,,
+KY,Campaign Committee,Candidate Committee,,,,
+KY,State Pac,PAC,,,,
+KY,Issues Committee,PAC,,,,
+KY,Executive Committee,Party Committee,,,,
+KY,Independent Expenditure-Only Committee,Independent Expenditure,,,,
+KY,Inaugural Committee,Other,,,,
+KY,Exploratory Committee,Candidate Committee,,,,
+KY,Contributing Organization,Organization,,,,
+KY,Caucus Campaign Committee,PAC,,,,
+KY,Executive Committee Building Fund,Party Committee,,,,
+# == Maine =====================================================================,,,,,,
+ME,Candidate,Candidate Committee,,,,
+ME,Political Action Committee,PAC,,,,
+ME,Party Committee,Party Committee,,,,
+ME,Ballot Question Committee,Ballot Measure,,,,
+ME,Gubernatorial Transition And Inaugural Committee,Other,,,,
+# Personal financial disclosure filers are not campaign committees — suppressed,,,,,,
+ME,Legislative Personal Filer,,,,,
+ME,Personal Financial Disclosure Filer - Executive,,,,,
+# == Louisiana =================================================================,,,,,,
+# Louisiana does not provide committee_type in bulk CSVs — field is left blank,,,,,,
+# by parser. Filer type (candidate vs PAC) is inferred from FilerFirstName,,,,,,
+# presence, not from a committee_type column. No mappings needed here.,,,,,
+# == Maryland ==================================================================,,,,,,
+MD,Candidate Committee,Candidate Committee,,,,
+MD,Political Action Committee (PAC),PAC,,,,
+MD,Super Political Action Committee (Super PAC),PAC,,,,
+MD,Party Central Committee,Party Committee,,,,
+MD,Legislative Caucus Committee,Party Committee,,,,
+MD,Independent Expenditure,Independent Expenditure,,,,
+MD,Electioneering Communication,Independent Expenditure,,,,
+MD,Ballot Issue Committee,Ballot Measure,,,,
+MD,Slate Committee,Other,,,,
+MD,Out of State (Non Federal) Committee,Other,,,,
+MD,Participating Organizations Committee,Other,,,,
+MD,Public Financing Committee,Other,,,,
+# == Massachusetts ==============================================================,,,,,,
+# Account type codes from all_filers.txt → canonical labels.,,,,,,
+# D/U/Z/z/N/O are candidate-type accounts (various vintages of the registration system).,,,,,,
+MA,Candidate Committee,Candidate Committee,,,,
+MA,PAC,PAC,,,,
+MA,Independent Expenditure,Independent Expenditure,,,,
+MA,Party Committee,Party Committee,,,,
+MA,Ballot Measure,Ballot Measure,,,,
+MA,Other,Other,,,,
+# == Michigan ==================================================================,,,,,,
+# com_type values from transaction files; committee_type labels from entity search,,,,,,
+MI,Candidate,Candidate Committee,,,,
+MI,Political,PAC,,,,
+"# ""Independent"" in MI = committees not affiliated with a candidate or party (non-IE PACs)",,,,,,
+MI,Independent,PAC,,,,
+MI,Caucus,PAC,,,,
+MI,Ballot Question,Ballot Measure,,,,
+MI,Independent Expenditure,Independent Expenditure,,,,
+MI,Qualifying Political Party,Party Committee,,,,
+MI,State Political Party,Party Committee,,,,
+MI,County Political Party,Party Committee,,,,
+MI,District Political Party,Party Committee,,,,
+# == Minnesota =================================================================,,,,,,
+# RegisteredEntityType (PCC/PCF/PTU) is mapped to canonical values at parse time,,,,,,
+# so the per-state DB query works without alias expansion. Aliases here are no-ops,,,,,,
+# for the aggregate DB but kept for completeness.,,,,,,
+MN,Candidate Committee,Candidate Committee,,,,
+MN,PAC,PAC,,,,
+MN,Party Committee,Party Committee,,,,
+# == Mississippi ================================================================,,,,,,
+"# OrganizationType from CandidateNameSearch (entities.json). ""Policical"" is a",,,,,,
+# genuine typo in the source data, not a transcription error on our end.,,,,,
+MS,Candidate Committee,Candidate Committee,,,,
+MS,Political Committee (PAC),PAC,,,,
+MS,Policical Initiative Committee,Ballot Measure,,,,
+# == Pennsylvania ===============================================================,,,,,,
+# committee_type is parser-derived from raw FILERTYPE (1/2/3), not a free-text,,,,,
+# source field — see FILER_TYPE_LABEL in parsers/pennsylvania.py.,,,,,,
+PA,Candidate,Candidate Committee,,,,
+"# FILERTYPE=2 ""Committee"" is PA's single catch-all code for every non-candidate",,,,,,
+# non-lobbyist committee (PACs, party committees, ballot committees) — the,,,,
+# source data doesn't distinguish them further, so PAC is the closest generic,,,,,
+"# bucket. Some ""Committee"" rows are actually a candidate's own money committee",,,,,,
+"# (e.g. ""Shapiro for Pennsylvania"") now correctly linked via candidate_name/",,,,,,
+# person_id (see PA_COMMITTEE_CANDIDATE_OVERRIDE in the parser) but still,,,,,,
+# showing committee_type=PAC here — CA/GA have a precedent aggregate.py,,,,,,
+# override (state=X AND committee_type='PAC' AND candidate_name != '' ->,,,,,,
+# 'Candidate Committee') that hasn't been applied to PA yet; flagged in,,,,,,
+# docs/states/pennsylvania.md, not done in this pass.,,,,,
+PA,Committee,PAC,,,,
+PA,Lobbyist,Other,,,,
+"# FILERTYPE ""4"" is an undocumented raw code (105 rows", <1%) not covered by,,,,,
+# DOS's published FILERTYPE list (1/2/3) — suppressed rather than guessed at.,,,,,,
+PA,4,,,,,
+# == Montana ===================================================================,,,,,,
+# CERS committeeTypeDescr, from the committee search UI's own dropdown options.,,,,,
+MT,Ballot Issue,Ballot Measure,,,,
+MT,Disbanded Montana PAC,PAC,,,,
+MT,Disbanded Montana Party,Party Committee,,,,
+MT,Federal Action,PAC,,,,
+MT,Federal Party,Party Committee,,,,
+MT,Incidental,Organization,,,,
+MT,Incidental - Local Government,Organization,,,,
+MT,Independent,Independent Expenditure,,,,
+MT,Joint Fundraising Committee,PAC,,,,
+MT,Minor Party Qualification,Party Committee,,,,
+MT,Political Party,Party Committee,,,,
+MT,Undetermined,Other,,,,
+# == Ohio ======================================================================,,,,,,
+# Ohio's own committee_type values (assigned by the parser from which File,,,,,,
+# Transfer Page group a committee came from — CAN/PAC/PARTY) are already the,,,,,,
+# canonical labels, so this is an identity mapping.,,,,,
+OH,Candidate Committee,Candidate Committee,,,,
+OH,PAC,PAC,,,,
+OH,Party Committee,Party Committee,,,,
