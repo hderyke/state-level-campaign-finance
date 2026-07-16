@@ -285,3 +285,11 @@ NH,Loan Forgiven,Loan
 # has one of the two," no blanks to fall back on ""Contribution"" in practice).",
 WA,Cash,Monetary
 WA,In-kind,In-Kind
+# == Virginia ==================================================================,,
+"# Only Schedule A's fixed ""Contribution"" value is mapped here. Schedule B (in-kind)",,
+# and Schedule C (other receipts) transaction_type values carry a dynamic,,
+# parenthetical/suffix appended by the parser (ProductOrService / ReceiptType,,
+"# e.g. ""In-Kind Contribution (Website design)"""," ""Other Receipt: Interest Received"")",
+# so they never match a fixed raw string here — intentionally left unmapped,,
+# rather than guessed (see docs/states/virginia.md).,,
+VA,Contribution,Monetary
