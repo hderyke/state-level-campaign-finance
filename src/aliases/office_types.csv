@@ -1,249 +1,288 @@
-state,raw,canonical
-# Office type alias mappings: state-specific raw office values → canonical labels.
-# Used to normalize cross-state office comparisons in the aggregate database.
-# Leave canonical blank to suppress a value from canonical_office lookups.
-#
-# Format: state,raw,canonical
-#   raw       — the exact value as it appears in the candidates/contributions office column
-#               (compared case-insensitively; write any case here)
-#   canonical — a clean cross-state label (e.g. "Governor", "State Representative")
-#
-# Canonical statewide values used across states:
-#   Governor | Lt. Governor | Attorney General | Secretary of State | State Treasurer
-#   State Auditor | State Comptroller | Commissioner of Agriculture | Commissioner of Insurance
-#   Commissioner of Labor | Commissioner of Education | State Representative | State Senator
-#
-# District-specific office names (e.g. "State Representative District: 15") are handled
-# via LIKE patterns in aggregate.py and do not need entries here.
-#
-# == Alaska ====================================================================
-AK,GOVERNOR,Governor
-AK,LT. GOVERNOR,Lt. Governor
-AK,HOUSE,State Representative
-AK,SENATE,State Senator
-#
-# == Alabama ===================================================================
-AL,GOVERNOR,Governor
-AL,LT. GOVERNOR,Lt. Governor
-AL,ATTORNEY GENERAL,Attorney General
-AL,SECRETARY OF STATE,Secretary of State
-AL,STATE TREASURER,State Treasurer
-AL,STATE AUDITOR,State Auditor
-AL,COMMISSIONER OF AGRICULTURE & INDUSTRIES,Commissioner of Agriculture
-AL,STATE REPRESENTATIVE,State Representative
-AL,STATE SENATOR,State Senator
-#
-# == Arkansas ==================================================================
-AR,Governor,Governor
-AR,Lieutenant Governor,Lt. Governor
-AR,Attorney General,Attorney General
-AR,Secretary Of State,Secretary of State
-AR,State Treasurer,State Treasurer
-AR,Auditor Of State,State Auditor
-AR,State Representative,State Representative
-AR,State Senate,State Senator
-#
-# == Arizona ===================================================================
-AZ,Governor,Governor
-AZ,Attorney General,Attorney General
-AZ,Secretary of State,Secretary of State
-AZ,State Treasurer,State Treasurer
-AZ,State Representative,State Representative
-AZ,State Senator,State Senator
-#
-# == California ================================================================
-# CA uses 3-letter abbreviation codes for all offices.
-CA,GOV,Governor
-CA,LTG,Lt. Governor
-CA,ATT,Attorney General
-CA,SOS,Secretary of State
-CA,TRE,State Treasurer
-CA,CON,State Comptroller
-CA,INS,Commissioner of Insurance
-CA,ASM,State Representative
-CA,SEN,State Senator
-#
-# == Colorado ==================================================================
-CO,Governor,Governor
-CO,Lt. Governor,Lt. Governor
-CO,Attorney General,Attorney General
-CO,Secretary of State,Secretary of State
-CO,State Treasurer,State Treasurer
-CO,Colorado House,State Representative
-CO,Colorado Senate,State Senator
-#
-# == Connecticut ===============================================================
-CT,Governor,Governor
-CT,Lieutenant Governor,Lt. Governor
-CT,Attorney General,Attorney General
-CT,Secretary of the State,Secretary of State
-CT,State Treasurer,State Treasurer
-CT,State Comptroller,State Comptroller
-CT,State Representative,State Representative
-CT,State Senator,State Senator
-#
-# == Delaware ==================================================================
-DE,STATE REPRESENTATIVE,State Representative
-DE,STATE SENATOR,State Senator
-#
-# == Florida ===================================================================
-FL,Governor,Governor
-FL,Lt. Governor,Lt. Governor
-FL,Attorney General,Attorney General
-FL,Commissioner of Agriculture,Commissioner of Agriculture
-FL,Commissioner of Education,Commissioner of Education
-FL,State Representative,State Representative
-FL,State Senator,State Senator
-#
-# == Georgia ===================================================================
-# GA stores many offices with "District: X" embedded in the office field.
-# The generic entries below map candidates filed without a district suffix.
-# District-specific variants (e.g. "State Representative District: 15") are
-# handled via LIKE patterns in aggregate.py.
-GA,Governor,Governor
-GA,Lieutenant Governor,Lt. Governor
-GA,Attorney General,Attorney General
-GA,Secretary Of State,Secretary of State
-GA,Commissioner of Agriculture,Commissioner of Agriculture
-GA,Commissioner of Insurance,Commissioner of Insurance
-GA,Commissioner of Labor,Commissioner of Labor
-GA,State Representative,State Representative
-GA,State Senator,State Senator
-#
-# == Hawaii ====================================================================
-HI,GOVERNOR,Governor
-HI,LT. GOVERNOR,Lt. Governor
-HI,HOUSE,State Representative
-HI,SENATE,State Senator
-#
-# == Idaho =====================================================================
-# ID uses both full names and abbreviations; SEAT A/B and POSITION A/B are
-# both seats in the same multi-member district — all map to State Representative.
-ID,GOVERNOR,Governor
-ID,GOV,Governor
-ID,LIEUTENANT GOVERNOR,Lt. Governor
-ID,LT GOV,Lt. Governor
-ID,ATTORNEY GENERAL,Attorney General
-ID,SECRETARY OF STATE,Secretary of State
-ID,STATE TREASURER,State Treasurer
-ID,STATE REPRESENTATIVE,State Representative
-ID,STATE REPRESENTATIVE - SEAT A,State Representative
-ID,STATE REPRESENTATIVE - SEAT B,State Representative
+state,raw,canonical,
+# Office type alias mappings: state-specific raw office values → canonical labels.,,,
+# Used to normalize cross-state office comparisons in the aggregate database.,,,
+# Leave canonical blank to suppress a value from canonical_office lookups.,,,
+#,,,
+# Format: state,raw,canonical,
+#   raw       — the exact value as it appears in the candidates/contributions office column,,,
+#               (compared case-insensitively; write any case here),,,
+"#   canonical — a clean cross-state label (e.g. ""Governor"""," ""State Representative"")",,
+#,,,
+# Canonical statewide values used across states:,,,
+#   Governor | Lt. Governor | Attorney General | Secretary of State | State Treasurer,,,
+#   State Auditor | State Comptroller | Commissioner of Agriculture | Commissioner of Insurance,,,
+#   Commissioner of Labor | Commissioner of Education | State Representative | State Senator,,,
+#,,,
+"# District-specific office names (e.g. ""State Representative District: 15"") are handled",,,
+# via LIKE patterns in aggregate.py and do not need entries here.,,,
+#,,,
+# == Alaska ====================================================================,,,
+AK,GOVERNOR,Governor,
+AK,LT. GOVERNOR,Lt. Governor,
+AK,HOUSE,State Representative,
+AK,SENATE,State Senator,
+#,,,
+# == Alabama ===================================================================,,,
+AL,GOVERNOR,Governor,
+AL,LT. GOVERNOR,Lt. Governor,
+AL,ATTORNEY GENERAL,Attorney General,
+AL,SECRETARY OF STATE,Secretary of State,
+AL,STATE TREASURER,State Treasurer,
+AL,STATE AUDITOR,State Auditor,
+AL,COMMISSIONER OF AGRICULTURE & INDUSTRIES,Commissioner of Agriculture,
+AL,STATE REPRESENTATIVE,State Representative,
+AL,STATE SENATOR,State Senator,
+#,,,
+# == Arkansas ==================================================================,,,
+AR,Governor,Governor,
+AR,Lieutenant Governor,Lt. Governor,
+AR,Attorney General,Attorney General,
+AR,Secretary Of State,Secretary of State,
+AR,State Treasurer,State Treasurer,
+AR,Auditor Of State,State Auditor,
+AR,State Representative,State Representative,
+AR,State Senate,State Senator,
+#,,,
+# == Arizona ===================================================================,,,
+AZ,Governor,Governor,
+AZ,Attorney General,Attorney General,
+AZ,Secretary of State,Secretary of State,
+AZ,State Treasurer,State Treasurer,
+AZ,State Representative,State Representative,
+AZ,State Senator,State Senator,
+#,,,
+# == California ================================================================,,,
+# CA uses 3-letter abbreviation codes for all offices.,,,
+CA,GOV,Governor,
+CA,LTG,Lt. Governor,
+CA,ATT,Attorney General,
+CA,SOS,Secretary of State,
+CA,TRE,State Treasurer,
+CA,CON,State Comptroller,
+CA,INS,Commissioner of Insurance,
+CA,ASM,State Representative,
+CA,SEN,State Senator,
+#,,,
+# == Colorado ==================================================================,,,
+CO,Governor,Governor,
+CO,Lt. Governor,Lt. Governor,
+CO,Attorney General,Attorney General,
+CO,Secretary of State,Secretary of State,
+CO,State Treasurer,State Treasurer,
+CO,Colorado House,State Representative,
+CO,Colorado Senate,State Senator,
+#,,,
+# == Connecticut ===============================================================,,,
+CT,Governor,Governor,
+CT,Lieutenant Governor,Lt. Governor,
+CT,Attorney General,Attorney General,
+CT,Secretary of the State,Secretary of State,
+CT,State Treasurer,State Treasurer,
+CT,State Comptroller,State Comptroller,
+CT,State Representative,State Representative,
+CT,State Senator,State Senator,
+#,,,
+# == Delaware ==================================================================,,,
+DE,STATE REPRESENTATIVE,State Representative,
+DE,STATE SENATOR,State Senator,
+#,,,
+# == Florida ===================================================================,,,
+FL,Governor,Governor,
+FL,Lt. Governor,Lt. Governor,
+FL,Attorney General,Attorney General,
+FL,Commissioner of Agriculture,Commissioner of Agriculture,
+FL,Commissioner of Education,Commissioner of Education,
+FL,State Representative,State Representative,
+FL,State Senator,State Senator,
+#,,,
+# == Georgia ===================================================================,,,
+"# GA stores many offices with ""District: X"" embedded in the office field.",,,
+# The generic entries below map candidates filed without a district suffix.,,,
+"# District-specific variants (e.g. ""State Representative District: 15"") are",,,
+# handled via LIKE patterns in aggregate.py.,,,
+GA,Governor,Governor,
+GA,Lieutenant Governor,Lt. Governor,
+GA,Attorney General,Attorney General,
+GA,Secretary Of State,Secretary of State,
+GA,Commissioner of Agriculture,Commissioner of Agriculture,
+GA,Commissioner of Insurance,Commissioner of Insurance,
+GA,Commissioner of Labor,Commissioner of Labor,
+GA,State Representative,State Representative,
+GA,State Senator,State Senator,
+#,,,
+# == Hawaii ====================================================================,,,
+HI,GOVERNOR,Governor,
+HI,LT. GOVERNOR,Lt. Governor,
+HI,HOUSE,State Representative,
+HI,SENATE,State Senator,
+#,,,
+# == Idaho =====================================================================,,,
+# ID uses both full names and abbreviations; SEAT A/B and POSITION A/B are,,,
+# both seats in the same multi-member district — all map to State Representative.,,,
+ID,GOVERNOR,Governor,
+ID,GOV,Governor,
+ID,LIEUTENANT GOVERNOR,Lt. Governor,
+ID,LT GOV,Lt. Governor,
+ID,ATTORNEY GENERAL,Attorney General,
+ID,SECRETARY OF STATE,Secretary of State,
+ID,STATE TREASURER,State Treasurer,
+ID,STATE REPRESENTATIVE,State Representative,
+ID,STATE REPRESENTATIVE - SEAT A,State Representative,
+ID,STATE REPRESENTATIVE - SEAT B,State Representative,
 ID,STATE REPRESENTATIVE, POSITION A,State Representative
 ID,STATE REPRESENTATIVE, POSITION B,State Representative
-ID,STATE SENATOR,State Senator
-ID,ST SENATOR,State Senator
-#
-# == Illinois ==================================================================
-IL,GOVERNOR,Governor
-IL,LIEUTENANT GOVERNOR,Lt. Governor
-IL,ATTORNEY GENERAL,Attorney General
-IL,SECRETARY OF STATE,Secretary of State
-IL,COMPTROLLER,State Comptroller
-IL,STATE REPRESENTATIVE,State Representative
-IL,REPRESENTATIVE,State Representative
-IL,STATE SENATOR,State Senator
-#
-# == Indiana ===================================================================
-IN,GOVERNOR,Governor
-IN,LT. GOVERNOR,Lt. Governor
-IN,ATTORNEY GENERAL,Attorney General
-IN,SECRETARY OF STATE,Secretary of State
-IN,STATE AUDITOR,State Auditor
-IN,STATE TREASURER,State Treasurer
-IN,STATE REPRESENTATIVE,State Representative
-IN,STATE SENATOR,State Senator
-#
-# == Iowa ======================================================================
-IA,State House,State Representative
-IA,State Senate,State Senator
-#
-# == Kansas ====================================================================
-# KS data includes heavy OCR noise from scanned filings. Many variants of
-# House and Senate are mapped here. Truly unreadable garbage (1-record OCR
-# artifacts) are left unmapped.
-KS,GOVERNOR,Governor
-KS,ATTORNEY GENERAL,Attorney General
-KS,SECRETARY OF STATE,Secretary of State
-KS,STATE TREASURER,State Treasurer
-KS,INSURANCE COMMISSIONER,Commissioner of Insurance
-# KS House / State Representative variants
-KS,HOUSE,State Representative
-KS,HOUSE OF REP,State Representative
-KS,HOUSE OF REPRESENATIVES,State Representative
-KS,HOUSE OF REPRESENTATIVE,State Representative
-KS,HOUSE OF REPRESENTATIVES,State Representative
-KS,HOUSE OF REPRESENTATIVES _,State Representative
-KS,HOUSE OF REPRESENTATIVESX,State Representative
-KS,KANSAS HOUSE,State Representative
-KS,KANSAS HOUSE REPRESENTATIVE,State Representative
-KS,KANSAS HOUSE OF REPRESENTATIVES,State Representative
-KS,KANSAS HOUSE OF REPS,State Representative
-KS,KANSAS HOUSE OF REPS.,State Representative
-KS,KANSAS REPRESENTATIVE,State Representative
-KS,KANSAS STATE REPRESENTATIVE,State Representative
-KS,KS HOUSE OF REPRESENTATIVES,State Representative
-KS,KS STATE REPRESENTATIVE,State Representative
-KS,REPRESENTATIVE,State Representative
-KS,REPRESENTATIVE - KANSAS HOUSE,State Representative
-KS,REPRESENTATIVE -KANSAS HOUSE,State Representative
-KS,REPRESENTATIVE _,State Representative
-KS,SLATE REPRESENTATIVE,State Representative
-KS,STA.TE REPRESENTATIVE,State Representative
-KS,STATE REPRESENTATIVE,State Representative
-KS,STATE REPRESENTATIVE _,State Representative
+ID,STATE SENATOR,State Senator,
+ID,ST SENATOR,State Senator,
+#,,,
+# == Illinois ==================================================================,,,
+IL,GOVERNOR,Governor,
+IL,LIEUTENANT GOVERNOR,Lt. Governor,
+IL,ATTORNEY GENERAL,Attorney General,
+IL,SECRETARY OF STATE,Secretary of State,
+IL,COMPTROLLER,State Comptroller,
+IL,STATE REPRESENTATIVE,State Representative,
+IL,REPRESENTATIVE,State Representative,
+IL,STATE SENATOR,State Senator,
+#,,,
+# == Indiana ===================================================================,,,
+IN,GOVERNOR,Governor,
+IN,LT. GOVERNOR,Lt. Governor,
+IN,ATTORNEY GENERAL,Attorney General,
+IN,SECRETARY OF STATE,Secretary of State,
+IN,STATE AUDITOR,State Auditor,
+IN,STATE TREASURER,State Treasurer,
+IN,STATE REPRESENTATIVE,State Representative,
+IN,STATE SENATOR,State Senator,
+#,,,
+# == Iowa ======================================================================,,,
+IA,State House,State Representative,
+IA,State Senate,State Senator,
+#,,,
+# == Kansas ====================================================================,,,
+# KS data includes heavy OCR noise from scanned filings. Many variants of,,,
+# House and Senate are mapped here. Truly unreadable garbage (1-record OCR,,,
+# artifacts) are left unmapped.,,,
+KS,GOVERNOR,Governor,
+KS,ATTORNEY GENERAL,Attorney General,
+KS,SECRETARY OF STATE,Secretary of State,
+KS,STATE TREASURER,State Treasurer,
+KS,INSURANCE COMMISSIONER,Commissioner of Insurance,
+# KS House / State Representative variants,,,
+KS,HOUSE,State Representative,
+KS,HOUSE OF REP,State Representative,
+KS,HOUSE OF REPRESENATIVES,State Representative,
+KS,HOUSE OF REPRESENTATIVE,State Representative,
+KS,HOUSE OF REPRESENTATIVES,State Representative,
+KS,HOUSE OF REPRESENTATIVES _,State Representative,
+KS,HOUSE OF REPRESENTATIVESX,State Representative,
+KS,KANSAS HOUSE,State Representative,
+KS,KANSAS HOUSE REPRESENTATIVE,State Representative,
+KS,KANSAS HOUSE OF REPRESENTATIVES,State Representative,
+KS,KANSAS HOUSE OF REPS,State Representative,
+KS,KANSAS HOUSE OF REPS.,State Representative,
+KS,KANSAS REPRESENTATIVE,State Representative,
+KS,KANSAS STATE REPRESENTATIVE,State Representative,
+KS,KS HOUSE OF REPRESENTATIVES,State Representative,
+KS,KS STATE REPRESENTATIVE,State Representative,
+KS,REPRESENTATIVE,State Representative,
+KS,REPRESENTATIVE - KANSAS HOUSE,State Representative,
+KS,REPRESENTATIVE -KANSAS HOUSE,State Representative,
+KS,REPRESENTATIVE _,State Representative,
+KS,SLATE REPRESENTATIVE,State Representative,
+KS,STA.TE REPRESENTATIVE,State Representative,
+KS,STATE REPRESENTATIVE,State Representative,
+KS,STATE REPRESENTATIVE _,State Representative,
 KS,STATE REPRESENTATIVE, 118TH,State Representative
-# KS Senate / State Senator variants
-KS,SENATE,State Senator
-KS,SENATE _,State Senator
-KS,SENATE.,State Senator
-KS,KANSAS SENATE,State Senator
-KS,KANSAS STATE SENATE,State Senator
-KS,STATE SENATE,State Senator
-KS,STATE SENATE _,State Senator
-KS,STATE SENATOR,State Senator
-#
-# == Kentucky ==================================================================
-# KY Governor and Lt. Governor run as a joint ticket ("slate") and file as a
-# single combined campaign committee. Their contributions are reported to the
-# slate committee, not to individual officeholder accounts.
-KY,SLATE,Governor/Lt. Governor Ticket
-KY,GOVERNOR,Governor
-KY,LT. GOVERNOR,Lt. Governor
-KY,ATTORNEY GENERAL,Attorney General
-KY,SECRETARY OF STATE,Secretary of State
-KY,STATE TREASURER,State Treasurer
-KY,AUDITOR OF PUBLIC ACCOUNTS,State Auditor
-KY,AGRICULTURE COMMISSIONER,Commissioner of Agriculture
-KY,COMMISSIONER OF AGRICULTURE,Commissioner of Agriculture
-KY,STATE REPRESENTATIVE,State Representative
-KY,STATE SENATOR (ODD),State Senator
-KY,STATE SENATOR (EVEN),State Senator
-KY,MAYOR (J2),Mayor
-KY,CITY COMMISSIONER (J),City Commissioner
-#
-# == Maine =====================================================================
-ME,Representative,State Representative
-ME,Senator,State Senator
-#
-# == Maryland ==================================================================
-# MD Governor and Lt. Governor run together on a joint ticket.
-MD,Governor,Governor
-MD,Lieutenant Governor,Lt. Governor
-MD,Governor/Lieutenant Governor,Governor/Lt. Governor Ticket
-MD,Attorney General,Attorney General
-MD,Comptroller,State Comptroller
-MD,House of Delegates,State Representative
-MD,State Senator,State Senator
-#
-# == Massachusetts =============================================================
-MA,House,State Representative
-MA,Senate,State Senator
-#
-# == Michigan ==================================================================
-MI,Governor,Governor
-MI,Lt. Governor,Lt. Governor
-MI,Attorney General,Attorney General
-MI,Secretary of State,Secretary of State
-MI,Representative in State Legislature,State Representative
-MI,State Senator,State Senator
+# KS Senate / State Senator variants,,,
+KS,SENATE,State Senator,
+KS,SENATE _,State Senator,
+KS,SENATE.,State Senator,
+KS,KANSAS SENATE,State Senator,
+KS,KANSAS STATE SENATE,State Senator,
+KS,STATE SENATE,State Senator,
+KS,STATE SENATE _,State Senator,
+KS,STATE SENATOR,State Senator,
+#,,,
+# == Kentucky ==================================================================,,,
+"# KY Governor and Lt. Governor run as a joint ticket (""slate"") and file as a",,,
+# single combined campaign committee. Their contributions are reported to the,,,
+# slate committee, not to individual officeholder accounts.,,
+KY,SLATE,Governor/Lt. Governor Ticket,
+KY,GOVERNOR,Governor,
+KY,LT. GOVERNOR,Lt. Governor,
+KY,ATTORNEY GENERAL,Attorney General,
+KY,SECRETARY OF STATE,Secretary of State,
+KY,STATE TREASURER,State Treasurer,
+KY,AUDITOR OF PUBLIC ACCOUNTS,State Auditor,
+KY,AGRICULTURE COMMISSIONER,Commissioner of Agriculture,
+KY,COMMISSIONER OF AGRICULTURE,Commissioner of Agriculture,
+KY,STATE REPRESENTATIVE,State Representative,
+KY,STATE SENATOR (ODD),State Senator,
+KY,STATE SENATOR (EVEN),State Senator,
+KY,MAYOR (J2),Mayor,
+KY,CITY COMMISSIONER (J),City Commissioner,
+#,,,
+# == Maine =====================================================================,,,
+ME,Representative,State Representative,
+ME,Senator,State Senator,
+#,,,
+# == Maryland ==================================================================,,,
+# MD Governor and Lt. Governor run together on a joint ticket.,,,
+MD,Governor,Governor,
+MD,Lieutenant Governor,Lt. Governor,
+MD,Governor/Lieutenant Governor,Governor/Lt. Governor Ticket,
+MD,Attorney General,Attorney General,
+MD,Comptroller,State Comptroller,
+MD,House of Delegates,State Representative,
+MD,State Senator,State Senator,
+#,,,
+# == Massachusetts =============================================================,,,
+MA,House,State Representative,
+MA,Senate,State Senator,
+#,,,
+# == Michigan ==================================================================,,,
+MI,Governor,Governor,
+MI,Lt. Governor,Lt. Governor,
+MI,Attorney General,Attorney General,
+MI,Secretary of State,Secretary of State,
+MI,Representative in State Legislature,State Representative,
+MI,State Senator,State Senator,
+#,,,
+# == Washington ==================================================================,,,
+# Top offices by contribution volume (statewide  legislative and the most,,,
+"# common county/city offices) — WA's ""office"" field is otherwise a long",,,
+# freeform tail of local titles (port/school/fire/hospital district,,,
+"# commissioners, etc.) not worth enumerating exhaustively; unmapped values",,,
+# simply pass through uncanonicalized.,,,
+WA,GOVERNOR,Governor,
+WA,LIEUTENANT GOVERNOR,Lt. Governor,
+WA,ATTORNEY GENERAL,Attorney General,
+WA,SECRETARY OF STATE,Secretary of State,
+WA,STATE TREASURER,State Treasurer,
+WA,STATE AUDITOR,State Auditor,
+WA,PUBLIC LANDS COMMISSIONER,Commissioner of Public Lands,
+WA,INSURANCE COMMISSIONER,Commissioner of Insurance,
+WA,SUPERINTENDENT OF PUBLIC INSTRUCTION,Superintendent of Public Instruction,
+WA,PUBLIC UTILITY COMMISSIONER,Public Utility Commissioner,
+WA,STATE REPRESENTATIVE,State Representative,
+WA,STATE SENATOR,State Senator,
+WA,STATE SUPREME COURT JUSTICE,State Supreme Court Justice,
+WA,APPEALS COURT JUDGE,Court of Appeals Judge,
+WA,SUPERIOR COURT JUDGE,Superior Court Judge,
+WA,DISTRICT COURT JUDGE,District Court Judge,
+WA,MUNICIPAL COURT JUDGE,Municipal Court Judge,
+WA,MAYOR,Mayor,
+WA,CITY COUNCIL MEMBER,City Council Member,
+WA,CITY COUNCIL PRESIDENT,City Council President,
+WA,CITY ATTORNEY,City Attorney,
+WA,COUNTY COUNCIL MEMBER,County Council Member,
+WA,COUNTY COMMISSIONER,County Commissioner,
+WA,COUNTY EXECUTIVE,County Executive,
+WA,COUNTY SHERIFF,County Sheriff,
+WA,COUNTY PROSECUTOR,County Prosecutor,
+WA,COUNTY AUDITOR,County Auditor,
+WA,COUNTY ASSESSOR,County Assessor,
+WA,COUNTY TREASURER,County Treasurer,
+WA,COUNTY CLERK,County Clerk,
+WA,PORT COMMISSIONER,Port Commissioner,
+WA,SCHOOL DIRECTOR,School Director,

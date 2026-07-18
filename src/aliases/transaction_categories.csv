@@ -279,3 +279,9 @@ NH,Return Receipt,Refund
 NH,Loan Received,Loan
 NH,Loan Payment,Loan
 NH,Loan Forgiven,Loan
+# == Washington ==================================================================,,
+"# WA contributions.transaction_type is the raw ""cash_or_in_kind"" field",,
+"# (""Cash"" / ""In-kind"" — the only two values observed; every contribution row",,
+# has one of the two," no blanks to fall back on ""Contribution"" in practice).",
+WA,Cash,Monetary
+WA,In-kind,In-Kind
