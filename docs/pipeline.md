@@ -209,7 +209,7 @@ Tier 2 warnings are printed and saved to the report but do not affect the exit c
 
 **Row sampling.** For memory safety, large files are validated on a random sample rather than loading everything into memory. The default sample size is 500,000 rows (tunable via `MAX_SAMPLE_ROWS` at the top of `src/pipeline/validate.py`). Sampling uses reservoir sampling (Algorithm R) so the sample is uniformly random across the full file rather than just the first N rows — important for chronologically ordered files. The total row count is always computed by streaming the full file regardless of sampling. When sampling is active, the terminal output and HTML report note "sampled X of Y rows" for transparency.
 
-**Output.** Each run writes `metadata/{state}_latest.json` with row counts, tier 1 fill rates, tier 2 warnings, enrichment stats, and drift deltas. When running under `orc.py`, the report is also copied to `logs/prod/{run_id}/{state}_validate.json`.
+**Output.** Each run writes `metadata/{state}_latest.json` with row counts, tier 1 fill rates, tier 2 warnings, enrichment stats, and drift deltas. When running under `orc.py`, the report is also copied to `{state}_validate.json` in the run's directory (`logs/prod/{run_id}/` or `logs/daemon/{run_id}/` — see §9).
 
 ### Spot-check queries (`src/pipeline/queries.py`)
 
@@ -349,10 +349,13 @@ Every pipeline stage writes structured events to a JSONL log file. The logging s
 
 ### CF_RUN_ID
 
-The `CF_RUN_ID` environment variable is the thread that ties an entire pipeline run together. It is set by `orc.py` before any subprocesses are spawned and inherited by every stage. Each stage's logger uses it to determine where to write its log:
+The `CF_RUN_ID` environment variable is the thread that ties an entire pipeline run together. It is set by `orc.py` before any subprocesses are spawned and inherited by every stage. A second variable, `CF_DAEMON`, is set only by `ops/daemon.py`. Together they decide where a run's files land:
 
-- **With `CF_RUN_ID`** (orc/cron mode): all stages write to a single shared `logs/prod/{run_id}/log.jsonl`
-- **Without `CF_RUN_ID`** (dev mode, running a component directly): logs go to `logs/dev/{timestamp}-{state}-{operation}.jsonl`
+- **`CF_RUN_ID` set, `CF_DAEMON` not set** (orc mode — a manual `main.py sync`/`reparse`/`push`/`pull`): all stages write to a single shared `logs/prod/{run_id}/log.jsonl`
+- **`CF_RUN_ID` and `CF_DAEMON` both set** (daemon mode — anything run through `ops/daemon.py`, whether cron triggered it or you ran it by hand): same shared-log structure, but under `logs/daemon/{run_id}/log.jsonl` instead, so scheduled runs don't bury one-off manual runs in the same directory
+- **Neither set** (dev mode, running a component directly): logs go to `logs/dev/{timestamp}-{state}-{operation}.jsonl`
+
+The bucket decision lives in one place — `src/reporting.logger.run_dir_for(run_id)` — and everything that writes a side-car file into "the run dir" (query output, validation JSON, `report.html`, `emailer.py`'s run-dir lookup) goes through it, so they can't drift out of sync with where a run's `log.jsonl` actually landed.
 
 ### Event format
 
@@ -366,11 +369,11 @@ Each log line is a JSON object. Every event has four fixed fields: `ts` (ISO 860
 
 ### HTML reports
 
-After a pipeline run completes, `main.py` reads the run's `log.jsonl` and passes it to `src/reporting/log_report.py`, which renders a human-readable HTML summary at `logs/prod/{run_id}/report.html`. The report includes per-state pass/fail status, stage durations, row counts, and any warnings or errors. Report generation can be suppressed with `--no-report`.
+After a pipeline run completes, `main.py` reads the run's `log.jsonl` and passes it to `src/reporting/log_report.py`, which renders a human-readable HTML summary at `report.html` in the run's directory (`logs/prod/{run_id}/` for a manual run, `logs/daemon/{run_id}/` if it went through `ops/daemon.py`). The report includes per-state pass/fail status, stage durations, row counts, and any warnings or errors — and, for runs covering more than one state, per-state tabs so you're not scrolling past states you don't care about to find the one that failed. Report generation can be suppressed with `--no-report`.
 
 ### Reading a failed run
 
-To diagnose a failure, check `logs/prod/{run_id}/log.jsonl` for events with `level: ERROR` or `status: failed`. The `{state}_validate.json` files in the same directory contain the full tiered validation report for each state processed in that run.
+To diagnose a failure, check `log.jsonl` in the run's directory (`logs/prod/{run_id}/` manual, `logs/daemon/{run_id}/` via the daemon) for events with `level: ERROR` or `status: failed`. The `{state}_validate.json` files in the same directory contain the full tiered validation report for each state processed in that run.
 
 ---
 

@@ -129,10 +129,10 @@ After a pipeline run, data is written to the following locations:
 - `data/{State}/{state}.db` — state-level database
 - `data/state-level-cf.db` — master database combining all states
 
-Each run also generates a log and HTML report under `logs/prod/{run_id}/`:
+Each run also generates a log and HTML report under `logs/prod/{run_id}/` (or `logs/daemon/{run_id}/` for runs made through the scheduling wrapper, so scheduled runs don't bury one-off manual ones):
 
 - `log.jsonl` — structured event log for the run
-- `report.html` — human-readable summary of the run
+- `report.html` — human-readable summary of the run, with a tab per state for multi-state runs
 - `{state}_validate.json` — validation report for each state processed
 
 ---
