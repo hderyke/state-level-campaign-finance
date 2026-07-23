@@ -5,6 +5,8 @@ scrapers/new_hampshire.py) into the canonical cleaned schema.
 Input files (data/New Hampshire/raw/), all produced by scrapers/new_hampshire.py:
     receipts_{year}.csv       one bulk file per filing year -- transactionTypeCode=TCON
     expenditures_{year}.csv   one bulk file per filing year -- transactionTypeCode=TEXP
+    entities_candidates.csv   one flat snapshot, all cycles -- the candidate roster export
+                              (ENTITIES_URL, filerTypeCode=CAN); see "Candidate roster" below
 
 Output (data/New Hampshire/cleaned/):
     candidates.csv.gz, committees.csv.gz,
@@ -16,13 +18,18 @@ Output (data/New Hampshire/cleaned/):
 id_model = "committee"
     Filing Entity ID is NH's per-committee registration ID. A candidate who
     runs across multiple cycles appears to register a distinct committee
-    (and therefore a distinct Filing Entity ID) each time -- e.g. sample
-    data shows the same candidate's committee name changing between
-    cycles -- so "committee" grouping (person_id = min Filing Entity ID per
-    (state, candidate_name, office, district), see utils.assign_person_ids)
-    is used to merge those registrations under one person. Since NH's
-    export exposes no office/district data at all (see "No entity roster"
-    below), the grouping in practice reduces to candidate_name alone.
+    (and therefore a distinct Filing Entity ID) each time -- e.g. the
+    candidate roster shows the same candidate/office pair under two
+    different Filing Entity IDs in different Election Cycle rows -- so
+    "committee" grouping (person_id = min Filing Entity ID per (state,
+    candidate_name, office, district), see utils.assign_person_ids) is used
+    to merge those registrations under one person. office/district are now
+    populated from the candidate roster (see "Candidate roster" below) for
+    any filer_id it covers, so the grouping key is meaningful there;
+    transaction-only-backfilled candidates (roster-uncovered filer_ids,
+    e.g. filers outside the roster's cycle/status scope) still have no
+    office/district and the grouping falls back to candidate_name alone
+    for those, as before.
 
 VERIFIED vs ASSUMED:
     Every column mapping below was checked against real sample CSVs (one
@@ -39,17 +46,30 @@ VERIFIED vs ASSUMED:
     genuine rename fails loudly -- file_parse_error + file skipped --
     rather than silently mismapping).
 
-No entity roster:
-    Unlike some states, NH's CFS export API has no separate
-    candidate/committee roster endpoint -- only two data types exist on
-    the Download Data page (Receipts, Expenditures), confirmed against
-    the live page's own DOM. Candidates and committees are therefore
-    entirely backfilled from the two transaction files, keyed by
-    "Filing Entity ID" (-> state_filer_id). This means office, district,
-    party, jurisdiction, incumbent, treasurer_name, city, zip, and active
-    status are ALL unavailable for NH and are written blank in
-    candidates.csv.gz/committees.csv.gz -- not a parsing gap, a genuine
-    absence in the source data as exported.
+Candidate roster (entities_candidates.csv):
+    NH's Download Data page (Receipts, Expenditures) has no entity roster,
+    but a separate API behind the "Search for a Candidate" page
+    (cfs.sos.nh.gov/public/cf/publiccandidate) does -- see
+    scrapers/new_hampshire.py's ENTITIES_URL. It's parsed FIRST (see
+    parse_entities_candidates()) and is treated as authoritative for every
+    filer_id it covers, providing real office, district (Office District
+    Name), jurisdiction (County), party, election_year, treasurer_name,
+    city/zip (falls back from committee address to the candidate's own
+    mailing address when the committee address is blank -- confirmed
+    blank on every sampled roster row), and active status (Filer
+    Status=="Active" -> "1", else "0") -- none of which the transaction
+    files carry at all. candidate_first/candidate_last come directly from
+    the roster's own separate name columns rather than being parsed back
+    out of a combined "Last, First" string.
+
+    This only covers candidate filers (filerTypeCode=CAN) -- PAC/party
+    committees have no roster equivalent and are still entirely backfilled
+    from the two transaction files, keyed by "Filing Entity ID"
+    (-> state_filer_id), exactly as before: office, district, party,
+    jurisdiction, incumbent, treasurer_name, city, zip, and active status
+    are written blank for those, a genuine absence in the source data, not
+    a parsing gap. Candidates outside the roster's cycle/status coverage
+    (if any) fall back the same way.
 
 Column mapping -- receipts_{year}.csv (transactionTypeCode=TCON):
     Filing Entity ID                -> state_filer_id (committees/candidates), joins the two files
@@ -230,6 +250,33 @@ EXPEND_ALIASES = {
     "purpose":            ["transaction description"],
 }
 
+# Candidate-roster export (entities_candidates.csv, from scrapers/
+# new_hampshire.py's ENTITIES_URL) -- confirmed exact header against a real
+# 2,535-row sample response supplied by the user. Name-based resolution,
+# same defensive pattern as the transaction files above.
+ENTITY_ALIASES = {
+    "filer_entity_id":       ["filer entity id"],
+    "registration_type":     ["registration type"],
+    "candidate_first":       ["candidate first name"],
+    "candidate_last":        ["candidate last name"],
+    "committee_name":        ["committee name"],
+    "office_type":           ["office type"],
+    "office":                ["office"],
+    "county":                ["county"],
+    "district":              ["office district name"],
+    "party":                 ["political party"],
+    "election_year":         ["election year"],
+    "candidate_city":        ["candidate mailing address city"],
+    "candidate_state":       ["candidate mailing address state"],
+    "candidate_zip":         ["candidate mailing address zip code"],
+    "committee_city":        ["committee city"],
+    "committee_state":       ["committee state"],
+    "committee_zip":         ["committee zip code"],
+    "treasurer_first":       ["treasurer first name"],
+    "treasurer_last":        ["treasurer last name"],
+    "filer_status":          ["filer status"],
+}
+
 
 def _resolve_headers(fieldnames: list[str], alias_map: dict[str, list[str]]) -> dict[str, str | None]:
     lookup = {_norm_header(h): h for h in fieldnames if h}
@@ -349,6 +396,154 @@ def _year_from_filename(name: str) -> str:
     return m.group(1) if m else ""
 
 
+# ==================== candidate roster (entities) ======================
+#
+# entities_candidates.csv has one extra non-data line before the header --
+# a title/timestamp row, e.g. "FilingEntityDownload  Download as of
+# 2026-07-23 00:14:40" -- confirmed in the real sample file. Detect and
+# skip it by scanning for the real header (containing "Filer Entity Id")
+# rather than assuming it's always exactly line 1, in case NH ever drops it.
+
+def _read_entities_csv(path: Path):
+    with open(path, encoding="utf-8-sig", errors="replace") as f:
+        lines = f.readlines()
+    header_idx = next(
+        (i for i, line in enumerate(lines) if "filer entity id" in line.lower()),
+        None,
+    )
+    if header_idx is None:
+        return None
+    return csv.DictReader(lines[header_idx:])
+
+
+def parse_entities_candidates(log) -> tuple[list[dict], list[dict], set[str]]:
+    """Parse entities_candidates.csv -- the candidate-roster export (see
+    scrapers/new_hampshire.py's ENTITIES_URL) -- into (candidate_dicts,
+    committee_dicts, filer_ids_seen). Roster rows are authoritative:
+    filer_ids_seen is used by _run() to stop receipts/expenditures rows
+    from overwriting roster-sourced office/district/party/etc with blanks.
+
+    Every column mapping below was checked against the real 2,535-row
+    sample -- every row has Registration Type "Candidate" and Filer Status
+    "Active" (this endpoint is called with filerTypeCode=CAN,
+    accountStatus=FACT -- see scrapers/new_hampshire.py); "Committee Name"
+    and "Candidate Committee Name" were blank on every sampled row, so
+    committee_name always falls back to the candidate's own name here
+    (candidates don't appear to register a separate campaign-brand name
+    visible on this grid, unlike the receipts file's Committee Name --
+    see module docstring). "Total Raised New"/"Total Spent New" are
+    aggregate totals for that filer/cycle, not per-transaction rows, so
+    they're not mapped to any canonical column (contributions.csv.gz/
+    expenditures.csv.gz are already per-transaction from the transaction
+    files) -- kept out rather than double-counted or misrepresented as a
+    single transaction.
+
+    Filer Entity Id is NOT always unique per row in this export -- the same
+    id can repeat across multiple Election Cycle rows (confirmed: e.g. a
+    special-election row and a regular-cycle row sharing one id). Rows are
+    processed in file order and the last one wins per filer_id, same
+    last-write-wins convention used elsewhere in this parser; this only
+    discards a redundant duplicate cycle-year for the same committee, not
+    a distinct filer.
+    """
+    path = RAW_DIR / "entities_candidates.csv"
+    cand_rows: list[dict] = []
+    comm_rows: list[dict] = []
+    filer_ids: set[str] = set()
+    if not path.exists():
+        return cand_rows, comm_rows, filer_ids
+
+    reader = _read_entities_csv(path)
+    if reader is None or not reader.fieldnames:
+        log.file_parse_error(filename=path.name,
+                             error="could not find header row (looked for "
+                                   "'Filer Entity Id') -- file may be empty or truncated")
+        return cand_rows, comm_rows, filer_ids
+
+    resolved = _resolve_headers(reader.fieldnames, ENTITY_ALIASES)
+    if not resolved.get("filer_entity_id") or not resolved.get("candidate_last"):
+        log.file_parse_error(
+            filename=path.name,
+            error=f"could not resolve filer_entity_id/candidate_last columns in "
+                 f"header {reader.fieldnames!r} -- check ENTITY_ALIASES",
+        )
+        return cand_rows, comm_rows, filer_ids
+
+    cand_by_id: dict[str, dict] = {}
+    comm_by_id: dict[str, dict] = {}
+    rows_in = rows_out = 0
+
+    for row in reader:
+        rows_in += 1
+        filer_id = _clean(_get(row, resolved, "filer_entity_id"))
+        if not filer_id:
+            continue
+
+        registration_type = _clean(_get(row, resolved, "registration_type")).lower()
+        if registration_type != "candidate":
+            # Not expected given filerTypeCode=CAN, but fail safe rather
+            # than silently mis-typing a non-candidate row as one.
+            continue
+
+        cand_first = _clean(_get(row, resolved, "candidate_first"))
+        cand_last  = _clean(_get(row, resolved, "candidate_last"))
+        if not cand_first and not cand_last:
+            continue
+        candidate_name = utils.clean_name(
+            f"{cand_last}, {cand_first}" if cand_first else cand_last)
+
+        election_year = _clean(_get(row, resolved, "election_year"))
+        county   = _clean(_get(row, resolved, "county"))
+        district = _clean(_get(row, resolved, "district"))
+
+        cand_by_id[filer_id] = {
+            "state": STATE, "person_id": "",
+            "candidate_name": candidate_name,
+            "candidate_first": cand_first,
+            "candidate_last": cand_last,
+            "office": _clean(_get(row, resolved, "office")),
+            "canonical_office": "",
+            "district": district,
+            "jurisdiction": county,
+            "party": _clean(_get(row, resolved, "party")),
+            "election_year": election_year,
+            "incumbent": "",
+            "state_filer_id": filer_id,
+            "raw_file": path.name, "row_num": rows_in + 1,
+        }
+
+        committee_name = _clean(_get(row, resolved, "committee_name")) or candidate_name
+        treasurer_name = utils.clean_name(" ".join(
+            p for p in (_clean(_get(row, resolved, "treasurer_first")),
+                       _clean(_get(row, resolved, "treasurer_last"))) if p))
+        city = (_clean(_get(row, resolved, "committee_city"))
+               or _clean(_get(row, resolved, "candidate_city")))
+        zip_raw = (_clean(_get(row, resolved, "committee_zip"))
+                  or _clean(_get(row, resolved, "candidate_zip")))
+        filer_status = _clean(_get(row, resolved, "filer_status"))
+
+        comm_by_id[filer_id] = {
+            "state": STATE, "person_id": "",
+            "committee_name": committee_name,
+            "committee_type": "Candidate Committee",
+            "election_year": election_year,
+            "candidate_name": candidate_name,
+            "treasurer_name": treasurer_name,
+            "city": city,
+            "zip": utils.clean_zip(_clean_zip_raw(zip_raw)),
+            "active": "1" if filer_status.lower() == "active" else "0",
+            "state_filer_id": filer_id,
+            "raw_file": path.name, "row_num": rows_in + 1,
+        }
+        rows_out += 1
+
+    cand_rows = list(cand_by_id.values())
+    comm_rows = list(comm_by_id.values())
+    filer_ids = set(cand_by_id.keys()) | set(comm_by_id.keys())
+    log.file_parsed(path.name, "candidates+committees", rows_out, skipped=rows_in - rows_out)
+    return cand_rows, comm_rows, filer_ids
+
+
 # ========================== run ==========================================
 
 def run():
@@ -370,12 +565,22 @@ def run():
 
 def _run(log, t0: float):
 
-    committees_by_filer: dict[str, dict] = {}
-    candidates_by_filer: dict[str, dict] = {}
+    # -- 0. Candidate roster (entities_candidates.csv) -- authoritative --
+    log.info("  Parsing candidate roster...")
+    roster_cand_rows, roster_comm_rows, roster_filer_ids = parse_entities_candidates(log)
+    committees_by_filer: dict[str, dict] = {r["state_filer_id"]: r for r in roster_comm_rows}
+    candidates_by_filer: dict[str, dict] = {r["state_filer_id"]: r for r in roster_cand_rows}
+    log.info(f"    -> {len(roster_cand_rows):,} candidates, {len(roster_comm_rows):,} "
+            f"committees from the roster")
 
     def upsert_committee(filer_id, committee_name, committee_type, candidate_name,
                          election_year, raw_file, row_num):
         if not filer_id or not committee_name:
+            return
+        if filer_id in roster_filer_ids:
+            # Roster data (office/district/party/treasurer/city/zip/active)
+            # is authoritative -- don't let a transaction row, which only
+            # ever carries name/type, blank any of that out.
             return
         committees_by_filer[filer_id] = {
             "state": STATE, "person_id": "",
@@ -392,6 +597,8 @@ def _run(log, t0: float):
     def upsert_candidate(filer_id, candidate_name, candidate_first, candidate_last,
                          election_year, raw_file, row_num):
         if not filer_id or not candidate_name:
+            return
+        if filer_id in roster_filer_ids:
             return
         candidates_by_filer[filer_id] = {
             "state": STATE, "person_id": "",
@@ -599,7 +806,7 @@ def _run(log, t0: float):
 
     log.info(f"    -> {expend_count:,} expenditures total")
 
-    # -- 3. Write candidates/committees (backfilled from both files) ------
+    # -- 3. Write candidates/committees (roster + transaction backfill) ---
     cand_rows = list(candidates_by_filer.values())
     comm_rows = list(committees_by_filer.values())
 

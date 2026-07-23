@@ -35,9 +35,21 @@ see that module's docstring.
 
 For each filing year in scope and each of the two transaction types
 (receipts/expenditures), POST the body above and save the raw CSV
-response to disk. There is no separate entity/candidate roster export on
-this API -- candidates and committees are backfilled from the transaction
-files themselves (see parsers/new_hampshire.py).
+response to disk.
+
+There IS a separate candidate roster export -- a different API
+(ENTITIES_URL, api/PublicGridDownload/DownloadPublicGridData) behind the
+"Search for a Candidate" page at
+https://cfs.sos.nh.gov/public/cf/publiccandidate, confirmed directly
+against the user's own browser Network tab (copy-as-cURL) plus a real
+sample CSV response (2,535 rows). It's fetched as a single flat snapshot
+per run (not one-per-year like receipts/expenditures -- the request has no
+year parameter), and gives real office/district/county/party/treasurer/
+address/status data per candidate that the transaction files alone don't
+carry (see ENTITIES_FILTER below and parsers/new_hampshire.py for how it's
+merged with the receipts/expenditures-backfilled records). PAC/party
+committees still have no separate roster and are still backfilled
+entirely from the transaction files (see parsers/new_hampshire.py).
 
 ## Year range
 
@@ -112,6 +124,66 @@ TRANSACTION_GROUPS = [
 
 MIN_YEAR = 2016   # earliest year listed on the live Download Data page (2026-07-21 snapshot)
 
+# ------------------------- candidate roster (entities) ---------------------
+#
+# A second, separate CFS API confirmed directly against the user's own
+# browser Network tab (copy-as-cURL) -- NOT the same endpoint as the
+# receipts/expenditures export above. This one drives the "Search for a
+# Candidate" grid at https://cfs.sos.nh.gov/public/cf/publiccandidate and
+# doubles as a bulk CSV export of that grid when "type":"CSV" is passed in
+# the body -- confirmed against a real sample response (2,535 rows,
+# filerTypeCode=CAN/accountStatus=FACT, spanning election cycles 2016-2026)
+# supplied directly by the user, not assumed. Unlike the receipts/
+# expenditures export, this is a single flat snapshot of every active
+# candidate filing -- there's no per-year request parameter, so it's fetched
+# once per run as one file (see ENTITIES_FILENAME below), not looped per year.
+ENTITIES_URL = "https://cfsapi.sos.nh.gov/api/PublicGridDownload/DownloadPublicGridData"
+
+ENTITIES_FILENAME = "entities_candidates.csv"
+
+# The exact filter object captured from the live page's own request (with a
+# candidate search and no manual filters applied) -- reused verbatim rather
+# than reverse-engineered. "pageSize": 10 is the grid's on-screen page size;
+# confirmed it's ignored server-side when "type" is "CSV" (the sample
+# response has all 2,535 matching rows, not 10), so no pagination loop is
+# needed. "electionCycle" is a fixed CSV of internal cycle ids -- the exact
+# string the page itself sends for "no cycle filter selected" (i.e. every
+# cycle); NH exposes no lookup for what each id means, so this is carried
+# forward unchanged rather than guessed at or reconstructed from year values.
+# "accountStatus": "FACT" scopes to active filers only (every sampled row is
+# Filer Status=Active); older/withdrawn candidacies under a different status
+# code, if any exist, are out of scope here -- unconfirmed, not guessed.
+ENTITIES_FILTER = {
+    "pageNumber": 1,
+    "pageSize": 10,
+    "sortBy": "FilerName",
+    "sortType": "asc",
+    "filerTypeCode": "CAN",
+    "filerSearchTypeCode": "CAN",
+    "filerSubTypeCode": None,
+    "filerName": None,
+    "politicalPartyCode": None,
+    "officeSought": None,
+    "totalRaisedMax": None,
+    "totalRaisedMin": None,
+    "totalSpentMax": None,
+    "totalSpentMin": None,
+    "accountStatus": "FACT",
+    "officeType": None,
+    "electionCycle": ("0,1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,"
+                      "21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,"
+                      "110,111,112,113,114"),
+    "county": None,
+    "CommitteeMakingIE": "",
+}
+
+ENTITIES_BODY = {
+    "publicGridName": "FilingEntitiesPublicGrid",
+    "candidateCommitteeSearchFilter": ENTITIES_FILTER,
+    "type": "CSV",
+    "openInNewTab": False,
+}
+
 SESSION_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
@@ -177,6 +249,23 @@ def _download_one(session, year: int, type_code: str, dest: Path) -> tuple[int, 
     return len(content), n_rows
 
 
+def _download_candidates(session, dest: Path) -> tuple[int, int]:
+    """POST the candidate-roster export request (ENTITIES_BODY) and write the
+    raw CSV response to dest. Returns (bytes_written, row_count).
+
+    Unlike _download_one's response, this CSV has one extra non-data line
+    before the header -- a title/timestamp row, e.g. "FilingEntityDownload
+    Download as of 2026-07-23 00:14:40" -- confirmed in the user's real
+    sample response, so the row count subtracts 2 (title + header) instead
+    of 1."""
+    r = session.post(ENTITIES_URL, json=ENTITIES_BODY, timeout=180)
+    r.raise_for_status()
+    content = r.content
+    dest.write_bytes(content)
+    n_rows = max(content.count(b"\n") - 2, 0)
+    return len(content), n_rows
+
+
 # ============================== run ====================================
 
 def run(
@@ -194,17 +283,28 @@ def run(
     Download New Hampshire campaign finance data from the CFS export API.
 
     Horizontal scope:
-        (no flag)          both receipts and expenditures
-        --transactions     same as no flag (kept for CLI consistency)
+        (no flag)          receipts + expenditures + candidate roster
+        --transactions     receipts + expenditures only (no candidate roster)
         --contributions    receipts (TCON) only
         --expenditures     expenditures (TEXP) only
         --entities / --candidates / --committees
-                           no-op -- NH's export API has no separate
-                           entity/candidate roster; candidates and
-                           committees are backfilled at parse time from
-                           the receipts/expenditures files themselves.
+                           candidate roster only (ENTITIES_URL -- see module
+                           docstring). One request covers every active
+                           candidate/committee across all election cycles;
+                           there's no year scoping for this file, so
+                           --start-year/--end-year/--force don't affect it.
+                           NH's roster endpoint only exposes candidate
+                           filers (filerTypeCode=CAN) -- --committees is
+                           kept as a distinct flag for CLI consistency with
+                           other scrapers, but fetches the same file, since
+                           a candidate's own committee info (name,
+                           treasurer, address) is embedded in each roster
+                           row rather than exposed as a separate PAC/party
+                           roster. PAC/party committees are still backfilled
+                           at parse time from receipts/expenditures only.
 
-    Vertical scope:
+    Vertical scope (receipts/expenditures only -- the candidate roster is
+    always fetched fresh in full when in scope, see above):
         (no flag)          incremental -- every year before the current
                            year is skipped if already on disk; the
                            current year is always re-fetched
@@ -220,16 +320,7 @@ def run(
                                   candidates, committees])
     do_receipts        = do_all or transactions or contributions
     do_expenditures     = do_all or transactions or expenditures
-    do_entities_only    = (entities or candidates or committees) and not (do_receipts or do_expenditures)
-
-    if do_entities_only:
-        log.info("  NH's export API has no separate entity/candidate roster -- "
-                 "nothing to fetch for --entities/--candidates/--committees. "
-                 "Candidates and committees are backfilled from receipts/expenditures "
-                 "at parse time.")
-        log._emit("scrape_completed", status="completed",
-                  duration_s=round(time.perf_counter() - t0, 1), files_ok=0, files_err=0)
-        return
+    do_entities         = do_all or entities or candidates or committees
 
     cur_year = date.today().year
     lo = start_year if start_year is not None else MIN_YEAR
@@ -264,6 +355,29 @@ def run(
         done = {} if force else load_manifest()
         if force:
             strip_manifest(lambda _: False)
+
+        if do_entities:
+            # Single flat snapshot, not year-scoped -- always re-fetched in
+            # full on every run regardless of --force/--start-year/--end-year
+            # (there's no per-year request param on this endpoint, and the
+            # roster reflects live filer status, so a stale cached copy is
+            # worse than just re-downloading the ~700KB response).
+            dest = RAW_DIR / ENTITIES_FILENAME
+            log.file_download_start(filename=ENTITIES_FILENAME)
+            t_file = time.perf_counter()
+            try:
+                n_bytes, n_rows = _download_candidates(session, dest)
+                log.file_download_ok(filename=ENTITIES_FILENAME, bytes=n_bytes, rows=n_rows,
+                                     duration_s=round(time.perf_counter() - t_file, 2))
+                upsert_manifest({
+                    "type": "candidates", "year": "", "filename": ENTITIES_FILENAME,
+                    "bytes": n_bytes, "rows": n_rows, "downloaded_at": today_str,
+                }, done)
+                files_ok += 1
+            except Exception as e:
+                log.file_download_error(filename=ENTITIES_FILENAME, error=str(e))
+                files_err += 1
+            time.sleep(0.3)
 
         for type_code, slug, label in TRANSACTION_GROUPS:
             if slug == "receipts" and not do_receipts:
@@ -339,12 +453,12 @@ if __name__ == "__main__":
     ap.add_argument("--end-year", type=int, metavar="YYYY",
                     help="only fetch years <= YYYY")
 
-    ap.add_argument("--entities",      action="store_true", help="no-op -- see module docstring")
+    ap.add_argument("--entities",      action="store_true", help="candidate roster only -- see module docstring")
     ap.add_argument("--transactions",  action="store_true", help="receipts + expenditures")
     ap.add_argument("--contributions", action="store_true", help="receipts (TCON) only")
     ap.add_argument("--expenditures",  action="store_true", help="expenditures (TEXP) only")
-    ap.add_argument("--candidates",    action="store_true", help="no-op -- see module docstring")
-    ap.add_argument("--committees",    action="store_true", help="no-op -- see module docstring")
+    ap.add_argument("--candidates",    action="store_true", help="same as --entities")
+    ap.add_argument("--committees",    action="store_true", help="same as --entities -- see module docstring")
 
     args, _ = ap.parse_known_args()
 
