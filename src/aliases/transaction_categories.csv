@@ -265,3 +265,17 @@ OH,31-A  Stmt of Contribution,Monetary
 OH,31-E FR Contributions,Monetary
 OH,31-J-1 In-Kind Cont Rcvd,In-Kind
 OH,31-A-2  Other Income,Other
+# == New Hampshire =============================================================,,
+"# NH receipts file: Transaction Type is mostly the uninformative ""Receipt"" --",,
+# the real distinction lives in Transaction Sub Type. The parser uses Sub Type,,
+"# when Type==""Receipt"" and Sub Type is non-blank", else falls back to Type itself,
+# (Return Receipt/Loan Received/Loan Payment/Loan Forgiven all carry blank Sub Type).,,
+NH,Itemized Monetary,Monetary
+NH,Unitemized Monetary,Monetary
+NH,Monetary Contribution,Monetary
+NH,In-Kind (Non-Money),In-Kind
+NH,Interest,Other
+NH,Return Receipt,Refund
+NH,Loan Received,Loan
+NH,Loan Payment,Loan
+NH,Loan Forgiven,Loan
