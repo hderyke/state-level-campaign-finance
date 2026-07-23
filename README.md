@@ -104,21 +104,7 @@ python3 src/main.py --daemon sync all                     # full run, silent mod
 
 ### S3 Data Sync
 
-Sync data to and from S3 without running the pipeline. Push is a separate step you run after `sync`/`reparse` finishes — it doesn't happen automatically. To grab or upload just the master database:
-
-```bash
-python3 src/main.py pull db
-python3 src/main.py push db
-```
-
-Or pull data for specific states, or push your own:
-
-- `pull <states|all|db>` — download state data or master DB from S3
-- `push <states|all|db>` — upload state data or master DB to S3
-
-Pushing a state uploads its `.db` file plus zipped `raw/` and `cleaned/` directories under `data/{State}/`, and publishes that state's latest report, validation results, and manifest under `metadata/latest/{State}/` (and `metadata/successful/{State}/` too, if the last validation run passed).
-
-> **Note:** AWS credentials are required. See [docs/pipeline.md](docs/pipeline.md) for setup details.
+The `push` and `pull` commands sync state data and the master database to and from S3. **They depend on `cloud/s3.py`, a personal AWS backend that is not included in this repo** — running `push`/`pull` on a fresh clone exits with a "bring your own bucket" message. To use them you'll need your own S3 bucket and a compatible `cloud/s3.py` implementation. See [docs/pipeline.md](docs/pipeline.md) for the expected interface. The core pipeline (`sync`/`reparse`) works fully without any of this.
 
 ### Output
 
@@ -201,7 +187,7 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 2. **Create parser**: `src/pipeline/parsers/{state}.py`
 3. **Test & validate**: `python3 src/pipeline/validate.py {state}`
 4. **Register**: Add state to the main orchestrator
-5. **Upload**: Push to master db and repo
+5. **Document & commit**: Add `docs/states/{state}.md` and alias mappings, then commit to the repo
 
 ---
 
@@ -224,7 +210,7 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 | Illinois (IL) | ✅ | ✅ | Full-history flat files updated nightly; large |
 | Indiana (IN) | ✅ | ✅ | Bulk ZIP by year; entity sweep via CommitteeDetail pages |
 | Iowa (IA) | ✅ | ✅ | Individual PDFs via IECDB API |
-| Kansas (KS) | ✅ | ✅ | Individual PDFs from KPDC static index pages; name_hash ID; no party data in source |
+| Kansas (KS) | 🚧 | 🚧 | In development — a `kansas_v2` rewrite is underway (see `kansas_v2.py`). The original `kansas.py` works (individual PDFs from KPDC static index pages, name_hash ID, no party data in source) but is being superseded; treat output as provisional |
 | Kentucky (KY) | ✅ | ✅ | KREF flat CSV exports; per-party candidate exports for party data; per-year contributions + expenditures; name_hash ID |
 | Louisiana (LA) | ✅ | ✅ | Bulk CSVs in 4-year ranges; no committee_type in source; person_id from stable FilerNumber |
 | Maine (ME) | ⚠️ | ⚠️ | In progress; occupation/employer enrichment requires a per-transaction detail-page scrape via Playwright (~400K pages) |
@@ -232,8 +218,23 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 | Massachusetts (MA) | ✅ | ✅ | Direct download from Azure Blob Storage (OCPF); committee person_id = min CPF ID per (candidate_name, office, district) |
 | Michigan (MI) | ✅ | ✅ | REST/JSON API for transactions + HTMX session search for entities (MiTN); committee person_id = min cfr_com_id per (candidate_name, office, district) |
 | Minnesota (MN) | ✅ | ✅ | Bulk CSVs + viewer API for entities (WAF blocks datacenter IPs for entity POSTs); contributor_state inferred from ZIP prefix |
-| Mississippi (MS) | ✅ | ✅ | Playwright required (WAF blocks non-browser traffic, not just datacenter IPs); GUID-based filer IDs; candidate↔committee linking via name-token + office-tiebreak heuristic (no shared filer ID between the two in source data) |
+| Mississippi (MS) | ✅ | ✅ | Done, but **no 2024–2026 data** — MS doesn't mandate e-filing until 2027, so recent paper filings aren't yet digitized (see [Notes](#notes-on-specific-states)). Playwright required (WAF blocks non-browser traffic); GUID-based filer IDs; candidate↔committee linking via name-token + office-tiebreak heuristic |
+| Montana (MT) | 🚧 | 🚧 | In development — source fully documented (`docs/states/montana.md`, reverse-engineered CERS AJAX API), but the scraper/parser are not yet implemented in the pipeline |
+| Ohio (OH) | ✅ | ✅ | Bulk CSV files via curl_cffi (browser TLS impersonation); validated end-to-end for the Candidate Committee group — PAC/Party groups not yet sampled |
 | Pennsylvania (PA) | ✅ | ✅ | Plain HTTP zip-per-year download (2000–present, ~25M contribution rows); no shared filer ID between a candidate and their own money committee in source data — hand-verified override table links the largest statewide committees, smaller ones remain unlinked |
+| Washington (WA) | 🚧 | 🚧 | In development — draft scraper/parser, not yet validated; no alias mappings or state doc yet |
 
-**Key:** ✅ Done &nbsp; ⚠️ Partial / known issues &nbsp; ❌ Broken
+**Key:** ✅ Done &nbsp; 🚧 In development &nbsp; ⚠️ Partial / known issues &nbsp; ❌ Broken
+
+---
+
+### Notes on specific states
+
+**Mississippi — the 2024–2026 data gap.** Mississippi is fully implemented and validated, but if you query it you'll notice contributions and expenditures cut off cleanly after 2023, with recent years all but empty. This is **not** a scraper bug. It was investigated by querying the live source API directly with explicit date ranges, which returns the same near-empty result — ruling out silent truncation. The root cause is state law: Mississippi does not require electronic filing until **January 1, 2027** ([HB1334, 2025 Regular Session](https://legiscan.com/MS/bill/HB1334/2025)). Until then, candidates and committees may file on paper, and those filings aren't reliably transcribed into the searchable system this pipeline reads from. The window should backfill naturally once mandatory e-filing begins; re-scrapes after that date should be checked for a sudden jump in 2024–2026 coverage. Full detail in [docs/states/mississippi.md](docs/states/mississippi.md).
+
+**Kansas, Montana, and Washington — in development.** These are not production-ready and their output (if any) should be treated as provisional:
+
+- **Kansas** has a working original scraper/parser (`kansas.py`) but is mid-rewrite — `kansas_v2.py` is the in-progress replacement.
+- **Montana** has its source fully reverse-engineered and documented (`docs/states/montana.md`), but the scraper and parser are not yet wired into the pipeline.
+- **Washington** has a draft scraper and parser that have not been validated end-to-end, and it has no alias mappings or state documentation yet.
 
