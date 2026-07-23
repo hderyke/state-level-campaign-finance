@@ -104,6 +104,18 @@ def _to_abbr(name: str) -> str:
     return _NAME_TO_ABBR.get(name.lower(), name.upper())
 
 
+def _target_key(raw: str) -> str:
+    """Canonical push/pull target key. Push/pull events log `state` inconsistently
+    — push_started/push_completed use the abbreviation, file_pushed/file_deleted
+    use the full lowercase name — so grouping directly on the raw value silently
+    splits one state's events into two separate targets ("AK" and "alaska").
+    Route everything through _to_abbr so both forms land in the same bucket;
+    "all"/"db"/"global" pass through unchanged since they aren't states."""
+    if raw in ("all", "db", "global"):
+        return raw
+    return _to_abbr(raw)
+
+
 # == Event parsing ==============================================================
 
 def load_events(path: Path) -> list[dict]:
@@ -310,7 +322,7 @@ def build_report(events: list[dict]) -> dict:
         elif op == "push":
             r["report_type"] = "push"
             if st:
-                tgt = st
+                tgt = _target_key(st)
             else:
                 if _push_global_tgt is None and t == "push_started":
                     _push_global_tgt = e.get("target", "global")
@@ -354,7 +366,7 @@ def build_report(events: list[dict]) -> dict:
         elif op == "pull":
             r["report_type"] = "pull"
             if st:
-                tgt = st
+                tgt = _target_key(st)
             else:
                 if _pull_global_tgt is None and t == "pull_started":
                     _pull_global_tgt = e.get("target", "global")
@@ -677,6 +689,45 @@ td.right { color: #e6edf3; }
 }
 .aggregate-header .state-name { font-size: 16px; font-weight: 600; color: #e6edf3; flex: 1; }
 .aggregate-body { padding: 16px 20px; }
+
+/* == Tab navigation (per-state, when a run covers more than one) == */
+.tab-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+.tab-btn {
+    appearance: none;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    background: #161b22;
+    color: #8b949e;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.tab-btn:hover { color: #c9d1d9; border-color: #484f58; }
+.tab-btn.active { background: #1c2128; color: #e6edf3; border-color: #58a6ff; }
+.tab-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-left: 7px;
+}
+.tab-dot.ok      { background: #56d364; }
+.tab-dot.err     { background: #f85149; }
+.tab-dot.warn    { background: #e3b341; }
+.tab-dot.neutral { background: #484f58; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* == Fixed section below tabs (aggregate / db push) == */
+.below-tabs { margin-top: 4px; }
 """
 
 
@@ -1091,6 +1142,43 @@ def render_validate_report(vr: dict) -> str:
 </div>'''
 
 
+TAB_SCRIPT = '''<script>
+function showTab(key) {
+    document.querySelectorAll('.tab-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.tab === key);
+    });
+    document.querySelectorAll('.tab-panel').forEach(function(p) {
+        p.classList.toggle('active', p.dataset.tab === key);
+    });
+}
+</script>'''
+
+
+def render_tabs(entries: list[tuple[str, str, str, str]]) -> str:
+    """entries: list of (key, label, status, panel_html), one per state.
+
+    Renders a clickable tab bar (label + pass/fail dot) with one panel visible
+    at a time, first entry active by default. A single-entry run (e.g. one
+    state) skips the tab chrome entirely and just renders that panel — tabs
+    only earn their keep once there's more than one thing to switch between.
+    """
+    if not entries:
+        return ""
+    if len(entries) == 1:
+        return entries[0][3]
+
+    nav_btns = ""
+    panels   = ""
+    for i, (key, label, status, panel_html) in enumerate(entries):
+        active  = " active" if i == 0 else ""
+        dot     = f'<span class="tab-dot {status_class(status)}"></span>' if status else ""
+        nav_btns += (f'<button type="button" class="tab-btn{active}" data-tab="{h(key)}" '
+                     f'onclick="showTab(\'{h(key)}\')">{h(label)}{dot}</button>')
+        panels   += f'<div class="tab-panel{active}" data-tab="{h(key)}">{panel_html}</div>'
+
+    return f'<div class="tab-nav">{nav_btns}</div><div class="tab-panels">{panels}</div>'
+
+
 def render_query_output(query_text: str) -> str:
     """Render captured test_queries output as a collapsible terminal window."""
     if not query_text or not query_text.strip():
@@ -1416,7 +1504,20 @@ def render_html_push_pull(report: dict, source_path: Path) -> str:
   </div>
 </div>'''
 
-    target_cards = "".join(render_push_target(k, targets[k]) for k in tgt_order)
+    # Individual states get their own tab (mirrors the sync report); db/all/
+    # global targets aren't per-state, so they render as fixed cards below
+    # the tab block instead of competing for a tab slot.
+    state_keys = [k for k in tgt_order if k not in ("all", "db", "global")]
+    other_keys = [k for k in tgt_order if k in ("all", "db", "global")]
+
+    tab_entries = [
+        (k, _to_abbr(k), targets[k].get("completed", {}).get("status", ""),
+         render_push_target(k, targets[k]))
+        for k in state_keys
+    ]
+    state_html  = render_tabs(tab_entries)
+    other_html  = "".join(render_push_target(k, targets[k]) for k in other_keys)
+    below_html  = f'<div class="below-tabs">{other_html}</div>' if (state_html and other_html) else other_html
 
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     footer = (f'<p style="text-align:center;color:#484f58;font-size:12px;margin-top:32px">'
@@ -1429,11 +1530,13 @@ def render_html_push_pull(report: dict, source_path: Path) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{h(run_id)}</title>
 <style>{CSS}</style>
+{TAB_SCRIPT}
 </head>
 <body>
 <div class="page">
 {header_html}
-{target_cards}
+{state_html}
+{below_html}
 {footer}
 </div>
 </body>
@@ -1482,14 +1585,18 @@ def render_html(report: dict, source_path: Path, run_dir: Path | None = None) ->
     validate_reports = load_validate_reports(run_dir, state_order)
     query_outputs    = load_query_outputs(run_dir, state_order)
 
-    state_cards = ""
+    tab_entries = []
     for name in state_order:
         vr = validate_reports.get(name)
         qo = query_outputs.get(name)
-        state_cards += render_state(name, report["states"][name],
-                                    validate_report=vr, query_output=qo)
+        status = report["states"][name].get("status", "")
+        panel  = render_state(name, report["states"][name],
+                              validate_report=vr, query_output=qo)
+        tab_entries.append((name, name.title(), status, panel))
+    state_html = render_tabs(tab_entries)
 
     agg_html = render_aggregate(report.get("aggregate", {}))
+    below_html = f'<div class="below-tabs">{agg_html}</div>' if (state_html and agg_html) else agg_html
 
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     footer = f'<p style="text-align:center;color:#484f58;font-size:12px;margin-top:32px">Generated {generated} · {h(source_path.name)}</p>'
@@ -1501,12 +1608,13 @@ def render_html(report: dict, source_path: Path, run_dir: Path | None = None) ->
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{h(run_id)}</title>
 <style>{CSS}</style>
+{TAB_SCRIPT}
 </head>
 <body>
 <div class="page">
 {header_html}
-{state_cards}
-{agg_html}
+{state_html}
+{below_html}
 {footer}
 </div>
 </body>

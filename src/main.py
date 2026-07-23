@@ -91,6 +91,7 @@ def _cloud_s3():
               "repo — it's personal AWS deployment code (bring your own bucket).")
         print(f"    ({e})")
         sys.exit(1)
+
 DATA_COMMANDS     = {"push", "pull"}
 ALL_COMMANDS      = PIPELINE_COMMANDS | DATA_COMMANDS
 
@@ -219,7 +220,10 @@ def _push(targets: list[str]):
         if len(other) == 1 and other[0].lower() == "all":
             s3.push_all(PROJECT_ROOT)
         else:
-            for abbr in other:
+            for i, abbr in enumerate(other):
+                if i > 0:
+                    print()  # separates this state's file listing from the
+                              # previous state's "N ok, M error(s)" summary line
                 state_name = orc.ABBR_TO_NAME.get(abbr.upper())
                 if not state_name:
                     print(f"[!] Unknown state: {abbr}")
