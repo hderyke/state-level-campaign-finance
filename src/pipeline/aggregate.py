@@ -82,6 +82,38 @@ COL_MAP = {
     "expenditures":  C.EXPENDITURES_AGG,
 }
 
+# Full-text search indexes built into the final db — power fast contributor/
+# committee name search in client-facing/api/routers/contributions.py instead
+# of an ILIKE '%...%' scan across the whole contributions table (that timed
+# out the API Lambda's 29s cap on an unconstrained search, e.g. "Jim Walton"
+# with no state filter, 2026-07-19).
+#
+# Built HERE (this machine), not inside cloud/lambda/db_sync's handler, where
+# it was tried first and repeatedly OOM'd/timed out at real scale
+# (2026-07-20) — that Lambda's memory is hard-capped at 3008MB by an AWS
+# account quota that can't currently be raised. This function already solves
+# the same class of problem for the indexes below (a real 103.6M-row OOM,
+# see the CREATE INDEX comment further down) using a real disk-backed spill
+# directory and freeing memory by detaching sources first — same fix, same
+# place it already works, just extended to cover FTS too. Once this ships
+# inside state-level-cf.db, cloud/lambda/db_sync's handler goes back to being
+# a pure atomic file copy — no building, no memory pressure, regardless of
+# how large the db gets.
+#
+# Each column gets its own small "docs" table (rowid + just that column)
+# rather than indexing `contributions` directly, twice, for two different
+# columns. DuckDB's PRAGMA create_fts_index names its generated schema
+# fts_main_<input_table>, keyed only off the table name, not which column was
+# indexed — calling it twice against `contributions` itself would silently
+# clobber the first index (confirmed empirically: match_bm25 started
+# returning multi-row garbage on the first index after the second call).
+# Queried via fts_main_<docs_table>.match_bm25(rowid, ...) in
+# client-facing/api/routers/contributions.py.
+FTS_INDEXES = [
+    ("contributor_name_docs", "contributions", "contributor_name"),
+    ("committee_name_docs",   "contributions", "committee_name"),
+]
+
 # Physical row order for each built table. DuckDB's CREATE TABLE AS materializes
 # rows in the order the SELECT produces them, and row groups are filled
 # sequentially in that order — so an ORDER BY here directly controls each
@@ -486,6 +518,25 @@ def run():
             it0 = time.perf_counter()
             print(f"  Building {label}...", end=" ", flush=True)
             con.execute(sql)
+            print(f"{round(time.perf_counter() - it0, 1)}s")
+
+        # See FTS_INDEXES' comment for why this lives here instead of
+        # cloud/lambda/db_sync. Runs on the same connection as the CREATE
+        # INDEX calls above, after sources are already detached, so it gets
+        # the same memory headroom and spill directory for free. INSTALL/LOAD
+        # (not a curl-fetched explicit-path load, like the Lambda images use)
+        # is fine here — this runs natively on this machine, not inside a
+        # QEMU-emulated Docker build, so there's no segfault risk and normal
+        # internet access to fetch the extension.
+        print("\n  Building full-text search indexes...")
+        con.execute("INSTALL fts")
+        con.execute("LOAD fts")
+        for docs_table, src_table, column in FTS_INDEXES:
+            it0 = time.perf_counter()
+            print(f"    {docs_table}...", end=" ", flush=True)
+            con.execute(f"DROP TABLE IF EXISTS {docs_table}")
+            con.execute(f"CREATE TABLE {docs_table} AS SELECT rowid, {column} FROM {src_table}")
+            con.execute(f"PRAGMA create_fts_index('{docs_table}', 'rowid', '{column}', overwrite=1)")
             print(f"{round(time.perf_counter() - it0, 1)}s")
 
         con.close()
