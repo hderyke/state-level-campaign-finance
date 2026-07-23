@@ -54,10 +54,14 @@ guessed — no more EARLIEST_YEAR constant to keep in sync with the site.
 
 Each listing row carries the file's actual last-modified timestamp from
 the site itself (`DATE_MODIFIED`). The manifest stores this per file and
-skips re-downloading unless it has changed (or --force is given) — this
-naturally covers "always refresh the current year," since the current
-year's file gets a new DATE_MODIFIED every time a new filing comes in,
-without needing special-cased year logic.
+skips re-downloading unless it has changed (or --force is given). The
+current year's contributions/expenditures files are the one exception:
+they're always re-fetched regardless of DATE_MODIFIED, rather than trusting
+that Ohio's export has already regenerated to reflect a same-day filing —
+this is the explicit "always re-fetch current year" behavior other
+scrapers implement via year logic; here it overrides the DATE_MODIFIED
+check specifically for `year == current_year` (see `is_current_year` in
+`run()`).
 
 ## Format quirks
 
@@ -326,7 +330,9 @@ def run(
     Vertical scope (filters which discovered years are fetched — years are
     discovered from the File Transfer Page listing itself, not hardcoded):
         (no flag)          incremental — skip files whose DATE_MODIFIED on
-                           the site matches what's already in the manifest
+                           the site matches what's already in the manifest.
+                           The current year's contribution/expenditure files
+                           are always re-fetched regardless of DATE_MODIFIED.
         --start-year YYYY  only fetch contribution/expenditure years >= YYYY
         --end-year YYYY    only fetch contribution/expenditure years <= YYYY
         --force            ignore DATE_MODIFIED matches, re-fetch everything
@@ -349,6 +355,7 @@ def run(
     do_expenditures  = do_all or transactions or expenditures
 
     today = time.strftime("%Y-%m-%d")
+    current_year = int(time.strftime("%Y"))
     files_ok = files_err = files_skip = 0
 
     try:
@@ -382,6 +389,7 @@ def run(
                 if not in_scope:
                     continue
 
+                year = None
                 if category in ("contributions_year", "expenditures_year"):
                     year = int(re.search(r"(\d{4})", filename).group(1))
                     if start_year is not None and year < start_year:
@@ -389,11 +397,21 @@ def run(
                     if end_year is not None and year > end_year:
                         continue
 
+                # The current year's file gets new filings added continuously,
+                # so its DATE_MODIFIED can legitimately change between two
+                # runs on the same day (or even not change yet if Ohio's export
+                # hasn't regenerated since a filing came in). Rather than trust
+                # that timing, always re-fetch it — matches the "always
+                # re-fetch current year" contract other scrapers follow via
+                # explicit year logic instead of a site-provided timestamp.
+                is_current_year = (year is not None and year == current_year)
+
                 dest = RAW_DIR / filename
                 prior = done.get(filename)
                 unchanged = (prior is not None
                             and prior.get("date_modified") == row["date_modified"]
-                            and dest.exists() and dest.stat().st_size > 0)
+                            and dest.exists() and dest.stat().st_size > 0
+                            and not is_current_year)
                 if not force and unchanged:
                     log.file_download_skip(filename=filename)
                     files_skip += 1
