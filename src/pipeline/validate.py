@@ -36,7 +36,7 @@ from pathlib import Path
 csv.field_size_limit(10 * 1024 * 1024)  # 10 MB should be more than enough
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from src.reporting.logger import get_logger
+from src.reporting.logger import get_logger, run_dir_for
 
 # ── States without a real filer ID in their source data ───────────────────────
 # Read from src/aliases/states.csv's has_filer_id column (0 = no numeric filer ID
@@ -766,7 +766,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
     # Also copy into the run dir when running under orc
     run_id = os.environ.get("CF_RUN_ID")
     if run_id:
-        run_dir = PROJECT_ROOT / "logs" / "prod" / run_id
+        run_dir = run_dir_for(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         run_report = run_dir / f"{state_lower}_validate.json"
         run_report.write_text(json.dumps(report, indent=2))

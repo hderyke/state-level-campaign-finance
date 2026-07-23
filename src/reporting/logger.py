@@ -7,10 +7,14 @@ Three modes, detected automatically from environment variables:
                   logs/dev/{ts}-{state}-{operation}.jsonl
                   logs/dev/{ts}-{operation}.jsonl          (state-less, e.g. aggregate)
 
-  Orc mode    — CF_RUN_ID set. Console at INFO, JSONL to:
-                  logs/prod/{YYYYMMDD_HHMMSS_command_states}.jsonl
+  Orc mode    — CF_RUN_ID set, CF_DAEMON not set. Console at INFO, JSONL to:
+                  logs/prod/{YYYYMMDD_HHMMSS_command_states}/log.jsonl
+                (manual `main.py sync/reparse/push/pull` runs — "normal" use)
 
-  Daemon mode — CF_RUN_ID + CF_DAEMON set. Silent console, same JSONL as orc.
+  Daemon mode — CF_RUN_ID + CF_DAEMON set. Silent console, JSONL to:
+                  logs/daemon/{YYYYMMDD_HHMMSS_command_states}/log.jsonl
+                (anything run through ops/daemon.py — cron-triggered or run by
+                hand, doesn't matter; if it went through daemon.py it's here)
 
 Usage:
     from src.reporting.logger import get_logger
@@ -36,12 +40,29 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOGS_DIR     = PROJECT_ROOT / "logs"
 (LOGS_DIR / "prod").mkdir(parents=True, exist_ok=True)
 (LOGS_DIR / "dev").mkdir(parents=True, exist_ok=True)
+(LOGS_DIR / "daemon").mkdir(parents=True, exist_ok=True)
+
+
+def run_dir_for(run_id: str) -> Path:
+    """logs/{prod,daemon}/{run_id} — the single source of truth for which
+    bucket a given orc-mode run's directory lives in, keyed off CF_DAEMON.
+    Anything that writes a side-car file into "the run dir" (orc.py's query
+    output, validate.py's validation JSON, run_helpers.generate_report's
+    report.html, emailer.py's find_run_dir) should go through this rather
+    than re-deriving the path, so they can't drift out of sync with where
+    the run's actual log.jsonl was written.
+    """
+    bucket = "daemon" if os.environ.get("CF_DAEMON") else "prod"
+    return LOGS_DIR / bucket / run_id
 
 
 def _resolve_jsonl(state: str | None, operation: str) -> Path:
     run_id = os.environ.get("CF_RUN_ID")
     if run_id:
-        run_dir = LOGS_DIR / "prod" / run_id
+        # Daemon runs (anything through ops/daemon.py, cron or manual) get
+        # their own bucket so they don't bury one-off manual runs in the
+        # nightly automated volume — see module docstring.
+        run_dir = run_dir_for(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         return run_dir / "log.jsonl"
     ts   = datetime.now().strftime("%Y%m%d%H%M%S")

@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "pipeline"))
-from src.reporting.logger import get_logger
+from src.reporting.logger import get_logger, run_dir_for
 import aggregate as _aggregate
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -132,7 +132,7 @@ def _run_queries(name: str, log) -> None:
         # Copy to run dir if we're in orc mode
         run_id = os.environ.get("CF_RUN_ID")
         if run_id:
-            run_dir = PROJECT_ROOT / "logs" / "prod" / run_id
+            run_dir = run_dir_for(run_id)
             run_dir.mkdir(parents=True, exist_ok=True)
             (run_dir / f"{name}_queries.txt").write_text(output, encoding="utf-8")
 

@@ -7,7 +7,8 @@ Importing this module:
 
 Callable helpers:
   setup_run(command, state_abbrs, daemon)  → sets CF_RUN_ID / CF_DAEMON, returns run_id
-  generate_report(run_id, no_report)       → builds logs/prod/{run_id}/report.html
+  generate_report(run_id, no_report)       → builds report.html in logs/prod/{run_id}/
+                                              (or logs/daemon/{run_id}/ if CF_DAEMON is set)
 """
 
 import os
@@ -60,7 +61,8 @@ def generate_report(run_id: str, no_report: bool = False) -> None:
     if no_report or not run_id:
         return
 
-    run_dir  = PROJECT_ROOT / "logs" / "prod" / run_id
+    from src.reporting.logger import run_dir_for
+    run_dir  = run_dir_for(run_id)
     log_path = run_dir / "log.jsonl"
 
     if not log_path.exists():
