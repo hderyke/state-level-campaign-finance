@@ -18,11 +18,12 @@ metadata/
 # pipeline; requires your own AWS account/bucket/Lambda/ECS setup to use
 cloud/
 client-facing/
-src/daemon.py
-src/emailer.py
+ops/
 
 # credentials — never commit
 .env
+github_key
+github_key.pub
 
 # personal AI-agent workflow notes — not needed to use the pipeline
 CLAUDE.md
