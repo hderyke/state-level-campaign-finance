@@ -223,7 +223,7 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 | New Hampshire (NH) | ✅ | ✅ | CSV export API (CFS, `cfsapi.sos.nh.gov`) via curl_cffi (Akamai edge blocks plain `requests`' TLS); 2016–present. No entity roster in source — candidates/committees reconstructed from transaction files, so office/district/party are unavailable |
 | Ohio (OH) | ✅ | ✅ | Bulk CSV files via curl_cffi (browser TLS impersonation); validated end-to-end for the Candidate Committee group — PAC/Party groups not yet sampled |
 | Pennsylvania (PA) | ✅ | ✅ | Plain HTTP zip-per-year download (2000–present, ~25M contribution rows); no shared filer ID between a candidate and their own money committee in source data — hand-verified override table links the largest statewide committees, smaller ones remain unlinked |
-| Washington (WA) | 🚧 | 🚧 | In development — draft scraper/parser, not yet validated; no alias mappings or state doc yet |
+| Washington (WA) | ✅ | ✅ | Socrata (SODA) API on `data.wa.gov` — PDC data across 4 datasets (contributions/expenditures/debt/loans), split by year; pure HTTP, no Playwright. Filer office/party/jurisdiction carried inline per row, so no separate registry needed (~6.3M contribution rows) |
 
 **Key:** ✅ Done &nbsp; 🚧 In development &nbsp; ⚠️ Partial / known issues &nbsp; ❌ Broken
 
@@ -233,9 +233,8 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 
 **Mississippi — the 2024–2026 data gap.** Mississippi is fully implemented and validated, but if you query it you'll notice contributions and expenditures cut off cleanly after 2023, with recent years all but empty. This is **not** a scraper bug. It was investigated by querying the live source API directly with explicit date ranges, which returns the same near-empty result — ruling out silent truncation. The root cause is state law: Mississippi does not require electronic filing until **January 1, 2027** ([HB1334, 2025 Regular Session](https://legiscan.com/MS/bill/HB1334/2025)). Until then, candidates and committees may file on paper, and those filings aren't reliably transcribed into the searchable system this pipeline reads from. The window should backfill naturally once mandatory e-filing begins; re-scrapes after that date should be checked for a sudden jump in 2024–2026 coverage. Full detail in [docs/states/mississippi.md](docs/states/mississippi.md).
 
-**Kansas, Montana, and Washington — in development.** These are not production-ready and their output (if any) should be treated as provisional:
+**Kansas and Montana — in development.** These are not production-ready and their output (if any) should be treated as provisional:
 
 - **Kansas** has a working original scraper/parser (`kansas.py`) but is mid-rewrite — `kansas_v2.py` is the in-progress replacement.
 - **Montana** has its source fully reverse-engineered and documented (`docs/states/montana.md`), but the scraper and parser are not yet wired into the pipeline.
-- **Washington** has a draft scraper and parser that have not been validated end-to-end, and it has no alias mappings or state documentation yet.
 
