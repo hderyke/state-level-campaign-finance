@@ -104,7 +104,7 @@ python3 src/main.py --daemon sync all                     # full run, silent mod
 
 ### S3 Data Sync
 
-The `push` and `pull` commands sync state data and the master database to and from S3. **They depend on `cloud/s3.py`, a personal AWS backend that is not included in this repo** — running `push`/`pull` on a fresh clone exits with a "bring your own bucket" message. To use them you'll need your own S3 bucket and a compatible `cloud/s3.py` implementation. See [docs/pipeline.md](docs/pipeline.md) for the expected interface. The core pipeline (`sync`/`reparse`) works fully without any of this.
+The `push` and `pull` commands sync state data and the master database to and from S3. A `push db` also regenerates the downloads manifest (`metadata/manifest.csv`, the list of available states the client-facing downloads page reads) from the master database and uploads it alongside — so the site's state list stays current on every db push without a separate deploy step. **They depend on `cloud/s3.py`, a personal AWS backend that is not included in this repo** — running `push`/`pull` on a fresh clone exits with a "bring your own bucket" message. To use them you'll need your own S3 bucket and a compatible `cloud/s3.py` implementation. See [docs/pipeline.md](docs/pipeline.md) for the expected interface. The core pipeline (`sync`/`reparse`) works fully without any of this.
 
 ### Output
 

@@ -286,7 +286,7 @@ To add a new normalization mapping, append a row to the relevant CSV. The `(stat
 
 ## 8. S3
 
-`cloud/s3.py` handles syncing data to and from an S3 bucket, talking to AWS directly via `boto3` — no proxy or intermediary service sits in front of it. It replaces the project's earlier Cloudflare R2 setup (`src/cloudflare.py`, now removed, and the Worker under `worker/campaign-finance-r2/`, which is no longer used but left in place for reference). It lives in `cloud/` alongside `cloud/lambda/manifest_updater/` (the S3-triggered function that keeps the aggregate `metadata/manifest.csv` current) rather than under `src/`, since neither talks to state data directly — both are AWS glue sitting between the pipeline and the client-facing API.
+`cloud/s3.py` handles syncing data to and from an S3 bucket, talking to AWS directly via `boto3` — no proxy or intermediary service sits in front of it. It replaces the project's earlier Cloudflare R2 setup (`src/cloudflare.py`, now removed, and the Worker under `worker/campaign-finance-r2/`, which is no longer used but left in place for reference). It lives in `cloud/` rather than under `src/`, since it doesn't talk to state data directly — it's AWS glue sitting between the pipeline and the client-facing API. The aggregate `metadata/manifest.csv` that the downloads page reads is now kept current by `push_db` itself, which regenerates it from the db on every db push (see `cloud/regenerate_manifest.py`); the older S3-triggered `cloud/lambda/manifest_updater/` function that once did this incrementally is superseded.
 
 Push is a **separate, manual step** run after `sync`/`reparse` completes — it is not triggered automatically by `orc.py`. This means every push publishes whatever is currently on disk, including that state's most recent validation results.
 
@@ -339,7 +339,7 @@ This avoids trusting a local record of "what we think is in the bucket," which c
 
 `push_all` / `pull_all` — iterate over every state with a local `data/` directory (push) or every state registered in `states.csv` (pull), pushing/pulling one at a time, followed by the aggregate db. Both require typing `yes` at a confirmation prompt.
 
-`push_db` / `pull_db` — sync just the aggregate database (`push db` / `pull db`).
+`push_db` / `pull_db` — sync just the aggregate database (`push db` / `pull db`). `push_db` also regenerates `metadata/manifest.csv` from the db (via `cloud/regenerate_manifest.py`) and uploads it right after the db, so the client-facing downloads page and state dropdown — which read `metadata/manifest.csv` — can't drift from what's actually in the db that just went up. This happens on every db push, daemon or manual, and is MD5-idempotent like every other upload (an unchanged manifest is a `noop`). The manifest upload is best-effort: a regeneration or upload failure is logged as a file error and counted in the push summary, but does not abort the db push it rides along with.
 
 ---
 
