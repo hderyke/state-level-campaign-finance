@@ -221,8 +221,10 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 | Mississippi (MS) | ✅ | ✅ | Done, but **no 2024–2026 data** — MS doesn't mandate e-filing until 2027, so recent paper filings aren't yet digitized (see [Notes](#notes-on-specific-states)). Playwright required (WAF blocks non-browser traffic); GUID-based filer IDs; candidate↔committee linking via name-token + office-tiebreak heuristic |
 | Montana (MT) | 🚧 | 🚧 | In development — source fully documented (`docs/states/montana.md`, reverse-engineered CERS AJAX API), but the scraper/parser are not yet implemented in the pipeline |
 | New Hampshire (NH) | ✅ | ✅ | CSV export API (CFS, `cfsapi.sos.nh.gov`) via curl_cffi (Akamai edge blocks plain `requests`' TLS); 2016–present. No entity roster in source — candidates/committees reconstructed from transaction files, so office/district/party are unavailable |
+| New York (NY) | ✅ | ✅ | Socrata (SODA) API on `data.ny.gov` — NYSBOE across 4 datasets, split by election year; pure HTTP, no Playwright. All 21 lettered schedules (A–U) live in one 18.4M-row disclosure table; schedule O is a detail schedule and is dropped to avoid double-counting. No party affiliation published anywhere in the source; candidate↔committee link is a name-extraction heuristic (NYSBOE publishes no join) |
 | Ohio (OH) | ✅ | ✅ | Bulk CSV files via curl_cffi (browser TLS impersonation); validated end-to-end for the Candidate Committee group — PAC/Party groups not yet sampled |
 | Pennsylvania (PA) | ✅ | ✅ | Plain HTTP zip-per-year download (2000–present, ~25M contribution rows); no shared filer ID between a candidate and their own money committee in source data — hand-verified override table links the largest statewide committees, smaller ones remain unlinked |
+| Tennessee (TN) | ⚠️ | ✅ | TNCAMP (`apps.tn.gov/tncamp`) form POST + results-page walk — no bulk download, ~100 rows per page. Scraper and parser are complete and wired into the pipeline, but the search form's POST field names are inherited from a 2021 script and could not be re-verified against the live form's raw HTML — **run `scrapers/tennessee.py --discover` and reconcile before the first full scrape** (the scraper raises rather than writing nothing if they've drifted). No filer IDs anywhere in the source (`name_hash` person_id); no loan data in the public search |
 | Washington (WA) | ✅ | ✅ | Socrata (SODA) API on `data.wa.gov` — PDC data across 4 datasets (contributions/expenditures/debt/loans), split by year; pure HTTP, no Playwright. Filer office/party/jurisdiction carried inline per row, so no separate registry needed (~6.3M contribution rows) |
 
 **Key:** ✅ Done &nbsp; 🚧 In development &nbsp; ⚠️ Partial / known issues &nbsp; ❌ Broken
@@ -237,4 +239,12 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 
 - **Kansas** has a working original scraper/parser (`kansas.py`) but is mid-rewrite — `kansas_v2.py` is the in-progress replacement.
 - **Montana** has its source fully reverse-engineered and documented (`docs/states/montana.md`), but the scraper and parser are not yet wired into the pipeline.
+
+**Tennessee — confirm the search form before the first scrape.** TNCAMP has no bulk download and no API; the scraper drives the public search form and walks the paginated results, downloading each page's CSV export. The POST field names it submits come from a script that scraped this same form successfully, and an earlier iteration in this repo did pull real result pages with them — but they could not be re-verified against the live form's raw HTML while the current version was written, and TN.gov's form has gained at least one selector since. Run:
+
+```bash
+python3 src/pipeline/scrapers/tennessee.py --discover
+```
+
+which prints every field name and option value from both live forms, and reconcile them against `ce_search_body()` / `cp_search_body()`. If they have drifted, the scraper raises on the first empty search rather than writing zero files and letting the parser report a mysteriously empty state. Full detail in [docs/states/tennessee.md](docs/states/tennessee.md).
 

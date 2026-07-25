@@ -285,3 +285,36 @@ NH,Loan Forgiven,Loan
 # has one of the two," no blanks to fall back on ""Contribution"" in practice).",
 WA,Cash,Monetary
 WA,In-kind,In-Kind
+# == Tennessee ===================================================================,,
+"# TN's contributions.transaction_type is TNCAMP's Type column, with the",,
+# Adjustment column appended when it's set (see parsers/tennessee.py _txn_type).,,
+# The original R port this state was inherited from asserted Type has exactly 2,,
+"# distinct values, but the export's actual vocabulary could not be confirmed",,
+"# from a live pull while this was written, so no rows are guessed here —",,
+"# an unmapped value yields a NULL category, which the contributing guide",,
+# prefers over a wrong one. Fill this in from the first real scrape:,,
+#   zcat data/Tennessee/cleaned/contributions.csv.gz | csvcut -c transaction_type | sort -u,,
+# == New York ====================================================================,,
+# NY's contributions.transaction_type is the schedule label from,,
+"# parsers/new_york.py's SCHEDULES map, with a bounded sub-type appended for",,
+# schedules D/E/G (see contribution_subtype()). Both the bare label and every,,
+"# observed label+subtype combination are listed, since a schedule D row with no",,
+# cntrbn_type_desc emits the bare label.,,
+NY,Monetary Contribution — Individual/Partnership,Monetary
+NY,Monetary Contribution — Corporate,Monetary
+NY,Monetary Contribution — Other,Monetary
+NY,Housekeeping Receipt,Monetary
+NY,Public Fund Receipt,Monetary
+NY,In-Kind Contribution,In-Kind
+NY,In-Kind Contribution — Services/Facilities Provided,In-Kind
+NY,In-Kind Contribution — Property Given,In-Kind
+NY,In-Kind Contribution — Campaign Expenses Paid,In-Kind
+NY,Contribution Refunded,Refund
+NY,Transfer In,Transfer
+NY,Transfer In — Type 1,Transfer
+NY,Transfer In — Type 2,Transfer
+NY,Other Receipt,Other
+NY,Other Receipt — Interest/Dividends,Other
+NY,Other Receipt — Proceeds Sale/Lease,Other
+NY,Other Receipt — Public Funds,Other
+NY,Other Receipt — Other,Other

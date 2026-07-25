@@ -435,21 +435,70 @@ def drift_check(table: str, current: int, previous: int | None) -> dict | None:
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
+def _state_slug(name: str) -> str:
+    """"new york" / "New York" → "new_york" — the filename form used for
+    metadata/{state}_latest.json. Mirrors orc._state_slug."""
+    return _norm_dir_key(name).replace(" ", "_")
+
+
+def _norm_dir_key(name: str) -> str:
+    """Fold a state name / directory name to a comparable key.
+
+    Lowercases and treats spaces, underscores and hyphens as equivalent, so
+    "new york", "New York", "new_york" and "New_York" all collapse to
+    "new york"."""
+    return re.sub(r"[\s_-]+", " ", name.strip().lower())
+
+
+def _find_clean_dir(state: str) -> Path | None:
+    """Locate data/<State>/cleaned/ for a state name, case- and separator-
+    insensitively.
+
+    The two literal attempts below cover the single-word states. Multi-word
+    states (New York, New Hampshire, North Carolina, ...) need the scan:
+    `str.capitalize()` lowercases every letter after the first, so
+    "new york".capitalize() is "New york", which only resolves to the real
+    "New York" directory on a case-insensitive filesystem (macOS). On Linux —
+    CI, containers, the daemon host — it doesn't, and validate would exit 1
+    with "cleaned dir not found" on a state that parsed perfectly well. The
+    scan mirrors what tabulate.py and queries.py already do.
+    """
+    data_dir = PROJECT_ROOT / "data"
+    for candidate in (data_dir / state.lower(), data_dir / state.capitalize()):
+        if candidate.joinpath("cleaned").exists():
+            return candidate / "cleaned"
+
+    if not data_dir.exists():
+        return None
+    want = _norm_dir_key(state)
+    for d in sorted(data_dir.iterdir()):
+        if d.is_dir() and _norm_dir_key(d.name) == want and (d / "cleaned").exists():
+            return d / "cleaned"
+    return None
+
+
 def run(state: str):
-    state_lower = state.lower()
-    state_upper = STATE_ABBR.get(state_lower, state.upper())  # "alabama" → "AL"
-    clean_dir   = PROJECT_ROOT / "data" / state_lower / "cleaned"
+    # Normalized so "new_york" and "new york" behave identically everywhere
+    # downstream (STATES_WITHOUT_FILER_ID lookup, docs path in messages,
+    # report filenames) — orc.py spells multi-word states with a space, people
+    # typing them by hand tend to use an underscore.
+    state_lower = _norm_dir_key(state)
+    state_upper = STATE_ABBR.get(_norm_dir_key(state), state.upper())  # "alabama" → "AL"
+    clean_dir   = _find_clean_dir(state)
 
-    # Try capitalized dir too (Alabama vs alabama)
-    if not clean_dir.exists():
-        clean_dir = PROJECT_ROOT / "data" / state.capitalize() / "cleaned"
-    if not clean_dir.exists():
-        print(f"ERROR: cleaned dir not found for state '{state}'")
-        sys.exit(1)
-
+    # Logger first: a missing cleaned dir is a real validation failure and has
+    # to leave a record, otherwise orc's run report shows no validate event at
+    # all for the state rather than showing why it failed.
     log = get_logger(state_lower, "validate")
     t0  = time.perf_counter()
     log._emit("validate_started")
+
+    if clean_dir is None:
+        print(f"ERROR: cleaned dir not found for state '{state}'")
+        log._emit("validate_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  error="cleaned dir not found")
+        sys.exit(1)
 
     try:
         _run(state_lower, state_upper, clean_dir, log, t0)
@@ -469,8 +518,13 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
     print(f"  Validating {state_upper} — {clean_dir}")
     print(f"{'='*60}\n")
 
-    # Load previous report for drift detection
-    report_path  = REPORTS_DIR / f"{state_lower}_latest.json"
+    # Load previous report for drift detection.
+    # The filename is slugified (spaces → underscores) so a multi-word state
+    # lands on the same file whether it was invoked as "new york" (how orc.py
+    # spells it, from states.csv) or "new_york" (how a person types it on the
+    # command line) — otherwise the two spellings write two different files
+    # and drift detection silently compares a run against nothing.
+    report_path  = REPORTS_DIR / f"{_state_slug(state_lower)}_latest.json"
     prev_counts  = {}
     if report_path.exists():
         try:
@@ -527,7 +581,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
                     tier2_warnings.append({
                         "table":   table,
                         "warning": f"{e} — expected, this state's source data has "
-                                   f"no filer ID (see docs/states/{state_lower}.md)",
+                                   f"no filer ID (see docs/states/{_state_slug(state_lower)}.md)",
                     })
             else:
                 checks.append((f"fill:{col}", fill_errors))
@@ -637,7 +691,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
                 ok = "✓" if rate >= TIER1_PASS_RATE * 100 else "✗"
             print(f"    {field:<25} {_bar(rate)}  {rate:5.1f}%  {ok}")
         if any_downgraded:
-            print(f"    ↓ = tier-2 (no filer ID in source data; see docs/states/{state_lower}.md)")
+            print(f"    ↓ = tier-2 (no filer ID in source data; see docs/states/{_state_slug(state_lower)}.md)")
         print()
 
 
@@ -768,7 +822,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
     if run_id:
         run_dir = run_dir_for(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
-        run_report = run_dir / f"{state_lower}_validate.json"
+        run_report = run_dir / f"{_state_slug(state_lower)}_validate.json"
         run_report.write_text(json.dumps(report, indent=2))
         print(f"  Report copied to: {run_report}")
     print()
