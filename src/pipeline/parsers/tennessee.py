@@ -79,16 +79,21 @@ every row through `is_person_row()` and register it as a candidate or a
 committee based on the row's own content (First Name present vs. blank),
 never based on which file it was read from.
 
-Office Sought, Committee Affiliation and Contact Info never resolve
------------------------------------------------------------------------
-The `cp_search_body()` display checkboxes in scrapers/tennessee.py request
-`officeSoughtField`, `committeeAffiliationField` and `contactInfoField`, but
-none of the three appear anywhere in the actual roster export header — TN's
-export apparently doesn't support them for this search regardless of what's
-requested. `office`, and the roster-driven candidate↔committee affiliation
-link, therefore come out blank for every TN candidate; this is a source
-limitation, not a header-alias miss, and is surfaced in validate.py's fill
-rate warnings rather than silently patched over here.
+Office Sought, Committee Affiliation and Contact Info previously never resolved
+--------------------------------------------------------------------------------
+As of the 2026-07-25 --discover run, `cp_search_body()` in scrapers/tennessee.py
+had been requesting these three columns under the wrong checkbox names —
+`officeSoughtField`, `committeeAffiliationField` and `contactInfoField` instead
+of the live form's actual `officeField`, `committeeField` and `contactField` —
+so the checkboxes were silently never checked and TNCAMP had no reason to
+include the columns. That's now fixed in scrapers/tennessee.py; the aliases
+below (`office_sought`/`office`, `committee_affiliation`/`committee`,
+`contact_info`/`contact`/`address`) already cover either header spelling, so
+no parser change was needed. Whether these actually populate now depends on
+the next scrape run — if `office`/`committee_affiliation`/`contact_info` are
+still blank after a re-scrape, that confirms a genuine TNCAMP export gap
+rather than a field-name miss, and validate.py's fill-rate warnings are still
+the right place to see that surfaced.
 
 Primary/General are dates with an embedded outcome, not Y/N flags
 ---------------------------------------------------------------------

@@ -39,22 +39,57 @@ pages forever. Only a year with the `complete` sentinel is treated as done.
 
 ## Provenance of the request bodies — verified vs. assumed
 
-The POST field names in `ce_search_body()` come from the Investigative
-Reporting Workshop's `get_tn_contribs.R`, which scraped this exact form
-successfully (Kiernan Nicholls, Julia Ingram, Yanqi Xu), and an earlier
-iteration of this scraper in this repo did pull ~100-row result pages off
-`ceresults.htm` with them — see logs/dev/20260712130338-tennessee-scrape.jsonl.
-They are observed field names, not invented ones.
+The POST field names in `ce_search_body()` originally came from the
+Investigative Reporting Workshop's `get_tn_contribs.R`, which scraped this
+exact form successfully (Kiernan Nicholls, Julia Ingram, Yanqi Xu), and an
+earlier iteration of this scraper in this repo did pull ~100-row result pages
+off `ceresults.htm` with them — see
+logs/dev/20260712130338-tennessee-scrape.jsonl.
 
-What is NOT verified: whether TNCAMP has since added or renamed a required
-field. The live form's rendered text (checked 2026-07-24) shows a Report Year
-selector the 2021-era body doesn't obviously account for, and the page's raw
-HTML isn't reachable from the environment this module was written in, so the
-attribute name couldn't be confirmed. `--discover` exists for exactly this: it
-prints every `<input>`/`<select>` name and every `<option>` value from both
-live forms so the ground truth can be read off the site and pasted into the
-body builders below. Run it before the first full scrape, and after any
-TN.gov redesign.
+A `--discover` run against the live forms on 2026-07-25 turned up real drift,
+now folded into the body builders below:
+
+  - `cesearch.htm` gained three recipient-side checkboxes — `toCandidate`,
+    `toPac`, `toOther` — that parallel the four `from*` checkboxes and, like
+    them, default to unchecked (i.e. "match nothing") when omitted. `toType`
+    ("both") alone no longer appears to be sufficient. It also gained a
+    `reportSelection` filter (report period — "1st Quarter", "Pre-Primary",
+    etc.) with no visible blank/"all" option among the values `--discover`
+    printed; sent as `""` here, matching how every other optional filter in
+    this body is left blank, rather than omitted outright.
+  - `cesearch.htm`'s result-column checkboxes gained `candidatePACNameField`,
+    `candidateForField` and `soField`. The first is the one that matters:
+    parsers/tennessee.py's `COLUMN_ALIASES` already treats
+    `candidate_pac_name` as a spelling of `recipient_name`, which strongly
+    suggests TNCAMP renamed the "Recipient Name" export column to
+    "Candidate/PAC Name" behind a *new* checkbox rather than the old
+    `recipientNameField` one — so both are now requested.
+  - `cpsearch.htm` had drifted much further: the radio group is `searchType`
+    (values `candidate`/`pac`/`both`), not `findType`; the name filter is
+    `name`, not `lastName`; office/district/party filters are
+    `officeSelection`/`districtSelection`/`partySelection`, not
+    `officeSought`/`district`/`party`; there is one `winner` radio (Y/N), not
+    separate `primaryWinner`/`generalWinner`; and the election-year filter is
+    `electionYearSelection`, not `electionYear`. Three of the result-column
+    checkboxes were also misnamed (`contactField` not `contactInfoField`,
+    `officeField` not `officeSoughtField`, `committeeField` not
+    `committeeAffiliationField`), which is the most likely reason
+    parsers/tennessee.py's docstring reports Office Sought, Committee
+    Affiliation and Contact Info "never resolve" — the checkbox requesting
+    each of those columns was never actually being checked, so TNCAMP had no
+    reason to include them. That note in the parser should be revisited once
+    a run confirms whether the corrected names bring those columns back.
+    `ENTITY_FIND_TYPE` was also sending the plural `"candidates"`/`"pacs"` as
+    the radio value where the form only accepts singular `"candidate"`/`"pac"`
+    — fixed alongside the field names.
+
+What is still NOT verified: whether TNCAMP has added or renamed anything
+*since* 2026-07-25, and what the 16th, un-printed `reportSelection` option is
+(`--discover` truncates option lists at 15). `--discover` exists for exactly
+this kind of drift: it prints every `<input>`/`<select>` name and every
+`<option>` value from both live forms so the ground truth can be read off the
+site and pasted into the body builders below. Run it before the first full
+scrape, and after any TN.gov redesign.
 
 `run()` fails loudly — raising, so orc marks the state failed — if the first
 search of a run comes back with no export link at all, rather than quietly
@@ -64,9 +99,25 @@ would otherwise look identical from the outside.
 ## Rate limiting
 
 TN.gov's WAF resets connections that look like bare scripts. Requests carry a
-browser User-Agent and Accept headers, pages are spaced by a short randomized
-sleep and years by a longer one — the same courtesy pacing the original R
+browser User-Agent and Accept headers, and pages within one year's walk are
+spaced by a short randomized sleep — the same courtesy pacing the original R
 script used, which ran against this host over a full history of years.
+
+## Concurrency
+
+A full single-threaded run over every (relation, year) pair took ~3 days —
+almost entirely wall-clock spent waiting out per-page and per-year sleeps
+across ~50 years × 2 relations, one at a time. Each year's walk is
+independent (its own search POST, its own session-scoped page cursor), so
+`run()` now walks several years in parallel via a small thread pool
+(`--workers`, default `DEFAULT_WORKERS`), each worker on its own `requests`
+session/cookie jar. The per-page courtesy sleep is unchanged *within* a
+session — this doesn't make any single session hit the server faster, it just
+runs `--workers` of those sessions at once — so a run that previously took 3
+days at `--workers 1` should take roughly `3 days / workers`. Turn `--workers`
+down (to 1 for the old fully-sequential behavior) if TN.gov starts responding
+with more 429/503s or WAF resets than before; there's no data in this repo's
+run logs yet on how many concurrent sessions the WAF tolerates.
 
 Raw files (data/Tennessee/raw/):
   contributions_{year}_p{NNN}.csv   — one file per results page
@@ -79,7 +130,9 @@ import csv
 import random
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -128,6 +181,12 @@ MIN_YEAR = 2002
 # rows for a single year, comfortably above any real TN year.
 MAX_PAGES_PER_YEAR = 2000
 
+# How many (relation, year) walks run at once, each on its own session/cookie
+# jar. See "Concurrency" in the module docstring — this is the knob that took
+# the full-history run from ~3 days to a few hours; turn it down to 1 to get
+# the old strictly-sequential behavior back if the WAF starts pushing back.
+DEFAULT_WORKERS = 8
+
 # TN.gov's WAF resets connections that look like bare scripts (no User-Agent,
 # no Accept headers). config.USER_AGENT is the repo-wide browser string;
 # Accept/Accept-Language complete the browser-shaped request.
@@ -162,6 +221,12 @@ def ce_search_body(year: int, relation: str) -> dict:
         "fromPAC":               True,
         "fromIndividual":        True,
         "fromOrganization":      True,
+        # who the money went to — same idea, added 2026-07-25: `toType` alone
+        # no longer seems to be enough, these default to unchecked (i.e.
+        # "match nothing") if omitted. See module docstring.
+        "toCandidate":           True,
+        "toPac":                 True,
+        "toOther":               True,
         "electionYearSelection": "",
         "yearSelection":         year,
         "recipientName":         "",
@@ -177,6 +242,13 @@ def ce_search_body(year: int, relation: str) -> dict:
         "amountSelection":       "equal",
         "amountDollars":         "",
         "amountCents":           "",
+        # Report-period filter, added 2026-07-25. No blank/"all" option was
+        # visible in --discover's (truncated) option list, so sent explicitly
+        # empty — same convention as electionYearSelection above — rather
+        # than omitted, to avoid it defaulting to whatever option the live
+        # form would preselect (its first listed option is "1st Quarter",
+        # not a placeholder).
+        "reportSelection":       "",
         # result columns
         "typeField":                  True,
         "adjustmentField":            True,
@@ -185,6 +257,13 @@ def ce_search_body(year: int, relation: str) -> dict:
         "electionYearField":          True,
         "reportNameField":            True,
         "recipientNameField":         True,
+        # Added 2026-07-25: TNCAMP's export header for this column now looks
+        # to be driven by candidatePACNameField rather than
+        # recipientNameField — see module docstring. Requesting both is
+        # harmless (unknown keys are ignored) and covers either shape.
+        "candidatePACNameField":      True,
+        "candidateForField":         True,
+        "soField":                   True,
         "contributorNameField":       True,
         "contributorAddressField":    True,
         "contributorOccupationField": True,
@@ -208,42 +287,52 @@ def ce_search_body(year: int, relation: str) -> dict:
 def cp_search_body(find: str) -> dict:
     """Candidates & PACs roster search POST body.
 
-    `find` is "candidates", "pacs" or "both" — the radio group at the top of
-    cpsearch.htm. Every criterion is left blank so the search returns the full
-    roster, and every display checkbox is on so the export carries
-    office/district/party/treasurer — none of which appear anywhere in the
-    contributions or expenditures exports."""
+    `find` is "candidate", "pac" or "both" — the `searchType` radio group at
+    the top of cpsearch.htm. Every criterion is left blank so the search
+    returns the full roster, and every display checkbox is on so the export
+    carries office/district/party/treasurer — none of which appear anywhere
+    in the contributions or expenditures exports.
+
+    Field names below were rewritten 2026-07-25 after --discover showed this
+    form had drifted much further from the originally-assumed names than
+    ce_search_body() had: the radio group, name filter, office/district/party
+    filters, winner flag and every mis-fired display checkbox were all wrong
+    — see module docstring for the full list. If office/committee-affiliation
+    /contact-info columns still come out blank after this fix, that's a
+    genuine TNCAMP export gap, not a leftover field-name miss."""
     return {
-        "findType":      find,
-        "lastName":      "",
-        "officeSought":  "",
-        "district":      "",
-        "primaryWinner": "",
-        "generalWinner": "",
-        "electionYear":  "",
-        "party":         "",
+        "searchType":          find,
+        "name":                "",
+        "officeSelection":     "",
+        "districtSelection":   "",
+        "winner":              "",
+        "electionYearSelection": "",
+        "partySelection":      "",
         # result columns
-        "nameField":                 True,
-        "contactInfoField":          True,
-        "treasurerNameField":        True,
-        "treasurerContactInfoField": True,
-        "partyField":                True,
-        "officeSoughtField":         True,
-        "districtField":             True,
-        "primaryField":              True,
-        "generalField":              True,
-        "electionYearField":         True,
-        "committeeAffiliationField": True,
-        "officersField":             True,
-        "createdField":              True,
-        "closedField":               True,
-        "_continue":                 "Search",
+        "nameField":                  True,
+        "contactField":               True,
+        "treasurerNameField":         True,
+        "treasurerContactField":      True,
+        "partyField":                 True,
+        "officeField":                True,
+        "districtField":              True,
+        "primaryField":               True,
+        "generalField":               True,
+        "electionYearField":          True,
+        "committeeField":             True,
+        "officersField":              True,
+        "createdField":               True,
+        "closedField":                True,
+        "responsibleIndividualField": True,
+        "_continue":                  "Search",
     }
 
 
-# Horizontal scope groupings. TN calls its non-candidate committees "PACs",
-# so the --committees flag maps to the PAC roster.
-ENTITY_FIND_TYPE = {"candidates": "candidates", "pacs": "pacs"}
+# Horizontal scope groupings. TN calls its non-candidate committees "PACs".
+# Values are the `searchType` radio's own values (singular) — sending the
+# plural "candidates"/"pacs" here (as this dict did before 2026-07-25) never
+# matched any option on the live form.
+ENTITY_FIND_TYPE = {"candidates": "candidate", "pacs": "pac"}
 
 
 # ============================ http session ============================
@@ -319,6 +408,16 @@ def discover_valid_years(session: requests.Session) -> list[int]:
 
 
 # ========================= manifest helpers ============================
+# strip_manifest()/upsert_manifest() are read-modify-write on one shared CSV
+# file. Harmless when years run one at a time, but with --workers > 1 several
+# year-walks can finish within the same instant and race on this file — the
+# usual outcome of an unguarded read-modify-write under concurrency is a lost
+# update (one thread's write clobbers another's), not a crash, so it would go
+# unnoticed as silently-missing manifest rows rather than an obvious error.
+# One lock serializes every manifest read+write across all worker threads.
+_manifest_lock = threading.Lock()
+
+
 def load_manifest() -> dict[str, dict]:
     """filename -> manifest row."""
     if not MANIFEST.exists():
@@ -341,27 +440,29 @@ def completed_years(relation: str) -> set[str]:
 
 def strip_manifest(keep_fn) -> None:
     """Rewrite the manifest keeping only rows where keep_fn(row) is True."""
-    if not MANIFEST.exists():
-        return
-    with open(MANIFEST, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    with open(MANIFEST, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=MANIFEST_COLS)
-        w.writeheader()
-        w.writerows(r for r in rows if keep_fn(r))
+    with _manifest_lock:
+        if not MANIFEST.exists():
+            return
+        with open(MANIFEST, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        with open(MANIFEST, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=MANIFEST_COLS)
+            w.writeheader()
+            w.writerows(r for r in rows if keep_fn(r))
 
 
 def upsert_manifest(record: dict) -> None:
     """Add or overwrite the manifest entry for record['filename']."""
-    rows = []
-    if MANIFEST.exists():
-        with open(MANIFEST, newline="", encoding="utf-8") as f:
-            rows = [r for r in csv.DictReader(f) if r["filename"] != record["filename"]]
-    rows.append(record)
-    with open(MANIFEST, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=MANIFEST_COLS)
-        w.writeheader()
-        w.writerows(rows)
+    with _manifest_lock:
+        rows = []
+        if MANIFEST.exists():
+            with open(MANIFEST, newline="", encoding="utf-8") as f:
+                rows = [r for r in csv.DictReader(f) if r["filename"] != record["filename"]]
+        rows.append(record)
+        with open(MANIFEST, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=MANIFEST_COLS)
+            w.writeheader()
+            w.writerows(rows)
 
 
 # =========================== page-walk helpers ==========================
@@ -540,6 +641,48 @@ def _clear_pages(relation: str, year: str) -> None:
                                   and r["year"] == year))
 
 
+def _walk_one_transaction_year(log, relation: str, year: int) -> dict:
+    """Run one (relation, year) walk on its own session, for the thread pool.
+
+    Each task gets its own `requests.Session()` — TNCAMP's "more results"
+    cursor lives in the session cookie (see module docstring), so sharing one
+    session across concurrent walks would have them stomp on each other's
+    pagination state. A small random stagger spreads out the moment each
+    worker's first request actually hits the server, instead of every worker
+    opening its first connection in the same instant."""
+    time.sleep(random.uniform(0, 5.0))
+    session = build_session()
+    y = str(year)
+    t_year = time.perf_counter()
+    pages, rows, failed, _complete = _walk_results(
+        session, log, relation, y,
+        CE_SEARCH_URL, ce_search_body(year, relation),
+        CE_RESULTS_URL, CE_NEXT_URL,
+        stem=f"{relation}_{y}",
+    )
+    log.page_scrape_complete(filename=f"{relation}_{y}", rows=rows,
+                             duration_s=round(time.perf_counter() - t_year, 1),
+                             ok=pages, err=failed)
+    return {"relation": relation, "year": y, "pages": pages, "rows": rows,
+            "failed": failed}
+
+
+def _walk_one_entity_roster(log, relation: str) -> dict:
+    """Run one entity-roster walk (candidates or pacs) on its own session."""
+    session = build_session()
+    t_roster = time.perf_counter()
+    pages, rows, failed, _complete = _walk_results(
+        session, log, relation, "",
+        CP_SEARCH_URL, cp_search_body(ENTITY_FIND_TYPE[relation]),
+        CP_RESULTS_URL, CP_NEXT_URL,
+        stem=relation,
+    )
+    log.page_scrape_complete(filename=relation, rows=rows,
+                             duration_s=round(time.perf_counter() - t_roster, 1),
+                             ok=pages, err=failed)
+    return {"relation": relation, "pages": pages, "rows": rows, "failed": failed}
+
+
 # ============================== run ====================================
 def run(
     force: bool = False,
@@ -551,6 +694,7 @@ def run(
     expenditures: bool = False,
     candidates: bool = False,
     committees: bool = False,
+    workers: int = DEFAULT_WORKERS,
 ):
     """Download Tennessee TNCAMP data.
 
@@ -569,6 +713,9 @@ def run(
         --entities              candidate + PAC roster
         --candidates            candidate roster only
         --committees            PAC roster only (TN calls committees "PACs")
+
+    `workers` (--workers) is how many (relation, year) searches run at once,
+    each on its own session — see "Concurrency" in the module docstring.
     """
     log = get_logger("tennessee", "scrape")
     t0  = time.perf_counter()
@@ -596,13 +743,13 @@ def run(
         entity_relations.append("pacs")
 
     try:
-        session = build_session()
+        discovery_session = build_session()
 
         current_year      = datetime.today().year
         year_range_active = start_year is not None or end_year is not None
 
         # ── Resolve the year list from the live form, with a static fallback ──
-        years = discover_valid_years(session)
+        years = discover_valid_years(discovery_session)
         if years:
             log.info(f"  Discovered {len(years)} election years on the live form: "
                      f"{years[0]}–{years[-1]}")
@@ -622,39 +769,49 @@ def run(
         # every year empty is not.
         searches_run = searches_with_pages = 0
 
+        # Build the full (relation, year) task list up front, skipping years
+        # already complete in the manifest, then hand it to a thread pool —
+        # each task opens its own session (see _walk_one_transaction_year).
+        # This is what took a full single-threaded history walk from ~3 days
+        # to roughly 3 days / workers — see "Concurrency" in the module
+        # docstring for why running several years at once is safe here (each
+        # year's pagination cursor lives in its own session's cookie).
+        tasks: list[tuple[str, int]] = []
         for relation in txn_relations:
             done_years = completed_years(relation)
-            log.info(f"\nTennessee {relation}:")
-
             for year in years:
                 y = str(year)
                 is_open_cycle = year >= current_year
-
                 if (y in done_years and not force and not year_range_active
                         and not is_open_cycle):
                     log.file_download_skip(filename=f"{relation}_{y}_p001.csv")
                     years_skip += 1
                     continue
+                tasks.append((relation, year))
 
-                t_year = time.perf_counter()
-                pages, rows, failed, _complete = _walk_results(
-                    session, log, relation, y,
-                    CE_SEARCH_URL, ce_search_body(year, relation),
-                    CE_RESULTS_URL, CE_NEXT_URL,
-                    stem=f"{relation}_{y}",
-                )
-                files_ok  += pages
-                files_err += failed
-                searches_run += 1
-                if pages:
-                    searches_with_pages += 1
-
-                log.page_scrape_complete(filename=f"{relation}_{y}", rows=rows,
-                                         duration_s=round(time.perf_counter() - t_year, 1),
-                                         ok=pages, err=failed)
-                # Longer pause between years — the original IRW script used
-                # 10–30s here and ran a full history without being blocked.
-                time.sleep(random.uniform(8.0, 20.0))
+        if tasks:
+            log.info(f"\nTennessee transactions: {len(tasks)} (relation, year) "
+                     f"searches queued across {workers} worker(s)")
+            with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                futures = {pool.submit(_walk_one_transaction_year, log, relation, year): (relation, year)
+                          for relation, year in tasks}
+                for fut in as_completed(futures):
+                    relation, year = futures[fut]
+                    try:
+                        result = fut.result()
+                    except Exception as e:
+                        # One year's walk raising must not take the rest of
+                        # the pool down with it — log and count it as a
+                        # failure, same as a page-level error would be.
+                        log.page_scrape_error(entity=relation, page_id=str(year), error=str(e))
+                        files_err += 1
+                        searches_run += 1
+                        continue
+                    files_ok  += result["pages"]
+                    files_err += result["failed"]
+                    searches_run += 1
+                    if result["pages"]:
+                        searches_with_pages += 1
 
         # Every search in the run coming back with no export link, and no HTTP
         # failures to explain it, means the form contract changed — TN does not
@@ -673,21 +830,23 @@ def run(
         # Not year-scoped: one walk per roster, always refreshed. Filer status
         # and treasurer details change continuously and the roster is tiny next
         # to the transaction files, so there's nothing to gain from caching it.
-        for relation in entity_relations:
-            log.info(f"\nTennessee {relation} roster:")
-            t_roster = time.perf_counter()
-            pages, rows, failed, _complete = _walk_results(
-                session, log, relation, "",
-                CP_SEARCH_URL, cp_search_body(ENTITY_FIND_TYPE[relation]),
-                CP_RESULTS_URL, CP_NEXT_URL,
-                stem=relation,
-            )
-            files_ok  += pages
-            files_err += failed
-            log.page_scrape_complete(filename=relation, rows=rows,
-                                     duration_s=round(time.perf_counter() - t_roster, 1),
-                                     ok=pages, err=failed)
-            time.sleep(random.uniform(3.0, 8.0))
+        # Only ever 1-2 tasks, but they're independent so run them through the
+        # same pool rather than special-casing sequential code for two items.
+        if entity_relations:
+            log.info(f"\nTennessee entity roster: {entity_relations}")
+            with ThreadPoolExecutor(max_workers=max(1, min(workers, len(entity_relations)))) as pool:
+                futures = {pool.submit(_walk_one_entity_roster, log, relation): relation
+                          for relation in entity_relations}
+                for fut in as_completed(futures):
+                    relation = futures[fut]
+                    try:
+                        result = fut.result()
+                    except Exception as e:
+                        log.page_scrape_error(entity=relation, page_id="roster", error=str(e))
+                        files_err += 1
+                        continue
+                    files_ok  += result["pages"]
+                    files_err += result["failed"]
 
         duration = round(time.perf_counter() - t0, 1)
         log.info(f"Done in {duration}s — {files_ok} pages downloaded, "
@@ -738,6 +897,12 @@ if __name__ == "__main__":
     ap.add_argument("--committees",    action="store_true",
                     help="PAC roster only (TN calls committees 'PACs')")
 
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS, metavar="N",
+                    help=f"concurrent (relation, year) searches, each on its own "
+                         f"session (default {DEFAULT_WORKERS}); use 1 for the old "
+                         f"fully-sequential behavior — see 'Concurrency' in the "
+                         f"module docstring")
+
     args, _ = ap.parse_known_args()
 
     if args.discover:
@@ -771,6 +936,7 @@ if __name__ == "__main__":
             expenditures=args.expenditures,
             candidates=args.candidates,
             committees=args.committees,
+            workers=args.workers,
         )
     except KeyboardInterrupt:
         sys.exit(130)
