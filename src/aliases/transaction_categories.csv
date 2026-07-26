@@ -318,3 +318,22 @@ NY,Other Receipt — Interest/Dividends,Other
 NY,Other Receipt — Proceeds Sale/Lease,Other
 NY,Other Receipt — Public Funds,Other
 NY,Other Receipt — Other,Other
+# == Texas =======================================================================,,
+# TX contributions.transaction_type is the schedule label from,,
+# parsers/texas.py CONTRIB_SCHEDULES (schedFormTypeCd expanded via CFS-Codes.txt).,,
+TX,Monetary Political Contribution,Monetary
+TX,Monetary Political Contribution (Judicial),Monetary
+TX,Monetary Contribution from Corporation or Labor Organization,Monetary
+TX,Monetary Support from Corporation or Labor Organization,Monetary
+TX,Monetary Contribution (Speaker),Monetary
+TX,Non-Caucus Member Contribution,Monetary
+TX,In-Kind Political Contribution,In-Kind
+TX,In-Kind Political Contribution (Special Session),In-Kind
+TX,In-Kind Contribution from Corporation or Labor Organization,In-Kind
+TX,Non-Monetary Support from Corporation or Labor Organization,In-Kind
+TX,In-Kind Contribution (Speaker),In-Kind
+"# Schedule K is bank interest, investment gains, credits and contributions",,
+"# returned TO the filer — money in, but not donations. Mapping it to Other is",,
+"# what lets a donor ranking exclude it; without the filter, banks paying",,
+# interest outrank every actual donor in Texas. See docs/states/texas.md.,,
+TX,"Interest, Credit, Gain or Returned Contribution",Other

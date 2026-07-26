@@ -150,7 +150,45 @@ ZIP_FIELDS = {
 # Categorical fields to show value breakdowns for in tier 2
 BREAKDOWN_FIELDS = {
     "committees": ["committee_type", "active"],
+    # Provenance for externally joined party values. Deliberately a breakdown
+    # rather than a fill-rate row: these are only ever populated where `party`
+    # itself was joined in from outside the state's disclosure data, so their
+    # fill rate carries no information beyond party's, whereas the split
+    # between "exact" and "high" matches is what tells you how much to trust
+    # it. Blank for every state that publishes party directly.
+    "candidates": ["party_source", "match_confidence"],
 }
+
+# Breakdown fields that are dropped entirely — from both the console report and
+# the JSON — when a state populates none of them, instead of printing a lone
+# "(blank) 100%" row.
+#
+# Only a couple of states ever write these, so on the other forty that row says
+# nothing except "this column doesn't apply here", while adding two lines to
+# every report and two dead entries to every metadata JSON. Fields NOT listed
+# here keep the old always-print behaviour: `committee_type` and `active` are
+# expected on every state, so an all-blank breakdown there is a genuine finding
+# worth surfacing rather than noise worth hiding.
+SPARSE_BREAKDOWN_FIELDS = {"party_source", "match_confidence"}
+
+
+def _breakdown(rows: list[dict], bfield: str) -> dict[str, int] | None:
+    """Value counts for one categorical field, ordered by count descending.
+
+    Returns None when the field is in SPARSE_BREAKDOWN_FIELDS and every row is
+    blank (or the column is absent entirely, as it is in any state parsed
+    before the column existed) — the caller then omits it.
+
+    Shared by the console report and the JSON builder so the two can't drift:
+    they previously carried separate copies of this counting loop.
+    """
+    counts: dict[str, int] = {}
+    for r in rows:
+        val = (r.get(bfield) or "").strip() or "(blank)"
+        counts[val] = counts.get(val, 0) + 1
+    if bfield in SPARSE_BREAKDOWN_FIELDS and set(counts) <= {"(blank)"}:
+        return None
+    return dict(sorted(counts.items(), key=lambda x: -x[1]))
 
 ENRICHMENT_FIELDS = {
     "candidates": [
@@ -710,12 +748,11 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
 
         # Value breakdowns for categorical fields (e.g. committee_type, active)
         for bfield in BREAKDOWN_FIELDS.get(table, []):
-            counts: dict[str, int] = {}
-            for r in rows:
-                val = r.get(bfield, "").strip() or "(blank)"
-                counts[val] = counts.get(val, 0) + 1
+            counts = _breakdown(rows, bfield)
+            if counts is None:
+                continue
             print(f"    {bfield + ' breakdown':<25}")
-            for val, count in sorted(counts.items(), key=lambda x: -x[1]):
+            for val, count in counts.items():
                 rate = pct(count, len(rows))
                 print(f"      {val:<30} {count:>7,}  {rate:5.1f}%")
 
@@ -775,16 +812,15 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
         bfields = BREAKDOWN_FIELDS.get(table, [])
         if not bfields:
             continue
-        tier2_breakdowns[table] = {}
+        table_breakdowns = {}
         for bfield in bfields:
-            counts: dict[str, int] = {}
-            for r in rows:
-                val = r.get(bfield, "").strip() or "(blank)"
-                counts[val] = counts.get(val, 0) + 1
-            # Sort by count descending
-            tier2_breakdowns[table][bfield] = dict(
-                sorted(counts.items(), key=lambda x: -x[1])
-            )
+            counts = _breakdown(rows, bfield)
+            if counts is not None:
+                table_breakdowns[bfield] = counts
+        # Omit the table key entirely rather than emitting an empty object when
+        # every one of its breakdowns was sparse-and-blank.
+        if table_breakdowns:
+            tier2_breakdowns[table] = table_breakdowns
 
     # ── Newest record date (max transaction date across contributions/expenditures,
     #    capped at today — LATEST_YEAR is a generous tier-1 validity bound for

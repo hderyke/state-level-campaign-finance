@@ -12,7 +12,7 @@ Unlike most states, NY publishes every kind of money movement in ONE table.
 Each disclosure row carries a `filing_sched_abbrev` letter (A–U) that says
 which NYSBOE schedule it came from, and that letter is the only thing
 separating a contribution from an expenditure from a loan. `SCHEDULES` below
-is the full A-U map, built from the live
+is the full A–U map, built from the live
 `$select=filing_sched_abbrev,filing_sched_desc,count(*)&$group=...` output —
 all 21 letters are accounted for, none are guessed.
 
@@ -42,11 +42,27 @@ transactions use:
   compliance_type_desc = COMMITTEE  -> committees row (committee_type_desc,
                                        treasurer name, address, active)
 
-NY publishes **no party affiliation** anywhere in these four datasets, so
-`candidates.party` is blank for every row (same structural gap as NH). It
-also publishes no election year on the registry, so `candidates.election_year`
-is derived here as the max `election_year` seen for that `filer_id` across the
-disclosure files.
+NY publishes **no party affiliation** anywhere in these four datasets (same
+structural gap as NH). It also publishes no election year on the registry, so
+`candidates.election_year` is derived here as the max `election_year` seen for
+that `filer_id` across the disclosure files.
+
+Party, and the rest of the registry gaps, are filled by an optional external
+overlay — see `parsers/new_york_enrich.py`, fed by
+`scrapers/new_york_party.py`, which joins NYSBOE's own election-results
+database (results.elections.ny.gov, 1994–2025) and Open States onto the
+registry on a strict name + office + district/year key. That overlay fills
+`party` (pipe-delimited ballot lines, because NY's fusion voting means a
+candidate genuinely has more than one), `incumbent`, and blank `district` /
+`election_year`, and records `party_source` + `match_confidence` next to them.
+
+The overlay is strictly optional. If its raw files are absent the parser logs
+a warning and writes exactly the blanks it wrote before, so a NY parse never
+depends on a third-party host being up. Its reach is also capped by the
+source, not by the matcher: NYSBOE certifies statewide, congressional,
+legislative and judicial contests, while town/village/city/school races are
+certified by the 62 county boards and never enter the results database — and
+those local offices are most of the 36,486-row candidates table.
 
 Candidate <-> committee linkage
 -------------------------------
@@ -85,6 +101,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from src.reporting.logger import get_logger
+from src.pipeline.parsers.new_york_enrich import NYEnrichment, name_keys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import columns as C
@@ -427,9 +444,14 @@ def run():
                             "office":          clean(row.get("office_desc")),
                             "district":        clean(row.get("district")),
                             "jurisdiction":    jurisdiction_of(row),
-                            "party":           "",   # not published by NYSBOE
+                            # party/incumbent are not published by NYSBOE at
+                            # all; §4a fills what the external overlay can
+                            # reach and leaves the rest blank.
+                            "party":            "",
+                            "party_source":     "",
+                            "match_confidence": "",
                             "election_year":   "",   # derived from disclosure rows
-                            "incumbent":       "",   # not published by NYSBOE
+                            "incumbent":       "",
                             "state_filer_id":  filer_id,
                             "raw_file":        path.name,
                             "row_num":         row_num,
@@ -468,6 +490,19 @@ def run():
         return seen
 
     try:
+        # =================== 0. External enrichment overlay ===================
+        # Loaded first because the committee-linkage pass in §2 consults its
+        # name universe. Absent files are a warning, never an error — see the
+        # module docstring on why this must not be load-bearing.
+        enrich = NYEnrichment.load(RAW_DIR)
+        if enrich.available:
+            log.info("Loaded party/office enrichment overlay "
+                     f"({RAW_DIR / 'ElectionStats_Contests.csv'})")
+        else:
+            log.warning("  No enrichment overlay found in "
+                        f"{RAW_DIR} — party/incumbent will be blank. "
+                        "Run scrapers/new_york_party.py to populate them.")
+
         # =================== 1. Entity registries ===================
         # Loaded before any transaction file so every transaction row can look
         # up its filer's office/kind as it's written, in a single pass.
@@ -496,23 +531,46 @@ def run():
 
         # =================== 2. Committee -> candidate linkage ===================
         # Only accept an extracted name that resolves to a registered candidate.
-        def link_committees() -> int:
+        def link_committees() -> tuple[int, int]:
             """Fill blank committees.candidate_name from the committee name.
-            Returns the number newly linked. Re-runnable: committees already
-            carrying a candidate_name are left alone, so this can be called
-            again after the transaction pass picks up any committee that was
-            missing from the registry."""
-            n_linked = 0
+
+            Returns (registry_links, results_links). Re-runnable: committees
+            already carrying a candidate_name are left alone, so this can be
+            called again after the transaction pass picks up any committee
+            that was missing from the registry.
+
+            Two acceptance tests, tried in that order:
+
+              1. the extracted name is a registered NY candidate filer — the
+                 original rule, and the only one that can produce a person_id;
+              2. failing that, the extracted name is someone NYSBOE's election
+                 results database has on a ballot.
+
+            Test 2 exists because plenty of NY committees are authorized for a
+            candidate who never registered a *candidate* filer_id of their own
+            (they file solely through the committee), leaving the committee
+            permanently unlinked under test 1 alone. It cannot introduce a
+            wrong person_id: assign_committee_person_ids() only assigns one
+            when candidate_name matches a row in the candidates table, so a
+            results-only link resolves to a named committee with a NULL
+            person_id — strictly more information than the blank it replaces.
+            """
+            n_registry = n_results = 0
             for cmte in committees.values():
                 if cmte.get("candidate_name"):
                     continue
                 guess = candidate_from_committee_name(cmte["committee_name"])
-                if guess and guess in name_to_cand:
+                if not guess:
+                    continue
+                if guess in name_to_cand:
                     cmte["candidate_name"] = guess
-                    n_linked += 1
-            return n_linked
+                    n_registry += 1
+                elif enrich.available and name_keys(guess)[0] in enrich.known_names:
+                    cmte["candidate_name"] = guess
+                    n_results += 1
+            return n_registry, n_results
 
-        linked = link_committees()
+        linked, linked_results = link_committees()
 
         # =================== 3. Transactions ===================
         # Each handle is appended as it's created rather than in one list
@@ -721,13 +779,73 @@ def run():
             if cand is not None:
                 cand["election_year"] = str(year)
 
+        # ============ 4a. Apply the external overlay to candidates ============
+        # Runs after election_year is derived so the matcher has a year to key
+        # on, and only ever *fills* — a value NYSBOE published always wins over
+        # one we inferred, for district and election_year alike.
+        n_party = n_incumbent = n_district = n_year = 0
+        conf_counts: dict[str, int] = {}
+        if enrich.available:
+            for cand in candidates.values():
+                hit = enrich.lookup(cand["candidate_name"], cand["office"],
+                                    cand["district"], cand["election_year"])
+                if not hit:
+                    continue
+                if not cand.get("party"):
+                    cand["party"]            = hit["party"]
+                    cand["party_source"]     = hit["party_source"]
+                    cand["match_confidence"] = hit["match_confidence"]
+                    conf_counts[hit["match_confidence"]] = \
+                        conf_counts.get(hit["match_confidence"], 0) + 1
+                    n_party += 1
+                if hit["incumbent"] and not cand.get("incumbent"):
+                    cand["incumbent"] = hit["incumbent"]
+                    n_incumbent += 1
+                if hit["district"] and not cand.get("district"):
+                    cand["district"] = hit["district"]
+                    n_district += 1
+                if hit["election_year"] and not cand.get("election_year"):
+                    cand["election_year"] = hit["election_year"]
+                    n_year += 1
+
+            cov = enrich.coverage_report(c["office"] for c in candidates.values())
+            log.info(
+                f"  Enrichment: party {n_party:,} "
+                f"(exact {conf_counts.get('exact', 0):,} / "
+                f"high {conf_counts.get('high', 0):,}), "
+                f"incumbent {n_incumbent:,}, district {n_district:,}, "
+                f"election_year {n_year:,}"
+            )
+            # Stated explicitly so a low party fill rate reads as a coverage
+            # ceiling in NYSBOE's results database rather than as a matcher
+            # that isn't working.
+            log.info(
+                f"  Enrichment scope: {cov['candidates_in_scope']:,} of "
+                f"{len(candidates):,} candidates hold an office the results "
+                f"database covers; {cov['candidates_out_of_scope']:,} hold "
+                f"local/other offices it never contains"
+            )
+            if cov["party_conflicts"]:
+                log.warning(f"  {cov['party_conflicts']:,} candidates left blank "
+                            f"because NYSBOE results and Open States named "
+                            f"different parties for the same seat")
+            log.enrichment_summary(relation="candidates", matched=n_party,
+                                   total=len(candidates),
+                                   method="NYSBOE election results + Open States "
+                                          "→ party (strict name+office+district/year)")
+
         # Committees synthesized during the transaction pass (filer_ids missing
         # from the registry) were created after the first linkage pass, so give
         # them the same chance at a candidate link before they're written.
-        linked += link_committees()
-        log.enrichment_summary(relation="committees", matched=linked,
+        again_registry, again_results = link_committees()
+        linked         += again_registry
+        linked_results += again_results
+        log.enrichment_summary(relation="committees",
+                               matched=linked + linked_results,
                                total=len(committees),
-                               method="committee_name → candidate_name heuristic")
+                               method="committee_name → candidate_name heuristic "
+                                      f"({linked:,} via filer registry, "
+                                      f"{linked_results:,} via election results)")
 
         cand_fh, cand_w = open_writer("candidates.csv.gz", C.CANDIDATES)
         file_handles.append(cand_fh)
@@ -776,7 +894,12 @@ def run():
                   loans_debts=total_loans, committees=len(committees),
                   candidates=len(candidates), skipped_detail=skipped_detail,
                   skipped_unknown=skipped_unknown,
-                  committees_linked=linked)
+                  committees_linked=linked + linked_results,
+                  committees_linked_registry=linked,
+                  committees_linked_results=linked_results,
+                  enrichment_available=enrich.available,
+                  party_filled=n_party, incumbent_filled=n_incumbent,
+                  district_filled=n_district, election_year_filled=n_year)
 
     except KeyboardInterrupt:
         log._emit("parse_completed", status="interrupted",
