@@ -54,6 +54,65 @@ Received / Loan Payments exist as schedules inside individual filed reports
 (see the app's own example pages) but aren't exposed by the C&E search, so
 `loans_debts.csv.gz` is written with a header and no rows.
 
+The roster export has no combined name column
+------------------------------------------------
+Despite the search form's single `nameField` checkbox, TNCAMP's actual
+candidates_p*.csv / pacs_p*.csv export splits a person's name into separate
+First Name / Last Name columns, and represents an organization (a PAC or a
+corporate donor registered as its own filer) by putting the full org name in
+Last Name with First Name left blank — there is no "Name" header at all.
+`roster_entity_name()` rebuilds the combined 'Last, First' form from the two
+columns (falling back to a single combined column if one is ever present, in
+case the export shape changes back) so it feeds `display_name()`/
+`split_name()` unchanged from every other name in this parser. First Name
+being present is also the signal `is_person_row()` uses to decide whether a
+roster row is a candidate or an organization at all — see the next section.
+
+Candidate and PAC rows are mixed in both roster files
+-------------------------------------------------------
+`candidates_p*.csv` and `pacs_p*.csv` are two separate searches (`findType`
+"candidates" vs. "pacs"), but empirically neither is exclusively one or the
+other — organization rows (committee_type PAC, corporate filers) turn up in
+`candidates_p*.csv` and person rows turn up in `pacs_p*.csv`. The file a row
+came from is therefore not a reliable type signal. Both roster loops run
+every row through `is_person_row()` and register it as a candidate or a
+committee based on the row's own content (First Name present vs. blank),
+never based on which file it was read from.
+
+Office Sought, Committee Affiliation and Contact Info never resolve
+-----------------------------------------------------------------------
+The `cp_search_body()` display checkboxes in scrapers/tennessee.py request
+`officeSoughtField`, `committeeAffiliationField` and `contactInfoField`, but
+none of the three appear anywhere in the actual roster export header — TN's
+export apparently doesn't support them for this search regardless of what's
+requested. `office`, and the roster-driven candidate↔committee affiliation
+link, therefore come out blank for every TN candidate; this is a source
+limitation, not a header-alias miss, and is surfaced in validate.py's fill
+rate warnings rather than silently patched over here.
+
+Primary/General are dates with an embedded outcome, not Y/N flags
+---------------------------------------------------------------------
+The roster's Primary/General columns are not win/loss flags — they carry the
+election date with the outcome parenthesized onto the end, e.g.
+`"11/08/2016 (L)"` / `"08/07/2014 (W)"`, and are blank entirely for a cycle
+that hasn't happened yet. `parse_election_result()` pulls the `(W)`/`(L)`
+suffix out; a Y/Yes/Won-style flag match against the whole string never
+matches this shape and would silently produce `incumbent = "0"` for every
+candidate with a General value instead of the real result — an earlier
+version of this parser did exactly that.
+
+No filer identifier on expenditure rows
+------------------------------------------
+Every expenditure export sampled has "Recipient Name" blank in 100% of rows
+— TNCAMP's expenditure schedule has no per-row field naming the committee
+that made the expenditure (only "Vendor Name", the payee). This is a genuine
+gap in the source, the same category as the missing filer IDs and loan
+schedules above: there is nothing here to resolve `committee_name` from, so
+it is written blank for every TN expenditure row rather than guessed at.
+`validate.py`'s `TIER1_OPTIONAL_FOR_NAME_HASH` downgrades this from a hard
+failure to a tier-2 warning for states (TN included) that already lack a
+filer ID.
+
 Output (data/Tennessee/cleaned/):
   contributions.csv.gz, expenditures.csv.gz, loans_debts.csv.gz,
   committees.csv.gz, candidates.csv.gz
@@ -65,6 +124,7 @@ import re
 import sys
 import time
 from datetime import date, datetime
+from functools import lru_cache
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -116,10 +176,19 @@ COLUMN_ALIASES: dict[str, list[str]] = {
     "vendor_address":  ["vendor_address", "vendor_addr", "payee_address", "address"],
     "purpose":         ["purpose", "purpose_of_expenditure"],
     # entity roster (candidates_*.csv / pacs_*.csv)
+    # "entity_name" is only ever populated if TNCAMP's export reverts to a
+    # single combined column; the real export splits first/last (see
+    # roster_entity_name()), so first_name/last_name are resolved separately.
     "entity_name":     ["name", "candidate_name", "pac_name", "candidate_pac_name"],
+    "first_name":      ["first_name"],
+    "last_name":       ["last_name"],
     "office_sought":   ["office_sought", "office"],
     "district":        ["district"],
-    "party":           ["party", "party_affiliation"],
+    # "party_affliation" is TN's own misspelling of the header ("Party
+    # Affliation", missing the second i) — it's the only spelling the real
+    # export has ever been observed to use, but "party_affiliation" is kept
+    # too in case that gets corrected on TN's side.
+    "party":           ["party", "party_affiliation", "party_affliation"],
     "treasurer_name":  ["treasurer_name", "treasurer"],
     "treasurer_contact": ["treasurer_contact_info", "treasurer_contact",
                           "treasurer_address"],
@@ -143,15 +212,14 @@ VALID_STATE_ABBS = {
 }
 
 _ZIP_RE   = re.compile(r"^\d{5}(?:-\d{4})?$")
-_TRUE_RE  = re.compile(r"^(y|yes|true|1|won|winner)$", re.IGNORECASE)
 
 # Tokens that mark a name as an organization rather than a person, used by
 # display_name() to decide whether a comma is a "Last, First" inversion or
 # just punctuation inside a business name.
 _ORG_MARKER_RE = re.compile(
-    r"(?:^|\W)(?:llc|l\.l\.c|llp|lp|inc|corp|corporation|co|company|pac|"
-    r"committee|fund|association|assoc|union|partners|partnership|group|"
-    r"trust|foundation|society|institute|council|&)(?:\W|$)",
+    r"(?:^|\W)(?:llc|l\.l\.c|llp|lp|pllc|plc|ltd|pc|p\.c|inc|corp|corporation|"
+    r"co|company|pac|committee|fund|association|assoc|union|partners|"
+    r"partnership|group|trust|foundation|society|institute|council|&)(?:\W|$)",
     re.IGNORECASE,
 )
 
@@ -171,15 +239,20 @@ def snake(header: str) -> str:
     return h.lower().strip("_")
 
 
-def build_header_map(fieldnames: list[str] | None) -> dict[str, str]:
-    """canonical field -> the actual header in this file that supplies it.
+def build_header_map(fieldnames: list[str] | None) -> dict[str, int]:
+    """canonical field -> the column index in this file that supplies it.
 
     Resolved once per file rather than per row: TNCAMP page exports for the
     same relation share a header, but the header may differ between relations
-    (contributions vs. expenditures) and could change between scrape runs."""
+    (contributions vs. expenditures) and could change between scrape runs.
+
+    Maps to a column *index* rather than the header string so each data row
+    can be read with plain csv.reader (a list) instead of csv.DictReader (a
+    dict rebuilt from scratch every row) — a meaningful cost at the ~5,000
+    raw-file, hundreds-of-thousands-of-rows scale this parser runs at."""
     if not fieldnames:
         return {}
-    present = {snake(h): h for h in fieldnames if h}
+    present = {snake(h): i for i, h in enumerate(fieldnames) if h}
     resolved = {}
     for canonical, spellings in COLUMN_ALIASES.items():
         for spelling in spellings:
@@ -189,14 +262,22 @@ def build_header_map(fieldnames: list[str] | None) -> dict[str, str]:
     return resolved
 
 
-def get(row: dict, hmap: dict, field: str) -> str:
+def get(row: list, hmap: dict, field: str) -> str:
     """Read a canonical field out of a raw row via the resolved header map."""
-    header = hmap.get(field)
-    return clean(row.get(header)) if header else ""
+    idx = hmap.get(field)
+    if idx is None or idx >= len(row):
+        return ""
+    return clean(row[idx])
 
 
+@lru_cache(maxsize=None)
 def parse_amount(val: str) -> str:
     """Parse a dollar amount to a plain numeric string. Returns '' on failure.
+
+    Memoized: a pure function of its input string, and amounts repeat heavily
+    across a run (the same handful of dollar figures recur constantly), so
+    caching avoids re-parsing the same string across hundreds of thousands of
+    rows spread over ~5,000 raw files.
 
     TNCAMP exports amounts with a dollar sign and thousands separators
     ("$1,250.00"); adjustment/refund rows use a leading '-' rather than
@@ -213,8 +294,10 @@ def parse_amount(val: str) -> str:
         return ""
 
 
+@lru_cache(maxsize=None)
 def parse_date(val: str) -> str:
     """Normalize a date to YYYY-MM-DD. Returns '' on failure or implausible year.
+    Memoized — see parse_amount().
 
     TNCAMP renders dates as M/D/YYYY in the HTML table and the CSV export
     inherits that; the other formats are accepted defensively."""
@@ -232,8 +315,10 @@ def parse_date(val: str) -> str:
     return ""
 
 
+@lru_cache(maxsize=None)
 def parse_year(val: str) -> str:
     """First 4-digit year in a string, or ''.
+    Memoized — see parse_amount().
 
     TN's election-year values are sometimes decorated with the special
     election they belong to ('2023 (HOUSE 51)' appears in the search form's own
@@ -242,16 +327,71 @@ def parse_year(val: str) -> str:
     return m.group(0) if m else ""
 
 
-def parse_bool(val: str) -> str:
-    """'Y'/'Yes'/'Won' -> '1', anything else non-empty -> '0', blank -> ''."""
+_ELECTION_RESULT_RE = re.compile(r"\(([WL])\)\s*$", re.IGNORECASE)
+
+
+@lru_cache(maxsize=None)
+def parse_election_result(val: str) -> str:
+    """Pull the win/loss outcome off a roster Primary/General value.
+
+    TN's roster export doesn't carry a plain Y/N winner flag — Primary and
+    General are the election date with the outcome parenthesized onto the
+    end, e.g. '11/08/2016 (L)' or '08/07/2014 (W)'. A cycle with no decided
+    outcome yet (an upcoming election) has the date with no parenthetical at
+    all. Returns '1' for a win, '0' for a loss, '' for anything else
+    (blank, or a date with no outcome recorded)."""
     v = clean(val)
     if not v:
         return ""
-    return "1" if _TRUE_RE.match(v) else "0"
+    m = _ELECTION_RESULT_RE.search(v)
+    if not m:
+        return ""
+    return "1" if m.group(1).upper() == "W" else "0"
 
 
+def roster_entity_name(row: list, hmap: dict) -> str:
+    """Build a roster row's raw entity name, tolerating the split-name export.
+
+    Prefers a combined column if present (see COLUMN_ALIASES note), otherwise
+    rebuilds the 'Last, First' form TN uses everywhere else in this parser
+    from the First Name / Last Name columns the real export actually has.
+    An organization row (First Name blank) has its full name in Last Name
+    already, with no comma to invert."""
+    name = get(row, hmap, "entity_name")
+    if name:
+        return name
+    first = get(row, hmap, "first_name")
+    last  = get(row, hmap, "last_name")
+    if first and last:
+        return f"{last}, {first}"
+    return last or first
+
+
+def is_person_row(row: list, hmap: dict) -> bool:
+    """True if a roster row names a person (a candidate) rather than an
+    organization (a PAC or corporate filer).
+
+    candidates_p*.csv and pacs_p*.csv both mix person and organization rows
+    in practice — the file a row came from is not a reliable type signal (see
+    module docstring). First Name is only ever populated for a person, so its
+    presence is the classification TN's own export gives us; an organization
+    row has its full name in Last Name with First Name, District and Party
+    all blank."""
+    if get(row, hmap, "first_name"):
+        return True
+    if get(row, hmap, "entity_name"):
+        # Combined-name export shape (not currently observed) — first/last
+        # aren't split out to check, so fall back to another person-only
+        # field instead of guessing from the name string.
+        return bool(get(row, hmap, "district")) or bool(get(row, hmap, "office_sought"))
+    return False
+
+
+@lru_cache(maxsize=None)
 def split_address(raw: str) -> tuple[str, str, str, str]:
     """Split TNCAMP's single combined address into (street, city, state, zip).
+    Memoized — the same address recurs across a filer's many transactions;
+    see parse_amount().
 
     TNCAMP has no separate city/state/ZIP columns — everything arrives as one
     comma-joined string, e.g.:
@@ -305,8 +445,10 @@ def split_address(raw: str) -> tuple[str, str, str, str]:
     return street, city, state, zipc
 
 
+@lru_cache(maxsize=None)
 def split_name(raw: str) -> tuple[str, str]:
     """Candidate name -> (first_middle, last).
+    Memoized — see parse_amount().
 
     TN roster names arrive last-name-first ("Smith, John Q.") in the candidate
     search, which is the form's own sort order; transaction recipient names
@@ -324,8 +466,11 @@ def split_name(raw: str) -> tuple[str, str]:
     return " ".join(parts[:-1]), parts[-1]
 
 
+@lru_cache(maxsize=None)
 def display_name(raw: str) -> str:
     """'SMITH, JOHN Q.' -> 'JOHN Q. SMITH'; already-forward names pass through.
+    Memoized — the same contributor/recipient name recurs constantly across
+    a filer's transactions; see parse_amount().
 
     Committee↔candidate matching in utils.assign_committee_person_ids() is
     name-based and does NOT handle comma inversion, so every name written out
@@ -523,58 +668,92 @@ def run():
             _fill(cmte, "election_year",  parse_year(election_year))
         return cname
 
+    def process_roster_row(row: list, hmap: dict, path: Path, row_num: int) -> bool:
+        """Register one roster row as a candidate or a committee.
+
+        Shared by both the candidates_p*.csv and pacs_p*.csv loops: which
+        file a row came from doesn't say what it is (see module docstring),
+        so every row is classified by its own content via is_person_row()
+        regardless of source file. Returns False for a row with no usable
+        name (blank First Name AND Last Name)."""
+        name = roster_entity_name(row, hmap)
+        if not name:
+            return False
+
+        if is_person_row(row, hmap):
+            # Primary/General carry the election outcome, not a plain Y/N
+            # flag — see parse_election_result(). A general-election win is
+            # the closer proxy for a sitting officeholder.
+            incumbent = parse_election_result(get(row, hmap, "general"))
+            cname = register_candidate(
+                name,
+                office=get(row, hmap, "office_sought"),
+                district=get(row, hmap, "district"),
+                party=get(row, hmap, "party"),
+                election_year=get(row, hmap, "election_year"),
+                incumbent=incumbent,
+                raw_file=path.name, row_num=row_num,
+            )
+            # A candidate's own committee is named in the roster's Committee
+            # Affiliation column when TN's export carries it — it currently
+            # doesn't (see module docstring), so this branch is presently
+            # dormant; kept in case TN's export gains the column back.
+            affiliation = get(row, hmap, "committee_affiliation")
+            if affiliation:
+                _, t_city, _, t_zip = split_address(
+                    get(row, hmap, "treasurer_contact")
+                    or get(row, hmap, "contact_info"))
+                register_committee(
+                    affiliation,
+                    committee_type="Candidate Committee",
+                    candidate_name=cname,
+                    treasurer=get(row, hmap, "treasurer_name"),
+                    city=t_city, zipc=t_zip,
+                    election_year=get(row, hmap, "election_year"),
+                    active="0" if get(row, hmap, "closed") else "1",
+                    raw_file=path.name, row_num=row_num,
+                )
+        else:
+            _, city, _, zipc = split_address(
+                get(row, hmap, "treasurer_contact")
+                or get(row, hmap, "contact_info"))
+            register_committee(
+                name,
+                committee_type="PAC",
+                treasurer=get(row, hmap, "treasurer_name"),
+                city=city, zipc=zipc,
+                election_year=get(row, hmap, "election_year"),
+                # TN's roster has a "Closed" date rather than an active flag:
+                # a populated Closed means the entity is shut.
+                active="0" if get(row, hmap, "closed") else "1",
+                raw_file=path.name, row_num=row_num,
+            )
+        return True
+
     try:
         # =================== 1. Candidate roster ===================
         # Processed first so office/district/party are already populated when
         # the transaction files reference the same people by name.
         logged_headers: set[str] = set()
 
+        # Both roster files are read through the same per-row classifier
+        # (process_roster_row) since candidate/organization rows are mixed in
+        # both — see module docstring. The "candidates"/"committees" log
+        # labels below describe which file was read, not what every row in it
+        # turned out to be.
         for path in raw_files("candidates_p*.csv"):
             ft, count = time.perf_counter(), 0
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.DictReader(f)
-                hmap   = build_header_map(reader.fieldnames)
+                reader = csv.reader(f)
+                header = next(reader, None)
+                hmap   = build_header_map(header)
                 if "candidates" not in logged_headers:
                     log.info(f"  candidate roster headers resolved: "
-                             f"{sorted(hmap)} (from {reader.fieldnames})")
+                             f"{sorted(hmap)} (from {header})")
                     logged_headers.add("candidates")
                 for row_num, row in enumerate(reader, start=2):
-                    name = get(row, hmap, "entity_name")
-                    if not name:
-                        continue
-                    # "Primary winner" / "General winner" are the only
-                    # incumbency-adjacent signals TN publishes; a general-
-                    # election win is the closer proxy for a sitting officeholder.
-                    incumbent = parse_bool(get(row, hmap, "general"))
-                    cname = register_candidate(
-                        name,
-                        office=get(row, hmap, "office_sought"),
-                        district=get(row, hmap, "district"),
-                        party=get(row, hmap, "party"),
-                        election_year=get(row, hmap, "election_year"),
-                        incumbent=incumbent,
-                        raw_file=path.name, row_num=row_num,
-                    )
-                    # A candidate's own committee is named in the roster's
-                    # Committee Affiliation column; without it there's nothing
-                    # to link a TN candidate to a committee, since the
-                    # transaction files name only the recipient.
-                    affiliation = get(row, hmap, "committee_affiliation")
-                    if affiliation:
-                        _, t_city, _, t_zip = split_address(
-                            get(row, hmap, "treasurer_contact")
-                            or get(row, hmap, "contact_info"))
-                        register_committee(
-                            affiliation,
-                            committee_type="Candidate Committee",
-                            candidate_name=cname,
-                            treasurer=get(row, hmap, "treasurer_name"),
-                            city=t_city, zipc=t_zip,
-                            election_year=get(row, hmap, "election_year"),
-                            active="0" if get(row, hmap, "closed") else "1",
-                            raw_file=path.name, row_num=row_num,
-                        )
-                    count += 1
+                    if process_roster_row(row, hmap, path, row_num):
+                        count += 1
             log.file_parsed(path.name, "candidates", count,
                             duration_s=time.perf_counter() - ft,
                             bytes=path.stat().st_size)
@@ -583,32 +762,16 @@ def run():
         for path in raw_files("pacs_p*.csv"):
             ft, count = time.perf_counter(), 0
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.DictReader(f)
-                hmap   = build_header_map(reader.fieldnames)
+                reader = csv.reader(f)
+                header = next(reader, None)
+                hmap   = build_header_map(header)
                 if "pacs" not in logged_headers:
                     log.info(f"  PAC roster headers resolved: "
-                             f"{sorted(hmap)} (from {reader.fieldnames})")
+                             f"{sorted(hmap)} (from {header})")
                     logged_headers.add("pacs")
                 for row_num, row in enumerate(reader, start=2):
-                    name = get(row, hmap, "entity_name")
-                    if not name:
-                        continue
-                    _, city, _, zipc = split_address(
-                        get(row, hmap, "treasurer_contact")
-                        or get(row, hmap, "contact_info"))
-                    closed = get(row, hmap, "closed")
-                    register_committee(
-                        name,
-                        committee_type="PAC",
-                        treasurer=get(row, hmap, "treasurer_name"),
-                        city=city, zipc=zipc,
-                        election_year=get(row, hmap, "election_year"),
-                        # TN's roster has a "Closed" date rather than an active
-                        # flag: a populated Closed means the PAC is shut.
-                        active="0" if closed else "1",
-                        raw_file=path.name, row_num=row_num,
-                    )
-                    count += 1
+                    if process_roster_row(row, hmap, path, row_num):
+                        count += 1
             log.file_parsed(path.name, "committees", count,
                             duration_s=time.perf_counter() - ft,
                             bytes=path.stat().st_size)
@@ -635,11 +798,12 @@ def run():
             ft, count = time.perf_counter(), 0
             file_year = year_from_filename(path)
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.DictReader(f)
-                hmap   = build_header_map(reader.fieldnames)
+                reader = csv.reader(f)
+                header = next(reader, None)
+                hmap   = build_header_map(header)
                 if "contributions" not in logged_headers:
                     log.info(f"  contribution headers resolved: "
-                             f"{sorted(hmap)} (from {reader.fieldnames})")
+                             f"{sorted(hmap)} (from {header})")
                     logged_headers.add("contributions")
 
                 for row_num, row in enumerate(reader, start=2):
@@ -714,11 +878,12 @@ def run():
             ft, count = time.perf_counter(), 0
             file_year = year_from_filename(path)
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.DictReader(f)
-                hmap   = build_header_map(reader.fieldnames)
+                reader = csv.reader(f)
+                header = next(reader, None)
+                hmap   = build_header_map(header)
                 if "expenditures" not in logged_headers:
                     log.info(f"  expenditure headers resolved: "
-                             f"{sorted(hmap)} (from {reader.fieldnames})")
+                             f"{sorted(hmap)} (from {header})")
                     logged_headers.add("expenditures")
 
                 for row_num, row in enumerate(reader, start=2):

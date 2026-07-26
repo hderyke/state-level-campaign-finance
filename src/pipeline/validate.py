@@ -97,6 +97,13 @@ REQUIRED_COLS = {
 TIER1_OPTIONAL_FOR_NAME_HASH = {
     "candidates": {"state_filer_id"},
     "committees": {"state_filer_id"},
+    # TN's public expenditure export carries no per-row filer/spender
+    # identifier at all — only the payee ("Vendor Name") side is populated,
+    # "Recipient Name" (what committee_name is normally read from) is blank
+    # in 100% of observed rows. There's nothing in the source to fill
+    # committee_name from, so this state fails REQUIRED_COLS's tier-1 check
+    # on every run unless downgraded the same way state_filer_id is above.
+    "expenditures": {"committee_name"},
 }
 
 # Tables that have amount fields
