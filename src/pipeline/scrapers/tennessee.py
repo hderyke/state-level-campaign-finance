@@ -300,32 +300,50 @@ def cp_search_body(find: str) -> dict:
     — see module docstring for the full list. If office/committee-affiliation
     /contact-info columns still come out blank after this fix, that's a
     genuine TNCAMP export gap, not a leftover field-name miss."""
-    return {
-        "searchType":          find,
-        "name":                "",
-        "officeSelection":     "",
-        "districtSelection":   "",
-        "winner":              "",
-        "electionYearSelection": "",
-        "partySelection":      "",
-        # result columns
-        "nameField":                  True,
-        "contactField":               True,
-        "treasurerNameField":         True,
-        "treasurerContactField":      True,
-        "partyField":                 True,
-        "officeField":                True,
-        "districtField":              True,
-        "primaryField":               True,
-        "generalField":               True,
-        "electionYearField":          True,
-        "committeeField":             True,
-        "officersField":              True,
-        "createdField":               True,
-        "closedField":                True,
-        "responsibleIndividualField": True,
-        "_continue":                  "Search",
-    }
+    if find == 'candidate':
+        return {
+            "searchType":          find,
+            "name":                "",
+            "officeSelection":     "",
+            "districtSelection":   "",
+            "winner":              "",
+            "electionYearSelection": "",
+            "partySelection":      "",
+            # result columns
+            "nameField":                  True,
+            "contactField":               True,
+            "treasurerNameField":         True,
+            "treasurerContactField":      True,
+            "partyField":                 True,
+            "officeField":                True,
+            "districtField":              True,
+            "primaryField":               True,
+            "generalField":               True,
+            "electionYearField":          True,
+            "_continue":                  "Search",
+        }
+    else:
+        return {
+            "searchType":          find,
+            "name":                "",
+            "officeSelection":     "",
+            "districtSelection":   "",
+            "winner":              "",
+            "electionYearSelection": "",
+            "partySelection":      "",
+            # result columns
+            "nameField":                  True,
+            "contactField":               True,
+            "treasurerNameField":         True,
+            "treasurerContactField":      True,
+            "partyField":                 True,
+            "committeeField":             True,
+            "officersField":              True,
+            "createdField":               True,
+            "closedField":                True,
+            "responsibleIndividualField": True,
+            "_continue":                  "Search",
+        }
 
 
 # Horizontal scope groupings. TN calls its non-candidate committees "PACs".
@@ -832,6 +850,10 @@ def run(
         # to the transaction files, so there's nothing to gain from caching it.
         # Only ever 1-2 tasks, but they're independent so run them through the
         # same pool rather than special-casing sequential code for two items.
+        
+        # === THIS PORTION FOR CANDIDATES AND PACS NEED REDOING AS CANDIDATES NEED YEAR FILTER TO GET RESULTS
+        # WHILE PACS DON'T. ADDITIONALLY, THEY HAVE DIFFERENT COLUMN DISPLAY OPTIONS!!!
+
         if entity_relations:
             log.info(f"\nTennessee entity roster: {entity_relations}")
             with ThreadPoolExecutor(max_workers=max(1, min(workers, len(entity_relations)))) as pool:
