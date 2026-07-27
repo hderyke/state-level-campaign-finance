@@ -119,11 +119,69 @@ down (to 1 for the old fully-sequential behavior) if TN.gov starts responding
 with more 429/503s or WAF resets than before; there's no data in this repo's
 run logs yet on how many concurrent sessions the WAF tolerates.
 
+## cpsearch.htm is two searches, not one
+
+`cesearch.htm` and `cpsearch.htm` are separate forms, but `cpsearch.htm` is
+itself two different searches behind one URL: flipping its `searchType` radio
+between `candidate` and `pac` changes both the criteria the form accepts and
+the result columns it offers. Two consequences the scraper has to respect:
+
+  - **Candidates are election-scoped; PACs are not.** A TN candidate exists
+    per election, and `electionYearSelection` on the candidate side is a
+    required criterion rather than an optional filter — submitting it blank
+    returns an empty result set. (That is what this scraper did before, and
+    why the candidate roster came back empty while the PAC roster worked.) So
+    the candidate roster is a walk *per election*, while the PAC roster — a
+    standing registration with no election year on the form at all — stays one
+    walk for the whole roster.
+
+    Two traps in that selector, both of which this scraper hit:
+
+      1. **Its option values are opaque database IDs, not years.** The list
+         reads `<option value="234">2026</option>`,
+         `<option value="238">2023 (HOUSE 51)</option>` — the year exists only
+         in the *label*. POSTing "2023" matches no option and TNCAMP answers
+         with an empty result set, identical in appearance to form drift. Only
+         `discover_elections()` reads this select; the year-scanning
+         `discover_valid_years()` is for `yearSelection` on the C&E form,
+         whose values genuinely are years.
+      2. **There are several options per year.** ~50 options span ~28 years,
+         because special elections get their own entries — 2023 alone has the
+         regular cycle plus HOUSE 3, HOUSE 51, HOUSE 52, HOUSE 86 and HOUSE 86
+         AUG GEN, each with its own candidates. So the walk unit is an
+         election, not a year, and raw files are keyed
+         `candidates_{year}_e{id}_p{NNN}.csv`. Keying on the bare year would
+         have the five 2023 searches overwrite each other's page files and let
+         whichever finished first claim the year's `complete` sentinel for all
+         of them.
+
+    Because the IDs exist nowhere but the live form, there is no static
+    fallback for this list the way `MIN_YEAR..current_year` backstops the
+    transaction years. `run()` raises if the lookup comes back empty. Falling
+    back to a fabricated year range is what produced the original failure.
+  - **The two sides have different display checkboxes.** Candidates offer
+    office/district/primary/general/election-year columns; PACs offer
+    committee/officers/created/closed/responsible-individual. A `*Field` key
+    the form doesn't recognise doesn't error, it just means the column never
+    appears in the export — the same silent failure the 2026-07-25 --discover
+    run traced the missing Office Sought / Committee Affiliation / Contact
+    Info columns to. `cp_search_body()` therefore has one branch per side
+    rather than sending the union of both.
+
+Because the candidate roster is now election-scoped it also joins the
+incremental scheme: each election carries the same `complete` sentinel, is
+skipped once complete unless `--force` or an explicit year range is given, and
+anything in the open cycle is always re-walked. Past elections' candidate
+lists are closed history.
+
 Raw files (data/Tennessee/raw/):
-  contributions_{year}_p{NNN}.csv   — one file per results page
-  expenditures_{year}_p{NNN}.csv    — one file per results page
-  candidates_p{NNN}.csv             — candidate roster pages
-  pacs_p{NNN}.csv                   — PAC roster pages
+  contributions_{year}_p{NNN}.csv       — one file per results page
+  expenditures_{year}_p{NNN}.csv        — one file per results page
+  candidates_{year}_e{id}_p{NNN}.csv    — candidate roster pages, one set per
+                                          election; `id` is the form's own
+                                          electionYearSelection option value
+                                          (see above)
+  pacs_p{NNN}.csv                       — PAC roster pages, not election-scoped
 """
 
 import csv
@@ -135,6 +193,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import requests
 from bs4 import BeautifulSoup
@@ -185,7 +244,7 @@ MAX_PAGES_PER_YEAR = 2000
 # jar. See "Concurrency" in the module docstring — this is the knob that took
 # the full-history run from ~3 days to a few hours; turn it down to 1 to get
 # the old strictly-sequential behavior back if the WAF starts pushing back.
-DEFAULT_WORKERS = 8
+DEFAULT_WORKERS = 4
 
 # TN.gov's WAF resets connections that look like bare scripts (no User-Agent,
 # no Accept headers). config.USER_AGENT is the repo-wide browser string;
@@ -284,14 +343,37 @@ def ce_search_body(year: int, relation: str) -> dict:
     return body
 
 
-def cp_search_body(find: str) -> dict:
+def cp_search_body(find: str, election=None) -> dict:
     """Candidates & PACs roster search POST body.
 
-    `find` is "candidate", "pac" or "both" — the `searchType` radio group at
-    the top of cpsearch.htm. Every criterion is left blank so the search
-    returns the full roster, and every display checkbox is on so the export
-    carries office/district/party/treasurer — none of which appear anywhere
-    in the contributions or expenditures exports.
+    `find` is "candidate" or "pac" — the `searchType` radio group at the top
+    of cpsearch.htm. cpsearch.htm is one URL serving two genuinely different
+    searches: switching the radio swaps both the *criteria* the form offers
+    and the *display checkboxes* it offers, so there is no single body that
+    works for both. Hence the two branches below rather than one dict with
+    the union of every key.
+
+    The criteria that differ:
+
+      - A candidate search needs `electionYearSelection`. Candidates in TN
+        exist per election, and submitting the candidate search with it left
+        blank comes back with no results at all (which is what this scraper
+        was doing, and why the candidate roster was empty) — it is a required
+        criterion, not an optional filter. `election` is therefore mandatory
+        when find == "candidate", and must be an Election: the field takes the
+        select's opaque option ID ("237"), not the year ("2023"). Posting the
+        year matches no option and returns nothing, indistinguishably from
+        form drift.
+      - office/district/party/winner are candidate-only criteria and are not
+        sent on the PAC side at all.
+
+    The display checkboxes that differ: the candidate side offers
+    office/district/primary/general/election-year columns; the PAC side offers
+    committee/officers/created/closed/responsible-individual instead. Sending
+    the wrong set is not merely inert — an unrecognised `*Field` key means the
+    column simply never appears in the export, which is the same failure mode
+    the 2026-07-25 --discover run traced the missing Office Sought / Committee
+    Affiliation / Contact Info columns to.
 
     Field names below were rewritten 2026-07-25 after --discover showed this
     form had drifted much further from the originally-assumed names than
@@ -300,50 +382,66 @@ def cp_search_body(find: str) -> dict:
     — see module docstring for the full list. If office/committee-affiliation
     /contact-info columns still come out blank after this fix, that's a
     genuine TNCAMP export gap, not a leftover field-name miss."""
-    if find == 'candidate':
+    if find == "candidate":
+        if election is None:
+            # Guard rather than silently posting a blank: TNCAMP answers a
+            # candidate search with no election selected with an empty result
+            # set, indistinguishable downstream from "the form drifted".
+            raise ValueError(
+                "cp_search_body(find='candidate') requires an Election — "
+                "TNCAMP's candidate search returns nothing without one."
+            )
+        if not getattr(election, "value", None):
+            raise ValueError(
+                f"cp_search_body(find='candidate') needs an Election carrying "
+                f"the form's option ID, got {election!r}. The year alone is "
+                f"not a valid electionYearSelection value — see "
+                f"discover_elections()."
+            )
         return {
-            "searchType":          find,
-            "name":                "",
-            "officeSelection":     "",
-            "districtSelection":   "",
-            "winner":              "",
-            "electionYearSelection": "",
-            "partySelection":      "",
-            # result columns
-            "nameField":                  True,
-            "contactField":               True,
-            "treasurerNameField":         True,
-            "treasurerContactField":      True,
-            "partyField":                 True,
-            "officeField":                True,
-            "districtField":              True,
-            "primaryField":               True,
-            "generalField":               True,
-            "electionYearField":          True,
-            "_continue":                  "Search",
+            "searchType":            find,
+            "name":                  "",
+            # The one criterion that makes this search return anything. Note
+            # this is the opaque option ID, not the year.
+            "electionYearSelection": str(election.value),
+            "officeSelection":       "",
+            "districtSelection":     "",
+            "partySelection":        "",
+            "winner":                "",
+            # result columns — candidate side
+            "nameField":             True,
+            "contactField":          True,
+            "treasurerNameField":    True,
+            "treasurerContactField": True,
+            "partyField":            True,
+            "officeField":           True,
+            "districtField":         True,
+            "primaryField":          True,
+            "generalField":          True,
+            "electionYearField":     True,
+            "_continue":             "Search",
         }
-    else:
-        return {
-            "searchType":          find,
-            "name":                "",
-            "officeSelection":     "",
-            "districtSelection":   "",
-            "winner":              "",
-            "electionYearSelection": "",
-            "partySelection":      "",
-            # result columns
-            "nameField":                  True,
-            "contactField":               True,
-            "treasurerNameField":         True,
-            "treasurerContactField":      True,
-            "partyField":                 True,
-            "committeeField":             True,
-            "officersField":              True,
-            "createdField":               True,
-            "closedField":                True,
-            "responsibleIndividualField": True,
-            "_continue":                  "Search",
-        }
+
+    # PAC side. A PAC is a standing registration, not a per-cycle entity, so
+    # the form offers no election-year criterion here — one search returns the
+    # whole roster. The candidate-only criteria (office/district/party/winner/
+    # electionYearSelection) are deliberately absent rather than sent blank.
+    return {
+        "searchType":                 find,
+        "name":                       "",
+        # result columns — PAC side
+        "nameField":                  True,
+        "contactField":               True,
+        "treasurerNameField":         True,
+        "treasurerContactField":      True,
+        "partyField":                 True,
+        "committeeField":             True,
+        "officersField":              True,
+        "createdField":               True,
+        "closedField":                True,
+        "responsibleIndividualField": True,
+        "_continue":                  "Search",
+    }
 
 
 # Horizontal scope groupings. TN calls its non-candidate committees "PACs".
@@ -351,6 +449,13 @@ def cp_search_body(find: str) -> dict:
 # plural "candidates"/"pacs" here (as this dict did before 2026-07-25) never
 # matched any option on the live form.
 ENTITY_FIND_TYPE = {"candidates": "candidate", "pacs": "pac"}
+
+# Which entity rosters are searched once per election year, and which are
+# searched once outright. Keyed the same way as ENTITY_FIND_TYPE so run() can
+# plan both rosters through one loop instead of special-casing "candidates"
+# by name in three places. See cp_search_body() for why candidates are
+# year-scoped and PACs are not.
+ENTITY_YEAR_SCOPED = {"candidates": True, "pacs": False}
 
 
 # ============================ http session ============================
@@ -401,28 +506,135 @@ def discover_form_fields(session: requests.Session, url: str) -> None:
     print("--- end form fields ---\n")
 
 
-def discover_valid_years(session: requests.Session) -> list[int]:
-    """Read the election-year options off the live C&E search form.
+def discover_valid_years(session: requests.Session,
+                         url: str = CE_SEARCH_URL) -> list[int]:
+    """Read the *reporting*-year options off a live search form.
 
-    Returns a sorted list of 4-digit years, or [] if no year-looking select is
-    found. Reading the form beats hardcoding a range: TN's year list includes
-    special-election entries and grows as cycles are added."""
+    Returns a sorted list of 4-digit years, or [] if no such select is found.
+    This reads `yearSelection` — cesearch.htm's plain reporting-year filter,
+    whose option values really are the years ("2024" -> value "2024") — and
+    drives the contributions/expenditures walks.
+
+    It deliberately does NOT read `electionYearSelection`, which is a
+    different thing in two ways: its options are keyed by opaque database IDs
+    rather than years, and there are several per year. See
+    discover_elections() for that one."""
     try:
-        resp = session.get(CE_SEARCH_URL, timeout=60)
+        resp = session.get(url, timeout=60)
         resp.raise_for_status()
     except Exception:
         return []
     soup = BeautifulSoup(resp.text, "html.parser")
 
+    # Prefer the select actually named `yearSelection`; fall back to "whichever
+    # select has the most 4-digit option values" only if the form has been
+    # renamed, since that heuristic is what found it before the name was known.
+    selects = soup.find_all("select", attrs={"name": "yearSelection"}) \
+        or soup.find_all("select")
+
     best: list[int] = []
-    for select in soup.find_all("select"):
+    for select in selects:
         values  = [opt.get("value") for opt in select.find_all("option")]
         numeric = [int(v) for v in values if v and re.fullmatch(r"\d{4}", v)]
-        # The year selector is whichever select has the most 4-digit options;
-        # every other select on the form (office, district, party) has none.
         if len(numeric) > len(best):
             best = numeric
     return sorted(set(best))
+
+
+class Election(NamedTuple):
+    """One option of the `electionYearSelection` select.
+
+    TN does not have "the 2023 election" — it has five of them (the regular
+    cycle plus HOUSE 3, HOUSE 51, HOUSE 52, HOUSE 86 and HOUSE 86 AUG GEN
+    specials), each its own option with its own candidates. So an election,
+    not a year, is the unit the candidate roster is walked in.
+
+    value  the form's own option value: an opaque database ID ("237"), NOT
+           the year. This is what gets POSTed.
+    year   the 4-digit year parsed out of the option's label, used for
+           --start-year/--end-year filtering and for the raw filename.
+    label  the full option text ("2023 (HOUSE 51)"), for logging.
+    """
+    value: str
+    year:  int
+    label: str
+
+    @property
+    def key(self) -> str:
+        """Stable per-election identifier used in raw filenames and as the
+        manifest's `year` value.
+
+        Has to be unique per *election*, not per year: keying on the year
+        alone would have all five 2023 specials write over each other's
+        `candidates_2023_p001.csv` and would let the first one to finish claim
+        the year's `complete` sentinel for the other four. The year stays at
+        the front so the filename sorts and greps by year, and so the parser's
+        year_from_filename() still finds it."""
+        return f"{self.year}_e{self.value}"
+
+
+# The option label carries the year plus, for a special election, a
+# parenthesized district — and TNCAMP renders it across several lines with
+# stray whitespace ("2023\r\n  \r\n    (HOUSE 51)"). Only the leading year is
+# needed; the rest is collapsed for the log line.
+def _election_label(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "")).strip()
+
+
+def discover_elections(session: requests.Session,
+                       url: str = CP_SEARCH_URL) -> list[Election]:
+    """Read the `electionYearSelection` options off a live form.
+
+    Returns them newest-year-first, or [] if the select can't be found.
+
+    This exists separately from discover_valid_years() because the two
+    selects are not the same shape at all. `yearSelection` is a plain year
+    filter whose values are years. `electionYearSelection` is a lookup table:
+
+        <option value="234">2026</option>
+        <option value="237">2023 (HOUSE 3)</option>
+        <option value="238">2023 (HOUSE 51)</option>
+
+    The values are opaque row IDs, and the year only exists in the label. Two
+    consequences the candidate walk depends on:
+
+      - The ID is the only thing the form accepts. Posting "2023" — which is
+        what this scraper did before, because discover_valid_years() scanned
+        for 4-digit *values*, found none here, and fell back to a fabricated
+        MIN_YEAR..current range — matches no option, so TNCAMP returns an
+        empty result set for every single search. That is exactly the "no
+        export link on page 1" storm this replaces.
+      - IDs cannot be guessed or reconstructed offline, so there is no static
+        fallback for this list the way there is for yearSelection. A failed
+        lookup has to be an error, not a default — see run()."""
+    try:
+        resp = session.get(url, timeout=60)
+        resp.raise_for_status()
+    except Exception:
+        return []
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    select = soup.find("select", attrs={"name": "electionYearSelection"})
+    if select is None:
+        return []
+
+    elections: list[Election] = []
+    seen: set[str] = set()
+    for opt in select.find_all("option"):
+        value = (opt.get("value") or "").strip()
+        # The placeholder ("- Select Election Year-") has an empty value.
+        if not value or value in seen:
+            continue
+        label = _election_label(opt.get_text())
+        m = re.search(r"(?:19|20)\d{2}", label)
+        if not m:
+            continue
+        seen.add(value)
+        elections.append(Election(value=value, year=int(m.group()), label=label))
+
+    # Newest first, and stable within a year, so a --start-year run and a full
+    # run walk the same elections in the same order.
+    return sorted(elections, key=lambda e: (-e.year, e.value))
 
 
 # ========================= manifest helpers ============================
@@ -527,7 +739,7 @@ def _csv_rows(content: bytes) -> int:
 
 def _walk_results(session: requests.Session, log, relation: str, year: str,
                   search_url: str, body: dict, results_url: str, next_url: str,
-                  stem: str) -> tuple[int, int, int, bool]:
+                  stem: str, label: str | None = None) -> tuple[int, int, int, bool]:
     """Run one search and download every results page as its own CSV.
 
     Returns (pages_downloaded, rows_downloaded, pages_failed, complete).
@@ -550,7 +762,10 @@ def _walk_results(session: requests.Session, log, relation: str, year: str,
     pages = rows = failed = 0
     page_num = 0
     url = results_url
-    label    = f"{relation} {year}".strip()
+    # `label` is for the log only — the caller can pass something friendlier
+    # than the manifest key, e.g. "candidates 2023 (HOUSE 51)" instead of
+    # "candidates 2023_e238".
+    label    = label or f"{relation} {year}".strip()
     complete = False
     # Old page files for this (relation, year) are cleared lazily — only once
     # the first replacement page is actually in hand. Clearing up front would
@@ -685,20 +900,77 @@ def _walk_one_transaction_year(log, relation: str, year: int) -> dict:
             "failed": failed}
 
 
-def _walk_one_entity_roster(log, relation: str) -> dict:
-    """Run one entity-roster walk (candidates or pacs) on its own session."""
-    session = build_session()
+def _walk_one_entity_roster(log, relation: str,
+                            election: Election | None = None) -> dict:
+    """Run one entity-roster walk on its own session.
+
+    `election` is required for the election-scoped rosters (candidates) and
+    must be None for the rest (pacs) — see ENTITY_YEAR_SCOPED and
+    cp_search_body(). An election-scoped walk writes
+    `candidates_{year}_e{id}_p{NNN}.csv`; the `{year}_e{id}` key goes into the
+    manifest's `year` column too, so _clear_pages()'s glob, the `complete`
+    sentinel and the parser's year-bearing glob all keep working while still
+    telling TN's five separate 2023 elections apart. An unscoped walk keeps
+    the bare `pacs_p{NNN}.csv`.
+
+    Runs on its own session for the same reason the transaction walks do:
+    TNCAMP's "more results" cursor lives in the session cookie, so concurrent
+    walks sharing one session would stomp on each other's pagination. The
+    random stagger spreads out the first request of each worker."""
+    scoped = ENTITY_YEAR_SCOPED.get(relation, False)
+    if scoped and election is None:
+        raise ValueError(f"{relation} is election-scoped — "
+                         f"_walk_one_entity_roster needs an Election")
+    time.sleep(random.uniform(0, 5.0))
+    session  = build_session()
+    key      = election.key if scoped else ""
+    stem     = f"{relation}_{key}" if scoped else relation
     t_roster = time.perf_counter()
     pages, rows, failed, _complete = _walk_results(
-        session, log, relation, "",
-        CP_SEARCH_URL, cp_search_body(ENTITY_FIND_TYPE[relation]),
+        session, log, relation, key,
+        CP_SEARCH_URL,
+        cp_search_body(ENTITY_FIND_TYPE[relation], election if scoped else None),
         CP_RESULTS_URL, CP_NEXT_URL,
-        stem=relation,
+        stem=stem,
+        label=f"{relation} {election.label}" if scoped else relation,
     )
-    log.page_scrape_complete(filename=relation, rows=rows,
+    log.page_scrape_complete(filename=stem, rows=rows,
                              duration_s=round(time.perf_counter() - t_roster, 1),
                              ok=pages, err=failed)
-    return {"relation": relation, "pages": pages, "rows": rows, "failed": failed}
+    return {"relation": relation, "year": key, "pages": pages, "rows": rows,
+            "failed": failed}
+
+
+def _pending(log, relation: str, items: list, *, force: bool,
+             year_range_active: bool, current_year: int) -> tuple[list, int]:
+    """Filter a work list down to the units this relation still needs.
+
+    Returns (to_walk, skipped). The incremental rule — skip a unit only if it
+    carries the manifest's `complete` sentinel, never skip one in the open
+    cycle, and skip nothing at all under --force or an explicit year range —
+    is identical for transaction relations and for the election-scoped
+    candidate roster, so it lives here rather than being written out twice and
+    drifting apart.
+
+    `items` is a list of either plain ints (a transaction year, whose manifest
+    key is just the year) or Elections (whose manifest key is `key`, since one
+    year can hold several elections — see Election.key)."""
+    done    = completed_years(relation)
+    walk    = []
+    skipped = 0
+    for item in items:
+        if isinstance(item, Election):
+            key, year = item.key, item.year
+        else:
+            key, year = str(item), int(item)
+        is_open_cycle = year >= current_year
+        if (key in done and not force and not year_range_active
+                and not is_open_cycle):
+            log.file_download_skip(filename=f"{relation}_{key}_p001.csv")
+            skipped += 1
+            continue
+        walk.append(item)
+    return walk, skipped
 
 
 # ============================== run ====================================
@@ -716,7 +988,9 @@ def run(
 ):
     """Download Tennessee TNCAMP data.
 
-    Vertical scope (transactions only — the entity roster isn't year-scoped):
+    Vertical scope (applies to contributions, expenditures and the candidate
+    roster — the PAC roster is the one relation with no election year on its
+    form, so it is always a single always-refreshed walk):
         (no flag)               incremental — years already complete in the
                                 manifest are skipped; the current year is
                                 always re-walked
@@ -766,19 +1040,58 @@ def run(
         current_year      = datetime.today().year
         year_range_active = start_year is not None or end_year is not None
 
-        # ── Resolve the year list from the live form, with a static fallback ──
-        years = discover_valid_years(discovery_session)
-        if years:
-            log.info(f"  Discovered {len(years)} election years on the live form: "
-                     f"{years[0]}–{years[-1]}")
-        else:
-            years = list(range(MIN_YEAR, current_year + 1))
-            log.warning(f"  Could not read the year selector from the live form — "
-                        f"falling back to {MIN_YEAR}–{current_year}")
-        if start_year is not None:
-            years = [y for y in years if y >= start_year]
-        if end_year is not None:
-            years = [y for y in years if y <= end_year]
+        def _clip(items: list) -> list:
+            """Apply --start-year/--end-year to years or Elections alike."""
+            def yr(i):
+                return i.year if isinstance(i, Election) else int(i)
+            if start_year is not None:
+                items = [i for i in items if yr(i) >= start_year]
+            if end_year is not None:
+                items = [i for i in items if yr(i) <= end_year]
+            return items
+
+        # ── Transaction years: cesearch.htm's `yearSelection` ────────────
+        # Values here really are years, so a static MIN_YEAR..current fallback
+        # is a legitimate (if blunt) substitute if the lookup fails.
+        years: list[int] = []
+        if txn_relations:
+            years = discover_valid_years(discovery_session, CE_SEARCH_URL)
+            if years:
+                log.info(f"  Discovered {len(years)} transaction years on the "
+                         f"live form: {years[0]}–{years[-1]}")
+            else:
+                years = list(range(MIN_YEAR, current_year + 1))
+                log.warning(f"  Could not read the transaction year selector from "
+                            f"the live form — falling back to "
+                            f"{MIN_YEAR}–{current_year}")
+            years = _clip(years)
+
+        # ── Candidate elections: cpsearch.htm's `electionYearSelection` ──
+        # Not years — opaque option IDs, several per year (TN has five
+        # separate 2023 elections). See discover_elections(). There is no
+        # fallback that can work here: the IDs exist only on the live form, so
+        # a failed lookup is fatal rather than something to paper over with a
+        # fabricated year range. Doing the latter is precisely how this ended
+        # up POSTing "2002".."2026" into a field that accepts none of them and
+        # getting 25 empty searches back.
+        elections: list[Election] = []
+        if any(ENTITY_YEAR_SCOPED.get(r) for r in entity_relations):
+            elections = discover_elections(discovery_session, CP_SEARCH_URL)
+            if not elections:
+                raise RuntimeError(
+                    "Could not read the `electionYearSelection` options from "
+                    f"{CP_SEARCH_URL}. TN's candidate search is keyed by opaque "
+                    "per-election option IDs that only exist on the live form, "
+                    "so there is no fallback — the candidate roster cannot be "
+                    "scraped without them. Run `python3 "
+                    "src/pipeline/scrapers/tennessee.py --discover` to see what "
+                    "the select looks like now."
+                )
+            log.info(f"  Discovered {len(elections)} candidate elections on the "
+                     f"live form: {elections[-1].year}–{elections[0].year} "
+                     f"({len({e.year for e in elections})} distinct years; the "
+                     f"surplus are special elections)")
+            elections = _clip(elections)
 
         # ── Transactions ────────────────────────────────────────────────
         # Counts searches that actually ran vs. searches that produced pages.
@@ -796,16 +1109,11 @@ def run(
         # year's pagination cursor lives in its own session's cookie).
         tasks: list[tuple[str, int]] = []
         for relation in txn_relations:
-            done_years = completed_years(relation)
-            for year in years:
-                y = str(year)
-                is_open_cycle = year >= current_year
-                if (y in done_years and not force and not year_range_active
-                        and not is_open_cycle):
-                    log.file_download_skip(filename=f"{relation}_{y}_p001.csv")
-                    years_skip += 1
-                    continue
-                tasks.append((relation, year))
+            to_walk, skipped = _pending(
+                log, relation, years, force=force,
+                year_range_active=year_range_active, current_year=current_year)
+            years_skip += skipped
+            tasks.extend((relation, year) for year in to_walk)
 
         if tasks:
             log.info(f"\nTennessee transactions: {len(tasks)} (relation, year) "
@@ -831,11 +1139,81 @@ def run(
                     if result["pages"]:
                         searches_with_pages += 1
 
+        # ── Entity roster (candidates / PACs) ───────────────────────────
+        # cpsearch.htm is one URL serving two different searches, and they are
+        # not shaped alike (see cp_search_body):
+        #
+        #   candidates  election-scoped. A candidate exists per election and
+        #               the form's electionYearSelection is a required
+        #               criterion, not a filter — a candidate search with none
+        #               selected returns nothing. The unit is one *election*,
+        #               not one year: TN's list holds ~50 elections across ~28
+        #               years because special elections get their own entries
+        #               (five separate 2023s), each with its own candidates.
+        #               So this is a walk per election, landing as
+        #               candidates_{year}_e{id}_p{NNN}.csv, with the same
+        #               incremental treatment as the transaction years — an
+        #               election with the manifest's `complete` sentinel is
+        #               skipped unless --force or an explicit year range is
+        #               given, and anything in the open cycle is always
+        #               re-walked. Past elections' candidate lists are closed
+        #               history.
+        #   pacs        not election-scoped. A PAC is a standing registration
+        #               with no election year on the form at all, so one walk
+        #               pulls the whole roster, always refreshed — it's a
+        #               single cheap search and registration/treasurer details
+        #               change continuously.
+        #
+        # Both go through the same pool as one flat (relation, Election|None)
+        # task list, so a ~50-election candidate walk gets the same concurrency
+        # the transaction walks do instead of running one at a time.
+        entity_tasks: list[tuple[str, Election | None]] = []
+        for relation in entity_relations:
+            if ENTITY_YEAR_SCOPED.get(relation):
+                to_walk, skipped = _pending(
+                    log, relation, elections, force=force,
+                    year_range_active=year_range_active, current_year=current_year)
+                years_skip += skipped
+                entity_tasks.extend((relation, e) for e in to_walk)
+            else:
+                entity_tasks.append((relation, None))
+
+        if entity_tasks:
+            log.info(f"\nTennessee entity roster: {len(entity_tasks)} search(es) "
+                     f"queued across {workers} worker(s) "
+                     f"({sorted(set(r for r, _ in entity_tasks))})")
+            with ThreadPoolExecutor(max_workers=max(1, min(workers, len(entity_tasks)))) as pool:
+                futures = {pool.submit(_walk_one_entity_roster, log, relation, election):
+                           (relation, election)
+                           for relation, election in entity_tasks}
+                for fut in as_completed(futures):
+                    relation, election = futures[fut]
+                    try:
+                        result = fut.result()
+                    except Exception as e:
+                        log.page_scrape_error(entity=relation,
+                                              page_id=election.key if election else "roster",
+                                              error=str(e))
+                        files_err += 1
+                        searches_run += 1
+                        continue
+                    files_ok  += result["pages"]
+                    files_err += result["failed"]
+                    searches_run += 1
+                    if result["pages"]:
+                        searches_with_pages += 1
+
         # Every search in the run coming back with no export link, and no HTTP
         # failures to explain it, means the form contract changed — TN does not
         # have an empty decade. Fail loudly so orc marks the state failed,
         # rather than leaving the parser to find no input and report a
         # mysteriously empty state. A single empty year is left alone.
+        #
+        # Checked once here, after both the transaction and the roster walks,
+        # rather than between them: a `--candidates`-only or `--committees`-only
+        # run has no transaction searches at all, and running the check early
+        # would let a totally broken cpsearch.htm body pass silently because
+        # `searches_run` was still 0 at that point.
         if searches_run and not searches_with_pages and not files_err:
             raise RuntimeError(
                 f"TNCAMP returned no CSV export link for any of the {searches_run} "
@@ -843,32 +1221,6 @@ def run(
                 f"likely changed — run `python3 src/pipeline/scrapers/tennessee.py "
                 f"--discover` and update ce_search_body() / cp_search_body()."
             )
-
-        # ── Entity roster (candidates / PACs) ───────────────────────────
-        # Not year-scoped: one walk per roster, always refreshed. Filer status
-        # and treasurer details change continuously and the roster is tiny next
-        # to the transaction files, so there's nothing to gain from caching it.
-        # Only ever 1-2 tasks, but they're independent so run them through the
-        # same pool rather than special-casing sequential code for two items.
-        
-        # === THIS PORTION FOR CANDIDATES AND PACS NEED REDOING AS CANDIDATES NEED YEAR FILTER TO GET RESULTS
-        # WHILE PACS DON'T. ADDITIONALLY, THEY HAVE DIFFERENT COLUMN DISPLAY OPTIONS!!!
-
-        if entity_relations:
-            log.info(f"\nTennessee entity roster: {entity_relations}")
-            with ThreadPoolExecutor(max_workers=max(1, min(workers, len(entity_relations)))) as pool:
-                futures = {pool.submit(_walk_one_entity_roster, log, relation): relation
-                          for relation in entity_relations}
-                for fut in as_completed(futures):
-                    relation = futures[fut]
-                    try:
-                        result = fut.result()
-                    except Exception as e:
-                        log.page_scrape_error(entity=relation, page_id="roster", error=str(e))
-                        files_err += 1
-                        continue
-                    files_ok  += result["pages"]
-                    files_err += result["failed"]
 
         duration = round(time.perf_counter() - t0, 1)
         log.info(f"Done in {duration}s — {files_ok} pages downloaded, "

@@ -7,8 +7,24 @@ per results page, ~100 rows each):
 
   contributions_{year}_p{NNN}.csv  -> contributions
   expenditures_{year}_p{NNN}.csv   -> expenditures
-  candidates_p{NNN}.csv            -> candidates (+ their committees)
+  candidates_{year}_e{id}_p{NNN}.csv -> candidates (+ their committees)
   pacs_p{NNN}.csv                  -> committees
+
+The candidate roster is election-scoped and the PAC roster is not, because
+TNCAMP's candidate search requires an election and its PAC search has no
+election criterion at all — see scrapers/tennessee.py. `{id}` is TNCAMP's own
+opaque `electionYearSelection` option value, present because a year does not
+identify an election there: special elections are registered separately, so
+2023 covers five of them. The parser doesn't care about the ID; it only
+splits what would otherwise be colliding filenames.
+
+So candidate pages arrive as one set per election, and the same person recurs
+across every election they ran in. `register_candidate()` already
+de-duplicates on the normalized name and keeps the latest `election_year`
+seen, so a candidate spanning four cycles collapses to one row regardless of
+how many election files they appear in. `CANDIDATE_GLOBS` also still matches
+the older `candidates_{year}_p*.csv` and `candidates_p*.csv` namings, so a raw
+directory left over from an earlier scrape run still parses.
 
 Header tolerance
 ----------------
@@ -57,7 +73,7 @@ Received / Loan Payments exist as schedules inside individual filed reports
 The roster export has no combined name column
 ------------------------------------------------
 Despite the search form's single `nameField` checkbox, TNCAMP's actual
-candidates_p*.csv / pacs_p*.csv export splits a person's name into separate
+candidate / PAC roster export splits a person's name into separate
 First Name / Last Name columns, and represents an organization (a PAC or a
 corporate donor registered as its own filer) by putting the full org name in
 Last Name with First Name left blank — there is no "Name" header at all.
@@ -70,10 +86,11 @@ roster row is a candidate or an organization at all — see the next section.
 
 Candidate and PAC rows are mixed in both roster files
 -------------------------------------------------------
-`candidates_p*.csv` and `pacs_p*.csv` are two separate searches (`findType`
-"candidates" vs. "pacs"), but empirically neither is exclusively one or the
-other — organization rows (committee_type PAC, corporate filers) turn up in
-`candidates_p*.csv` and person rows turn up in `pacs_p*.csv`. The file a row
+The candidate files and `pacs_p*.csv` come from two separate searches
+(`searchType` "candidate" vs. "pac"), but empirically neither is exclusively
+one or the other — organization rows (committee_type PAC, corporate filers)
+turn up in the candidate files and person rows turn up in
+`pacs_p*.csv`. The file a row
 came from is therefore not a reliable type signal. Both roster loops run
 every row through `is_person_row()` and register it as a candidate or a
 committee based on the row's own content (First Name present vs. blank),
@@ -525,18 +542,52 @@ def resolve_recipient(raw: str, candidates: dict) -> tuple[str, str, bool]:
     return "", utils.clean_name(raw), False
 
 
-def raw_files(pattern: str) -> list[Path]:
-    """Non-empty raw files matching a glob, sorted by name (so page order and
-    year order are both preserved: contributions_2010_p001, _p002, ...)."""
-    return sorted(
-        (f for f in RAW_DIR.glob(pattern) if f.stat().st_size > 0),
-        key=lambda p: p.name,
-    )
+def raw_files(*patterns: str) -> list[Path]:
+    """Non-empty raw files matching any of these globs, sorted by name (so page
+    order and year order are both preserved: contributions_2010_p001, _p002,
+    ...).
+
+    Accepts several patterns because the candidate roster has two possible
+    filename shapes on disk — see CANDIDATE_GLOBS. De-duplicated by path, so
+    overlapping patterns can't read the same file twice."""
+    seen: dict[Path, None] = {}
+    for pattern in patterns:
+        for f in RAW_DIR.glob(pattern):
+            if f.stat().st_size > 0:
+                seen[f] = None
+    return sorted(seen, key=lambda p: p.name)
+
+
+# The candidate roster became year-scoped when scrapers/tennessee.py started
+# passing TNCAMP's required election-year criterion (see module docstring), so
+# its pages are now `candidates_{year}_p{NNN}.csv`. The bare `candidates_p*`
+# spelling is kept alongside it so a raw directory written by an older scrape
+# run — or a partially re-scraped one holding both shapes — still parses
+# instead of silently yielding zero candidates.
+CANDIDATE_GLOBS = ("candidates_*_p*.csv", "candidates_p*.csv")
+
+
+_FILENAME_YEAR_RE = re.compile(r"_((?:19|20)\d{2})(?:_e[^_]+)?_p\d+\.csv$")
 
 
 def year_from_filename(path: Path) -> str:
-    """Election year embedded in a transaction page filename, or ''."""
-    m = re.search(r"_((?:19|20)\d{2})_p\d+\.csv$", path.name)
+    """Election year embedded in a raw page filename, or ''.
+
+    Handles every shape the scraper writes:
+
+        contributions_2024_p001.csv    -> "2024"
+        candidates_2023_e238_p001.csv  -> "2023"
+        candidates_p001.csv            -> ""     (legacy, pre-election-scoping)
+        pacs_p001.csv                  -> ""     (no election year exists)
+
+    The optional `_e{id}` segment is the candidate roster's per-election
+    discriminator: TN registers special elections separately, so 2023 alone
+    covers five distinct elections and the year does not identify one (see
+    scrapers/tennessee.py). The ID is TNCAMP's own opaque option value and
+    means nothing to the parser — only the year it is attached to matters
+    here, since rows are de-duplicated by candidate name regardless of which
+    election file they arrived in."""
+    m = _FILENAME_YEAR_RE.search(path.name)
     return m.group(1) if m else ""
 
 
@@ -685,6 +736,13 @@ def run():
         if not name:
             return False
 
+        # The Election Year column is authoritative; the year in the filename
+        # is the search criterion the page was fetched under and is used only
+        # as a fallback, exactly as the transaction loops do. It's '' for the
+        # unyeared PAC roster, which has no election year to fall back to.
+        election_year = (get(row, hmap, "election_year")
+                         or year_from_filename(path))
+
         if is_person_row(row, hmap):
             # Primary/General carry the election outcome, not a plain Y/N
             # flag — see parse_election_result(). A general-election win is
@@ -695,7 +753,7 @@ def run():
                 office=get(row, hmap, "office_sought"),
                 district=get(row, hmap, "district"),
                 party=get(row, hmap, "party"),
-                election_year=get(row, hmap, "election_year"),
+                election_year=election_year,
                 incumbent=incumbent,
                 raw_file=path.name, row_num=row_num,
             )
@@ -714,7 +772,7 @@ def run():
                     candidate_name=cname,
                     treasurer=get(row, hmap, "treasurer_name"),
                     city=t_city, zipc=t_zip,
-                    election_year=get(row, hmap, "election_year"),
+                    election_year=election_year,
                     active="0" if get(row, hmap, "closed") else "1",
                     raw_file=path.name, row_num=row_num,
                 )
@@ -727,7 +785,7 @@ def run():
                 committee_type="PAC",
                 treasurer=get(row, hmap, "treasurer_name"),
                 city=city, zipc=zipc,
-                election_year=get(row, hmap, "election_year"),
+                election_year=election_year,
                 # TN's roster has a "Closed" date rather than an active flag:
                 # a populated Closed means the entity is shut.
                 active="0" if get(row, hmap, "closed") else "1",
@@ -746,7 +804,7 @@ def run():
         # both — see module docstring. The "candidates"/"committees" log
         # labels below describe which file was read, not what every row in it
         # turned out to be.
-        for path in raw_files("candidates_p*.csv"):
+        for path in raw_files(*CANDIDATE_GLOBS):
             ft, count = time.perf_counter(), 0
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
                 reader = csv.reader(f)
@@ -781,7 +839,7 @@ def run():
                             duration_s=time.perf_counter() - ft,
                             bytes=path.stat().st_size)
 
-        log.registry_loaded("candidates_p*.csv / pacs_p*.csv",
+        log.registry_loaded("candidates_*_p*.csv / pacs_p*.csv",
                             entries=len(candidates) + len(committees),
                             relation="candidates+committees")
 
