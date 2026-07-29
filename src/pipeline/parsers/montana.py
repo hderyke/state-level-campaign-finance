@@ -71,6 +71,18 @@ Notes
     docstring), not a live sample — if a real scrape turns up different or
     additional header names, the `.get(...)` lookups below should be updated
     to match; they're written defensively (missing keys just yield '').
+  • Raw JSON is written compactly (no indent) by the scraper — json.load reads
+    it identically, so this is transparent here, but it means the raw files are
+    not pretty-printed if you open one by hand. Pipe them through
+    `python3 -m json.tool` when eyeballing.
+  • A report the scraper could not fetch carries a `fetchError` key (and no
+    itemized rows). Those are skipped and counted here rather than silently
+    contributing zero rows, so a partial scrape is visible in the parse log
+    instead of looking like a filer with no activity. The scraper retries them
+    on the next run — its report-level cache deliberately refuses to reuse an
+    errored entry.
+  • The scraper also stores a `fetchFingerprint` per report (its cache key).
+    It is ignored here; it exists purely so an amended report gets re-fetched.
 """
 
 import csv
@@ -152,7 +164,7 @@ def parse_epoch_ms(val) -> str:
         if d.year < 1990 or d.year > MAX_VALID_YEAR:
             return ""
         return d.strftime("%Y-%m-%d")
-    except (ValueError, OSError, OverflowError):
+    except (ValueError, OSError, OverflowError, TypeError):
         return ""
 
 
@@ -243,6 +255,7 @@ def run():
     total_expenditures  = 0
     committees_written   = 0
     candidates_written   = 0
+    reports_incomplete   = 0   # reports the scraper failed to fetch (fetchError)
     file_handles          = []
 
     try:
@@ -274,7 +287,6 @@ def run():
                 elec_yr = clean(str(row.get("electionYear", "")))
                 party   = clean(row.get("partyDescr", ""))
                 jur     = clean(row.get("candidateTypeDescr", ""))
-                status  = clean(row.get("candidateStatusDescr", ""))
 
                 entry = {
                     "candidate_name": name, "candidate_first": first,
@@ -340,7 +352,7 @@ def run():
         # ── Itemized transactions (from per-entity full-report bundles) ──
 
         def process_entity_file(path: Path, entity_type: str):
-            nonlocal total_contributions, total_expenditures
+            nonlocal total_contributions, total_expenditures, reports_incomplete
             data = load_json(path)
             if not data:
                 return
@@ -357,11 +369,19 @@ def run():
 
             cont_row_num = 0
             expn_row_num = 0
+            incomplete   = 0
             ft = time.perf_counter()
 
             for report in data.get("reports", []):
                 form_type = report.get("formTypeCode", "")
                 report_id = clean(str(report.get("reportId", "")))
+
+                # The scraper marks a report it could not fetch with fetchError
+                # and leaves its itemized lists empty. Count it so a partial
+                # scrape shows up in the log rather than reading as no activity.
+                if report.get("fetchError"):
+                    incomplete += 1
+                    continue
 
                 if form_type in PERIODIC_TYPES:
                     for row in report.get("contributions", []):
@@ -461,7 +481,9 @@ def run():
                 # Unrecognized form types are skipped — scraper already logs a
                 # warning for these at scrape time.
 
+            reports_incomplete += incomplete
             log.file_parsed(path.name, "transactions", cont_row_num + expn_row_num,
+                            skipped=incomplete,
                             duration_s=round(time.perf_counter() - ft, 2),
                             bytes=path.stat().st_size)
 
@@ -476,6 +498,10 @@ def run():
                 process_entity_file(path, "committee")
             except Exception as e:
                 log.file_parse_error(filename=path.name, error=str(e))
+
+        if reports_incomplete:
+            log.warning(f"  {reports_incomplete:,} report(s) had no data because the "
+                        f"scraper failed to fetch them — re-run the scraper to retry")
 
         # ── Close handles before person-ID assignment ──────────────────
         for fh in file_handles:
@@ -507,7 +533,8 @@ def run():
         log.info(f"Done in {duration}s")
         log._emit("parse_completed", status="completed", duration_s=duration,
                   contributions=total_contributions, expenditures=total_expenditures,
-                  committees=committees_written, candidates=candidates_written)
+                  committees=committees_written, candidates=candidates_written,
+                  reports_incomplete=reports_incomplete)
 
     except KeyboardInterrupt:
         log.warning("Interrupted")
