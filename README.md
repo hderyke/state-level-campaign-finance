@@ -224,6 +224,7 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
 | Ohio (OH) | ✅ | ✅ | Bulk CSV files via curl_cffi (browser TLS impersonation); validated end-to-end for the Candidate Committee group — PAC/Party groups not yet sampled |
 | Pennsylvania (PA) | ✅ | ✅ | Plain HTTP zip-per-year download (2000–present, ~25M contribution rows); no shared filer ID between a candidate and their own money committee in source data — hand-verified override table links the largest statewide committees, smaller ones remain unlinked |
 | Washington (WA) | ✅ | ✅ | Socrata (SODA) API on `data.wa.gov` — PDC data across 4 datasets (contributions/expenditures/debt/loans), split by year; pure HTTP, no Playwright. Filer office/party/jurisdiction carried inline per row, so no separate registry needed (~6.3M contribution rows) |
+| Wisconsin (WI) | ✅ | ✅ | Sunshine (`campaignfinance.wi.gov`) CSV download endpoints; pure HTTP, no Playwright. **Every download is silently truncated at 99,999 rows**, so the ~13.1M transactions are pulled in adaptive date windows (month → halves → day → amount bands) that are row-counted and re-split on any capped response. One combined contribution/disbursement feed routed by `Transaction Type`. Office/district come from transactions (absent from the registrant list); see [docs/states/wisconsin.md](docs/states/wisconsin.md) |
 
 **Key:** ✅ Done &nbsp; 🚧 In development &nbsp; ⚠️ Partial / known issues &nbsp; ❌ Broken
 
