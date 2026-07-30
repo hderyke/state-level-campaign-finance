@@ -39,10 +39,21 @@ Schema notes
       parser checks the window ranges encoded in the filenames and warns.
 
   Candidates and committees
-    • committees.csv is the only source for registrant status/party/candidate
-      name; office and district aren't in it, so they're accumulated from the
-      transaction pass (`Related Office` / `Related District`, keeping the row
-      from the most recent ballot event) and joined on Registrant ID.
+    • Every registrant is a filer, so every registrant gets a committees row —
+      candidates included. A candidate registrant additionally gets a candidates
+      row. `State Candidate` and `State Candidate -> Personal Campaign
+      Committee` are the same thing recorded under two registration flows (the
+      subtype was dropped when Sunshine replaced CFIS in 2019); both map to
+      "Candidate Committee" at aggregate time.
+    • committees.csv's `Ballot events` cell lists every seat the registrant has
+      been on a ballot for, and is the source for office, district,
+      jurisdiction and election_year — see office_path_parts(). The transaction
+      pass harvests the same hierarchy (`Related Office` / `Related District` /
+      `Related Branch`) as a fallback for registrants whose cell is empty.
+    • treasurer_name is always blank. The registrant list carries everything the
+      per-registrant detail page shows except the treasurer and depository
+      blocks, and reaching those means one page load per registrant (~10.3k)
+      against an undocumented internal API — see docs/states/wisconsin.md.
     • Registrant IDs persist across cycles (party committees still carry their
       1978 registration date), so id_model="person".
     • `Registrant Type` is hierarchical, e.g. "PAC  -> Labor",
@@ -117,6 +128,33 @@ _CHUNK_RE = re.compile(
 
 # "2025 July Continuing (ID: 7946)" → 7946
 _REPORT_ID_RE = re.compile(r"\(ID:\s*(\d+)\)")
+
+# One line of the registrant list's `Ballot events` cell:
+#   "2026 Fall General (Date: 11/03/2026, Type: Election) - State Assembly / …"
+# Referendum events carry no office path, so the " - path" tail is optional.
+_BALLOT_EVENT_RE = re.compile(
+    r"^(?P<name>.*?)\s*\(Date:\s*(?P<date>[^,]*?)\s*,\s*Type:\s*(?P<type>[^)]*)\)"
+    r"(?:\s*-\s*(?P<path>.*))?$"
+)
+
+# Seat labels at the end of an office path:
+#   "State Assembly, District No. 67" → 67      "Court of Appeals, District 04" → 4
+#   "Sauk County Circuit Court, Branch 03" → Branch 3
+_DISTRICT_NO_RE = re.compile(r"\bDistrict\s*(?:No\.?\s*)?(\d+)\b", re.IGNORECASE)
+_BRANCH_RE      = re.compile(r"\bBranch\s*(\d+)\b", re.IGNORECASE)
+
+# "Sauk County Circuit Court" → "Sauk County";  "Dane County District Attorney" → "Dane County"
+_COUNTY_RE = re.compile(r"^(?P<county>.+?\s+County)\b", re.IGNORECASE)
+
+# Offices elected by the whole state. Everything else is scoped to a county or
+# municipality (Circuit Court, District Attorney, Municipal Judge) or to a
+# multi-county appellate district (Court of Appeals), so those get their
+# jurisdiction from the office path instead — see office_path_parts().
+STATEWIDE_OFFICES = {
+    "GOVERNOR", "LIEUTENANT GOVERNOR", "ATTORNEY GENERAL", "SECRETARY OF STATE",
+    "STATE TREASURER", "SUPERINTENDENT OF PUBLIC INSTRUCTION", "SUPREME COURT",
+    "STATE SENATE", "STATE ASSEMBLY", "STATEWIDE REFERENDUM",
+}
 
 # Trailing "city, State zip[, Country]" line of an address block
 _CITY_STATE_ZIP_RE = re.compile(
@@ -254,6 +292,144 @@ def election_year(row: dict) -> str:
     return tx_date[:4] if tx_date else ""
 
 
+def office_path_parts(path: str) -> tuple[str, str, str]:
+    """
+    Split a Sunshine office path into (office, district, jurisdiction).
+
+    The path is a " / "-separated hierarchy that gets one to three levels deep:
+
+        Governor
+        State Assembly / State Assembly, District No. 92
+        Circuit Court / Sauk County Circuit Court / Sauk County Circuit Court, Branch 03
+        District Attorney / Dane County District Attorney
+
+    Level 1 is the office. The deepest level is the specific seat, which is
+    where the district number or court branch lives. Level 2 names the county
+    for the county-scoped offices.
+
+    district   "92" for a legislative or appellate district; "Branch 3" for a
+               circuit court branch, spelled out because a bare "3" would read
+               as a district and mean something else entirely; "" for
+               single-seat offices (Governor, Supreme Court, a county DA).
+    jurisdiction
+               "Sauk County" where the path names a county, "Statewide" for the
+               offices in STATEWIDE_OFFICES, "" otherwise — Court of Appeals
+               districts span several counties without being statewide, and
+               Municipal Judge seats are identified by a bare numeric municipality
+               code ("Municipal Judge (450301)") that isn't a place name.
+    """
+    levels = [clean(p) for p in (path or "").split(" / ")]
+    levels = [p for p in levels if p]
+    if not levels:
+        return "", "", ""
+
+    office = levels[0]
+    seat   = levels[-1]
+
+    district = ""
+    m = _BRANCH_RE.search(seat)
+    if m:
+        district = f"Branch {int(m.group(1))}"
+    else:
+        m = _DISTRICT_NO_RE.search(seat)
+        # Guard against the office itself being the match ("Statewide Referendum"
+        # has no number, but a future "District Attorney" style label could).
+        if m:
+            district = str(int(m.group(1)))
+
+    jurisdiction = ""
+    for lvl in levels[1:]:
+        m = _COUNTY_RE.match(lvl)
+        if m:
+            jurisdiction = clean(m.group("county"))
+            break
+    if not jurisdiction and office.upper() in STATEWIDE_OFFICES:
+        jurisdiction = "Statewide"
+
+    return office, district, jurisdiction
+
+
+def parse_ballot_events(cell: str) -> list[dict]:
+    """
+    Parse the registrant list's `Ballot events` cell into one dict per event.
+
+    The cell is a newline-joined list of
+
+        2026 Fall Primary (Date: 08/11/2026, Type: Election) - Governor
+
+    Referendum rows stop after the parenthesis and carry no office path. Each
+    dict has event_name, event_date, event_type, office, district,
+    jurisdiction, election_year. Unparseable lines are skipped — a wrong office
+    is worse than a missing one.
+    """
+    out: list[dict] = []
+    for line in (cell or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _BALLOT_EVENT_RE.match(line)
+        if not m:
+            continue
+        ev_date = parse_date(m.group("date"))
+        name    = clean(m.group("name"))
+        year    = ev_date[:4]
+        if not year:
+            # Fall back to a leading 4-digit year in the event name
+            ym = re.match(r"(\d{4})\b", name)
+            if ym and 1990 <= int(ym.group(1)) <= MAX_VALID_YEAR:
+                year = ym.group(1)
+        office, district, jurisdiction = office_path_parts(m.group("path") or "")
+        out.append({
+            "event_name":    name,
+            "event_date":    ev_date,
+            "event_type":    clean(m.group("type")),
+            "office":        office,
+            "district":      district,
+            "jurisdiction":  jurisdiction,
+            "election_year": year,
+        })
+    return out
+
+
+def latest_ballot_event(events: list[dict]) -> dict:
+    """
+    The event a registrant should be described by: the most recent one that
+    names an office.
+
+    Sorted on (event_date, election_year) so a registrant who has run for
+    several seats is labelled with the latest. Events with no office path
+    (referendums) are only used as a last resort, for election_year.
+    """
+    if not events:
+        return {}
+    keyed = sorted(events, key=lambda e: (e["event_date"], e["election_year"]))
+    with_office = [e for e in keyed if e["office"]]
+    return (with_office or keyed)[-1]
+
+
+def transaction_office_parts(row: dict) -> tuple[str, str, str]:
+    """
+    (office, district, jurisdiction) for a transaction row.
+
+    The transaction feed splits the same hierarchy the registrant list packs
+    into one string: `Related Office` is level 1, `Related District` level 2 and
+    `Related Branch` level 3. For single-seat offices all three repeat the
+    office name ("Governor", "Governor", "Governor"), which is why district must
+    be derived rather than copied — the old behaviour wrote "Governor" into
+    candidates.district. Reassembling the path and reusing office_path_parts()
+    keeps transaction-derived and registrant-derived values identical in shape.
+    """
+    office = clean(row.get("Related Office", ""))
+    if not office:
+        return "", "", ""
+    levels = [office]
+    for key in ("Related District", "Related Branch"):
+        lvl = clean(row.get(key, ""))
+        if lvl and lvl not in levels:
+            levels.append(lvl)
+    return office_path_parts(" / ".join(levels))
+
+
 def first_report_id(val: str) -> str:
     """First report ID in a 'Reports' cell → '7946'; '' when absent."""
     m = _REPORT_ID_RE.search(val or "")
@@ -375,6 +551,8 @@ def load_registrants(log) -> dict[str, dict]:
         )
         return registry
 
+    with_event = 0
+
     ft = time.perf_counter()
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
         for row_num, row in enumerate(csv.DictReader(f), start=2):
@@ -383,6 +561,14 @@ def load_registrants(log) -> dict[str, dict]:
                 continue
             city, zipcode = parse_address_block(row.get("Registrant Address", ""))
             status = clean(row.get("Registrant Status", ""))
+            # `Ballot events` lists every seat this registrant has been on a
+            # ballot for. It is the authoritative source for office, district and
+            # jurisdiction — the transaction feed only shows them for registrants
+            # that actually raised or spent money.
+            events = parse_ballot_events(row.get("Ballot events", ""))
+            latest = latest_ballot_event(events)
+            if latest.get("office"):
+                with_event += 1
             registry[reg_id] = {
                 "committee_name":  clean(row.get("Registrant Name", "")),
                 "committee_type":  clean(row.get("Registrant Type", "")),
@@ -393,12 +579,19 @@ def load_registrants(log) -> dict[str, dict]:
                 "zip":             zipcode,
                 # Sunshine's only status signal; "Terminated" is the inactive one
                 "active":          "0" if status.upper() == "TERMINATED" else "1",
+                "office":          latest.get("office", ""),
+                "district":        latest.get("district", ""),
+                "jurisdiction":    latest.get("jurisdiction", ""),
+                "election_year":   latest.get("election_year", ""),
+                "ballot_events":   len(events),
                 "row_num":         row_num,
             }
     log.file_parsed(path.name, "committees", len(registry),
                     duration_s=round(time.perf_counter() - ft, 2),
                     bytes=path.stat().st_size)
     log.registry_loaded(path.name, entries=len(registry), relation="committees")
+    log.info(f"  ballot events resolved an office for {with_event:,} of "
+             f"{len(registry):,} registrants")
     return registry
 
 
@@ -464,17 +657,17 @@ def run():
                     elec_year = election_year(row)
                     report_id = first_report_id(row.get("Reports", ""))
                     amended   = reports.get(report_id, "")
-                    office    = clean(row.get("Related Office", ""))
-                    district  = clean(row.get("Related District", ""))
+                    office, district, jurisdiction = transaction_office_parts(row)
 
                     # ── Registrant metadata harvested from the row ──────────
                     if reg_id:
-                        if office or district:
+                        if office:
                             prev = offices.get(reg_id)
                             if prev is None or (elec_year or "") >= prev.get("election_year", ""):
                                 offices[reg_id] = {
                                     "office":        office,
                                     "district":      district,
+                                    "jurisdiction":  jurisdiction,
                                     "election_year": elec_year,
                                 }
                         if reg_id not in registrants and reg_id not in orphans:
@@ -485,6 +678,15 @@ def run():
                                 "raw_file":       path.name,
                                 "row_num":        row_num,
                             }
+
+                    # A transaction only names an office when it was reported
+                    # against a ballot event, which most routine receipts aren't.
+                    # For a candidate registrant the seat is still known from the
+                    # registrant record, so fall back to it rather than leaving
+                    # the column blank. Non-candidate filers (PACs, parties,
+                    # conduits) keep a blank office — they aren't seeking one.
+                    if not office and cand_name:
+                        office = reg.get("office", "")
 
                     dest = route(row)
 
@@ -585,13 +787,36 @@ def run():
 
         # ── Committees and candidates ─────────────────────────────────
         # Written after the transaction pass so office/district are available.
-        for reg_id, reg in registrants.items():
+        # `Ballot events` from the registrant list wins over the transaction
+        # harvest: it covers every registrant, not just the ones with money
+        # moving, and it carries the full office hierarchy. The transaction
+        # harvest stays on as a fallback for registrants whose ballot events cell
+        # is empty but whose transactions were reported against an event.
+        def _seat(reg_id: str, reg: dict) -> dict:
+            if reg.get("office"):
+                return {
+                    "office":        reg["office"],
+                    "district":      reg["district"],
+                    "jurisdiction":  reg["jurisdiction"],
+                    "election_year": reg["election_year"],
+                }
             info = offices.get(reg_id, {})
+            return {
+                "office":        info.get("office", ""),
+                "district":      info.get("district", ""),
+                "jurisdiction":  info.get("jurisdiction", ""),
+                # An election year is known from the ballot events even when no
+                # office is (a referendum committee), so prefer it either way.
+                "election_year": reg.get("election_year") or info.get("election_year", ""),
+            }
+
+        for reg_id, reg in registrants.items():
+            seat = _seat(reg_id, reg)
             cmte_w.writerow({
                 "state":          STATE,
                 "committee_name": reg["committee_name"],
                 "committee_type": reg["committee_type"],
-                "election_year":  info.get("election_year", ""),
+                "election_year":  seat["election_year"],
                 "candidate_name": reg["candidate_name"],
                 "treasurer_name": "",
                 "city":           reg["city"],
@@ -612,11 +837,11 @@ def run():
                 "candidate_name":  full,
                 "candidate_first": first,
                 "candidate_last":  last,
-                "office":          info.get("office", ""),
-                "district":        info.get("district", ""),
-                "jurisdiction":    "",
+                "office":          seat["office"],
+                "district":        seat["district"],
+                "jurisdiction":    seat["jurisdiction"],
                 "party":           reg["party"],
-                "election_year":   info.get("election_year", ""),
+                "election_year":   seat["election_year"],
                 "incumbent":       "",
                 "state_filer_id":  reg_id,
                 "raw_file":        "committees.csv",

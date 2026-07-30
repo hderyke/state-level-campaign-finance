@@ -104,7 +104,8 @@ The "registrants" tab — every filer, in one unfiltered download (~10k rows).
 | `Candidate Name` | Candidate behind the committee, or `N/A` |
 | `Registrant Party` | Party, or `-` |
 | `Registrant Status` | `Registered` / `Terminated` → `active` |
-| `Reports submitted`, `Exempt`, `Has a segregated fund`, `Ballot events` | Additional registration detail (unused) |
+| `Ballot events` | Newline-joined list of every seat the registrant has been on a ballot for: `2026 Fall General (Date: 11/03/2026, Type: Election) - State Assembly / State Assembly, District No. 92`. **The only source of office, district and jurisdiction for candidates** — see the parser notes below. Referendum events stop after the parenthesis and carry no office path. |
+| `Reports submitted`, `Exempt`, `Has a segregated fund` | Additional registration detail (unused) |
 
 ### `reports_{from}_{to}.csv`
 
@@ -186,9 +187,41 @@ months split down to days). Incremental runs are ~25 requests.
   year in the event name, then the transaction date.
 - Contributor/payee `State` accepts `WI` or `Wisconsin`; full names are mapped
   to two-letter codes via `src/aliases/states.csv`.
-- Office and district are not in `committees.csv`, so they're harvested from the
-  transaction pass (`Related Office` / `Related District`, keeping the most
-  recent ballot event) and joined onto candidates by `Registrant ID`.
+- **Office, district and jurisdiction** come from the `Ballot events` cell in
+  `committees.csv`, which lists every seat a registrant has been on a ballot
+  for. The registrant is described by its most recent event that names an
+  office. The office path is a `" / "`-separated hierarchy — level 1 is the
+  office, the deepest level is the specific seat, level 2 names the county for
+  county-scoped offices — and `office_path_parts()` splits it:
+
+  | Path | office | district | jurisdiction |
+  |---|---|---|---|
+  | `Governor` | Governor | | Statewide |
+  | `State Assembly / State Assembly, District No. 92` | State Assembly | 92 | Statewide |
+  | `Circuit Court / Sauk County Circuit Court / Sauk County Circuit Court, Branch 03` | Circuit Court | Branch 3 | Sauk County |
+  | `District Attorney / Dane County District Attorney` | District Attorney | | Dane County |
+  | `Court of Appeals / Court of Appeals, District 04` | Court of Appeals | 4 | |
+  | `Municipal Judge / Municipal Judge (450301)` | Municipal Judge | | |
+
+  A circuit-court `district` keeps the word `Branch` because a bare number
+  there would read as a legislative district and mean something else.
+  `jurisdiction` is `Statewide` for the offices in `STATEWIDE_OFFICES`, the
+  county wherever the path names one, and blank otherwise — a Court of Appeals
+  district spans several counties without being statewide, and a Municipal
+  Judge seat is identified by a bare numeric municipality code rather than a
+  place name. This resolves an office for **99.9% of candidate registrants**.
+- The transaction pass still harvests the same fields (`Related Office` is
+  level 1, `Related District` level 2, `Related Branch` level 3) as a fallback
+  for registrants with an empty `Ballot events` cell. The path is reassembled
+  and run through the same `office_path_parts()`, so both sources produce
+  identical shapes. This matters: for single-seat offices the source repeats
+  the office name in all three columns, so copying `Related District` straight
+  through used to write `Governor` into `candidates.district`.
+- On contributions and expenditures, `office` falls back to the registrant's
+  own seat when the row itself names no ballot event — which most routine
+  receipts don't. Non-candidate filers (PACs, parties, conduits) keep a blank
+  `office`; they aren't seeking one.
+- `treasurer_name` is always blank — see the note below.
 - `Registrant Type` whitespace is collapsed to a single `X -> Y` form;
   canonicalization happens at aggregate time.
 - Registrants that appear in transactions but not in `committees.csv`
@@ -207,7 +240,53 @@ name.
   if a stale file survives an interrupted run. Fix with `--force` for the
   affected years.
 - `employer` is always blank — Sunshine collects occupation only.
-- `treasurer_name` is always blank — not published in the registrant list.
+- `treasurer_name` is always blank, deliberately. It's the one field on the
+  per-registrant detail page (`/browse-data/registrant/{id}`) that isn't already
+  in the registrant list — everything else that page shows, including the
+  election events, is in `committees.csv`. Collecting it would cost one page
+  load per registrant (~10.3k, and `robots.txt` sets `Crawl-delay: 10`, so ~28
+  hours) against an *undocumented internal API*: Sunshine is a client-rendered
+  SPA, so every route returns a loading shell, and the detail page is keyed on a
+  surrogate ID (`12389010`) that has no derivable relationship to the registrant
+  ID (`01072987`) — you'd have to scrape the list API first just to learn the
+  surrogate IDs. That's two undocumented endpoints and the repo's most
+  breakage-prone scraper, for a column no join, alias table or query in this
+  project reads, and which ~13 other states also leave blank. If it's ever
+  wanted, scope the crawl to `active` registrants (1,799 rows, not 10,283) — a
+  treasurer for a committee terminated in 2003 is worth little.
+- `incumbent` is always blank — Sunshine publishes no incumbency flag anywhere,
+  on the registrant list or the detail page.
+- `candidates.district` is legitimately blank for single-seat offices
+  (Governor, Supreme Court, a county DA, Municipal Judge). A low fill rate on
+  that column is the office mix, not missing data.
+
+### Registrant types and the committees/candidates split
+
+Every registrant is a **filer**, so every registrant gets a `committees.csv.gz`
+row — candidates included. A candidate registrant *additionally* gets a
+`candidates.csv.gz` row. This is the project-wide convention (see
+`parsers/texas.py`, `parsers/maryland.py`, `parsers/maine.py`) and it is load
+bearing: `committee_name` on every WI transaction is the registrant name, and
+`aggregate.py` NULLs out `candidate_name` on any contribution or expenditure
+whose `committee_name` doesn't match a known candidate committee. Dropping
+candidate registrants from `committees` would silently blank `candidate_name`
+across all 12.7M WI transactions.
+
+`State Candidate` and `State Candidate  -> Personal Campaign Committee` are the
+**same entity type recorded under two different registration flows**, not two
+kinds of filer:
+
+| Type | Rows | Registration dates | Has candidate name |
+|---|---|---|---|
+| `State Candidate  -> Personal Campaign Committee` | 5,827 | 1978–2019 | 5,816 |
+| `State Candidate` | 1,262 | 2019–present | 1,262 |
+
+The subtype was dropped when Sunshine replaced the legacy CFIS system in 2019 —
+the split is chronological, with essentially no overlap. Both map to
+`Candidate Committee` in `src/aliases/committee_types.csv`, which is in
+`aggregate.py`'s `CANDIDATE_COMMITTEE_TYPES`, so they behave identically
+downstream. `State Candidate  -> Support Committee` (3 rows) is a third-party
+committee supporting a named candidate and also maps to `Candidate Committee`.
 - `incumbent` and `jurisdiction` are always blank.
 
 ---
