@@ -1,0 +1,975 @@
+"""
+parsers/south_carolina.py — Transform South Carolina raw JSON into the 5
+normalized relations.
+
+Reads data/South Carolina/raw/ and writes data/South Carolina/cleaned/.
+
+Raw inputs (all written by scrapers/south_carolina.py):
+
+    contributions_{year}.json   {"relation","year","retrieved_at","rows":[...]}
+    expenditures_{year}.json    same envelope
+    reports_{year}.json         same envelope — one row per filed disclosure
+                                report; the only bulk source of candidate,
+                                office, election-year and election-type data
+                                on the portal
+    election_history.csv        SC Election Commission election history export,
+                                used for tier-2 backfill (see below)
+
+TOLERANT FIELD LOOKUP
+---------------------
+The portal's search API is private and undocumented — its JSON key names are
+not contractual and have no published schema. Rather than hardcode one
+spelling, every field is read through `pick()`, which matches against a
+normalized (lowercased, punctuation-stripped) index of the row's keys and
+accepts a list of plausible names. `contributorName`, `Contributor_Name` and
+`CONTRIBUTORNAME` all resolve identically, and an added or renamed key costs an
+alias entry rather than a parser rewrite. Nested objects are flattened into the
+same index, both bare and parent-prefixed, so `{"contributor":{"name":...}}`
+resolves for either `name` or `contributorName`.
+
+NAME FORMATS DIFFER BETWEEN SCREENS
+-----------------------------------
+The contributions screen renders candidate names as "Allen Wooten Jr." while
+the expenditures and reports screens render the same people as
+"Kendrick, Robert S". Left alone, the two halves of the dataset would never
+join. `person_name()` detects the inverted form and flips it, so every table
+carries "FIRST MIDDLE LAST" and committee/candidate matching works across
+sources.
+
+ADDRESSES ARE A SINGLE UNSPLIT STRING
+-------------------------------------
+Contributor and vendor addresses arrive as one line — "515 Handsome Oak Drive
+Hardeeville, SC 29927" — with no delimiter between street and city (the only
+comma sits between city and state). State and ZIP are recovered reliably from
+the tail. City is recovered by walking backwards from the state code and
+stopping at the first token that carries a digit or is a street-type word
+("Drive", "Box", "Ste"), which resolves the observed forms correctly. Anything
+that doesn't match cleanly leaves city empty rather than guessing.
+
+TIER-2 BACKFILL FROM ELECTION HISTORY
+-------------------------------------
+ethicsfiling.sc.gov publishes no party, district, incumbency or jurisdiction
+data anywhere, and has no candidate or committee registry to enrich from. Those
+columns are filled by joining candidates against election_history.csv on
+normalized candidate name — exact full name first, then an unambiguous
+first+last fallback, mirroring utils.assign_committee_person_ids. When a person
+appears in several contests the most recent one wins, so party reflects their
+latest ballot appearance. Candidates with no election-history match keep those
+columns empty; the join rate is reported via log.enrichment_summary.
+
+OTHER NOTES
+-----------
+  - person_id uses id_model="name_hash". The portal exposes no filer ID on any
+    transaction row — the only identifiers on the site (personId/seiId/officeId)
+    live in report-detail deep links, so a name-derived key is the only thing
+    that can identify the same filer across all three screens. states.csv marks
+    SC has_filer_id=0 accordingly. Where a reports row does carry personId it is
+    still written to state_filer_id for traceability.
+  - Every filer in this dataset is a candidate or public official — the screens
+    sit under /candidates-public-officials — so committees are written with
+    committee_type "Candidate Committee". Standalone PACs file elsewhere and do
+    not appear here.
+  - SC publishes no loan or debt schedule through this portal; loans_debts.csv.gz
+    is written empty (header only) so tabulate has a consistent set of inputs.
+"""
+
+import csv
+import gzip
+import json
+import re
+import sys
+import time
+from datetime import datetime, date
+from pathlib import Path
+
+# Make project root and src/pipeline importable before importing local modules
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src" / "pipeline"))
+from src.reporting.logger import get_logger
+import columns as C
+import utils
+
+# Expenditure descriptions run long — well past Python's ~131 KB default. Not
+# sys.maxsize: csv.field_size_limit takes a C long, which is 32-bit on Windows,
+# so sys.maxsize raises OverflowError at import there. 10 MB matches validate.py.
+csv.field_size_limit(10 * 1024 * 1024)
+
+# =============================== paths ================================
+RAW_DIR   = PROJECT_ROOT / "data" / "South Carolina" / "raw"
+CLEAN_DIR = PROJECT_ROOT / "data" / "South Carolina" / "cleaned"
+CLEAN_DIR.mkdir(parents=True, exist_ok=True)
+
+STATE = "SC"
+
+ELECTION_HISTORY_FILE = "election_history.csv"
+
+
+# ========================= tolerant field lookup ======================
+
+def _nk(key: str) -> str:
+    """Normalize a key for matching: lowercase, drop everything non-alphanumeric."""
+    return re.sub(r"[^a-z0-9]", "", (key or "").lower())
+
+
+# Aggregate lines the election-history export carries in its candidate_name
+# column. They are per-contest totals, not people, and are indistinguishable
+# from a candidate to everything downstream — person_name() happily normalizes
+# "Total Ballots Cast" into a name, after which the first+last fallback join can
+# match a real filer against it.
+_TALLY_ROWS = {_nk(s) for s in (
+    "Total Ballots Cast", "Total Votes Cast", "Overvotes/Undervotes",
+    "Overvotes", "Undervotes", "Write-In", "Write-Ins", "Blank Votes",
+)}
+
+
+def index_row(row: dict, _prefix: str = "", _depth: int = 0) -> dict:
+    """Flatten a raw record into {normalized_key: scalar}.
+
+    Nested objects are registered twice — once under the bare child key and once
+    under parent+child — so a value can be found whether the API nests it or
+    not. Depth is capped at 2: these payloads are shallow, and an unbounded walk
+    on an unknown schema is an easy way to blow the stack on a self-referencing
+    structure.
+    """
+    out: dict[str, str] = {}
+    if not isinstance(row, dict):
+        return out
+
+    # Two passes, not one: a top-level key must win over a nested one that
+    # normalizes to the same name. A single pass would make precedence depend on
+    # dict insertion order, so {"contributor":{"name":...},"contributorName":...}
+    # would resolve to whichever the API happened to emit first.
+    nested: list[tuple[str, dict]] = []
+    for key, val in row.items():
+        nk = _nk(key)
+        if isinstance(val, dict):
+            if _depth < 2:
+                nested.append((nk, val))
+            continue
+        if isinstance(val, list):
+            continue
+        if isinstance(val, bool):
+            val = "Yes" if val else "No"
+        text = "" if val is None else str(val).strip()
+        out.setdefault(nk, text)
+        if _prefix:
+            out.setdefault(_prefix + nk, text)
+
+    for child_prefix, child in nested:
+        for child_key, child_val in index_row(child, child_prefix, _depth + 1).items():
+            out.setdefault(child_key, child_val)
+    return out
+
+
+def pick(idx: dict, *names: str, default: str = "") -> str:
+    """First non-empty value among the given candidate field names."""
+    for name in names:
+        val = idx.get(_nk(name))
+        if val:
+            return val
+    return default
+
+
+# ============================== helpers ===============================
+
+def clean(val) -> str:
+    """Strip whitespace and coerce None to an empty string."""
+    return (val or "").strip()
+
+
+def parse_amount(val: str) -> str:
+    """Parse a dollar amount to a plain numeric string. Returns '' on failure."""
+    v = clean(val).replace("$", "").replace(",", "")
+    if not v:
+        return ""
+    if v.startswith("(") and v.endswith(")"):
+        v = "-" + v[1:-1]           # accounting-style negative
+    try:
+        float(v)
+        return v
+    except ValueError:
+        return ""
+
+
+_DATE_FORMATS = ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y", "%b %d, %Y", "%m/%d/%y")
+
+
+def parse_date(val: str) -> str:
+    """Normalize a date to YYYY-MM-DD. Returns '' on failure or implausible year."""
+    v = clean(val)
+    if not v:
+        return ""
+    # ISO-8601 with a time component ("2018-12-31T00:00:00") — keep the date half
+    if "T" in v and re.match(r"^\d{4}-\d{2}-\d{2}T", v):
+        v = v.split("T", 1)[0]
+    for fmt in _DATE_FORMATS:
+        try:
+            d = datetime.strptime(v, fmt)
+        except ValueError:
+            continue
+        if d.year < 1990 or d.year > date.today().year + 2:
+            return ""
+        return d.strftime("%Y-%m-%d")
+    return ""
+
+
+def year_of(iso_date: str) -> str:
+    """Year component of a YYYY-MM-DD string, or ''."""
+    return iso_date[:4] if len(iso_date) >= 4 and iso_date[:4].isdigit() else ""
+
+
+_SUFFIXES = {"JR", "SR", "II", "III", "IV", "V", "MD", "DDS", "ESQ", "PHD"}
+
+# Honorifics the portal leaves attached to filer names ("Young, Dr. Hester").
+# They break the join against election history, which never carries them.
+_TITLES = {"DR", "MR", "MRS", "MS", "MISS", "REV", "HON", "SEN", "REP",
+           "JUDGE", "SGT", "CAPT", "COL", "GEN", "PROF"}
+
+
+def person_name(val: str, strip_title: bool = False) -> str:
+    """Normalize a person name to "FIRST MIDDLE LAST", uppercased.
+
+    The portal mixes two conventions across its screens (see module docstring):
+    "Kendrick, Robert S" on expenditures/reports vs. "Allen Wooten Jr." on
+    contributions. Anything containing a comma is treated as inverted and
+    flipped; a trailing generational suffix on the surname half ("Smith Jr.,
+    John") is kept attached to the surname so it doesn't migrate to the front.
+
+    Organization names — which also show up in these fields, e.g. "South
+    Carolina Federal Credit Union" — have no comma and pass through unchanged
+    apart from case and whitespace normalization.
+
+    strip_title drops a leading honorific ("DR. HESTER YOUNG" → "HESTER YOUNG").
+    It is opt-in and used only for filer/candidate names: contributor and vendor
+    names are frequently organizations, and some legitimately begin with one of
+    these words ("MR ROOTER PLUMBING").
+    """
+    v = utils.clean_name(val)
+    if not v:
+        return v
+
+    if "," in v:
+        last, _, rest = v.partition(",")
+        last, rest = last.strip(), rest.strip()
+        if not last or not rest:
+            v = utils.clean_name(v.replace(",", " "))
+        else:
+            # "Smith, John Jr." — a suffix trailing the given-name half belongs
+            # at the end, not in front of the surname.
+            tokens = rest.split()
+            suffix = ""
+            if len(tokens) > 1 and tokens[-1].rstrip(".") in _SUFFIXES:
+                suffix = tokens.pop()
+            v = utils.clean_name(
+                f"{' '.join(tokens)} {last}" + (f" {suffix}" if suffix else ""))
+
+    if strip_title:
+        tokens = v.split()
+        while len(tokens) > 2 and tokens[0].rstrip(".") in _TITLES:
+            tokens.pop(0)
+        v = " ".join(tokens)
+
+    return v
+
+
+def name_parts(name: str) -> tuple[str, str]:
+    """(first, last) from a normalized "FIRST MIDDLE LAST" name.
+
+    Honorifics and generational suffixes are excluded from both ends — without
+    this, "ALLEN WOOTEN JR." yields a last name of "JR." and "DR. HESTER YOUNG"
+    a first name of "DR.".
+    """
+    tokens = [t for t in name.split() if t]
+    while len(tokens) > 2 and tokens[0].rstrip(".") in _TITLES:
+        tokens.pop(0)
+    while len(tokens) > 2 and tokens[-1].rstrip(".") in _SUFFIXES:
+        tokens.pop()
+    if not tokens:
+        return "", ""
+    return tokens[0], (tokens[-1] if len(tokens) > 1 else "")
+
+
+# Street-type words that mark the end of the street portion of an address.
+# Walking backwards from the state code, the city is whatever sits between one
+# of these (or a token containing a digit) and the state.
+_STREET_WORDS = {
+    "ST", "STREET", "RD", "ROAD", "DR", "DRIVE", "AVE", "AVENUE", "LN", "LANE",
+    "CT", "COURT", "BLVD", "BOULEVARD", "WAY", "CIR", "CIRCLE", "PKWY",
+    "PARKWAY", "HWY", "HIGHWAY", "TRL", "TRAIL", "PL", "PLACE", "TER",
+    "TERRACE", "LOOP", "RUN", "PT", "POINT", "SQ", "SQUARE", "BOX", "PO",
+    "APT", "STE", "SUITE", "UNIT", "FLOOR", "FL", "BLDG", "RM",
+}
+
+_ADDR_TAIL = re.compile(
+    r"[,\s]+(?P<st>[A-Za-z]{2})\.?[,\s]+(?P<zip>\d{5}(?:-\d{4})?|\d{9})\s*$"
+)
+
+
+def split_address(val: str) -> tuple[str, str, str]:
+    """Best-effort (city, state, zip) from a single-line address string.
+
+    Returns empty strings for anything that can't be recovered confidently —
+    a wrong city is worse than a missing one, since these feed geographic
+    rollups in the aggregate database.
+    """
+    v = re.sub(r"\s+", " ", clean(val))
+    if not v:
+        return "", "", ""
+
+    m = _ADDR_TAIL.search(v)
+    if not m:
+        return "", "", ""
+
+    st   = m.group("st").upper()
+    zipc = utils.clean_zip(m.group("zip"))
+    head = v[: m.start()].strip().rstrip(",").strip()
+
+    city_tokens: list[str] = []
+    bounded = False               # did the walk stop at a real street boundary?
+    for token in reversed(head.split()):
+        bare = token.strip(".,#").upper()
+        if not bare or any(ch.isdigit() for ch in bare) or bare in _STREET_WORDS:
+            bounded = True
+            break
+        city_tokens.insert(0, token)
+        if len(city_tokens) == 3:
+            # Three alphabetic tokens with no house number or street word behind
+            # them means the street name itself is bleeding into the city
+            # ("123 N Main Mount Pleasant" → "MAIN MOUNT PLEASANT"). Give up
+            # rather than emit a wrong city.
+            return "", st, zipc
+    else:
+        # Ran out of tokens — the whole head is the city ("Columbia, SC 29260").
+        bounded = True
+
+    if not bounded:
+        return "", st, zipc
+    return utils.clean_name(" ".join(city_tokens)), st, zipc
+
+
+# "SC Senate District 10", "School Board Trustee District GREENVILLE",
+# "Coroner No. 2" — the district is glued onto the office string and there is no
+# separate field for it anywhere in the source.
+_DISTRICT_RE = re.compile(
+    r"\b(?:DISTRICT|DIST\.?|SEAT|NO\.?|#)\s*[:#]?\s*(?P<d>[A-Z0-9][A-Z0-9 .#/-]*)$"
+)
+
+
+def split_office(val: str) -> tuple[str, str]:
+    """(office, district) from a combined SC office string.
+
+    The office is returned whole — truncating it would lose meaning ("SC Senate"
+    alone is fine, but "School Board Trustee" without its county is not) — and
+    the district is additionally surfaced on its own so it can be grouped on.
+    """
+    office = utils.clean_name(val)
+    if not office:
+        return "", ""
+    m = _DISTRICT_RE.search(office)
+    return office, (m.group("d").strip() if m else "")
+
+
+def yes_no(val: str) -> str:
+    """Normalize a boolean-ish source value to 'Yes' / 'No' / ''."""
+    v = clean(val).upper()
+    if v in ("YES", "Y", "TRUE", "1"):
+        return "Yes"
+    if v in ("NO", "N", "FALSE", "0"):
+        return "No"
+    return ""
+
+
+def raw_files(pattern: str) -> list[Path]:
+    """Non-empty raw files matching a glob, in filename (i.e. year) order."""
+    return sorted(
+        (f for f in RAW_DIR.glob(pattern) if f.stat().st_size > 0),
+        key=lambda p: p.name,
+    )
+
+
+def load_envelope(path: Path) -> tuple[list[dict], str]:
+    """Read a scraper envelope → (rows, year). Tolerates a bare JSON array."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        rows, year = payload, ""
+    else:
+        rows = payload.get("rows") or []
+        year = str(payload.get("year") or "")
+    if not year:
+        m = re.search(r"_(\d{4})\.json$", path.name)
+        year = m.group(1) if m else ""
+    return [r for r in rows if isinstance(r, dict)], year
+
+
+# ============================== writers ===============================
+
+def open_writer(filename: str, fieldnames: list[str]):
+    """Open a gzipped CSV writer in CLEAN_DIR. Extra keys dropped, missing keys ''."""
+    fh = gzip.open(CLEAN_DIR / filename, "wt", encoding="utf-8", newline="")
+    w  = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore", restval="")
+    w.writeheader()
+    return fh, w
+
+
+# ========================= election history ===========================
+
+def _manifest_partial_years() -> list[str]:
+    """Truncated election-history years, as recorded by the scraper.
+
+    Read defensively: the manifest predates the `partial_years` column, so a
+    file written by an older scraper simply won't have it, and that is not an
+    error — it means "unknown", which reads the same as "none" here.
+    """
+    manifest = RAW_DIR.parent / "manifest.csv"
+    if not manifest.exists():
+        return []
+    try:
+        with open(manifest, newline="", encoding="utf-8") as f:
+            return [r["partial_years"] for r in csv.DictReader(f)
+                    if r.get("relation") == "election_history"
+                    and (r.get("partial_years") or "").strip()]
+    except OSError:
+        return []
+
+
+def _tally_skip(why: dict, filer, amount, tx_date) -> None:
+    """Record which required field sent a row to the skip pile."""
+    if not filer:
+        why["committee_name"] = why.get("committee_name", 0) + 1
+    if amount == "":
+        why["amount"] = why.get("amount", 0) + 1
+    if not tx_date:
+        why["date"] = why.get("date", 0) + 1
+
+
+def _check_total_skip(log, name: str, relation: str, count: int, skipped: int,
+                      why: dict, sample: dict | None) -> None:
+    """Escalate a file that produced nothing but had rows to work with.
+
+    A skip is normally a judgement about one row. Every row in a file failing
+    the same required-field check is not that — it is the parser and the feed
+    disagreeing about a field name, and it has to be loud. This exact shape went
+    unnoticed across all nineteen expenditure files: `expDate` was missing from
+    the date aliases, so every row was "missing a required field" and each file
+    still reported success with 0 rows.
+    """
+    if count or not skipped:
+        return
+    lead = max(why, key=why.get) if why else "unknown"
+    log.warning(
+        f"  {name}: EVERY row ({skipped:,}) was skipped — no {relation} "
+        f"emitted. Most common missing required field: {lead} "
+        f"({why.get(lead, 0):,} rows). This is usually a field-name mismatch "
+        f"rather than bad data.")
+    if sample:
+        log.warning(f"  {name}: keys actually present on the first row: "
+                    f"{sorted(sample)}")
+
+
+def load_election_history(log) -> dict[str, dict]:
+    """Index the SC Election Commission export by normalized candidate name.
+
+    Returns {NORMALIZED NAME: {party, district, jurisdiction, election_year,
+    incumbent}}. When a candidate appears in several contests the most recent
+    one wins — party affiliation and district can both change between cycles,
+    and the latest ballot appearance is the most useful single answer.
+    """
+    path = RAW_DIR / ELECTION_HISTORY_FILE
+    if not path.exists():
+        log.warning(f"  {ELECTION_HISTORY_FILE} not found — "
+                    f"party/district/incumbent backfill skipped")
+        return {}
+
+    # The scraper records years the service truncated mid-stream. Those years
+    # are present in the file but incomplete, so a candidate whose only ballot
+    # appearance falls in one can come back unmatched — or matched to an older
+    # contest — with nothing in the join rate to suggest why.
+    for year_list in _manifest_partial_years():
+        log.warning(f"  {ELECTION_HISTORY_FILE}: year(s) {year_list} were "
+                    f"downloaded PARTIAL — party/district/jurisdiction backfill "
+                    f"is incomplete for candidates whose contests fall in them")
+
+    index: dict[str, dict] = {}
+    rows_read = 0
+    skipped_tally = 0
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+        for raw in csv.DictReader(f):
+            rows_read += 1
+            idx  = index_row(raw)
+            name = person_name(pick(idx, "candidate", "candidateName",
+                                    "candidate_name", "name", "contestant"),
+                               strip_title=True)
+            if not name:
+                continue
+            # The export puts per-contest tally lines in candidate_name
+            # alongside real people. Without this they enter the name index as
+            # candidates and can be matched against by the fallback first+last
+            # join.
+            if _nk(name) in _TALLY_ROWS:
+                skipped_tally += 1
+                continue
+
+            election_date = parse_date(pick(idx, "electionDate", "date"))
+            year = (pick(idx, "year", "electionYear", "contestYear")
+                    or year_of(election_date))
+
+            # `candidate_party_name` and `division_name` are the real column
+            # names in this export. Neither normalizes to anything the generic
+            # aliases below match (_nk("candidate_party_name") is
+            # "candidatepartyname"), so before they were added every candidate
+            # came back with an empty party and jurisdiction while the
+            # name-match rate still looked healthy.
+            #
+            # division_name is only a county when division_type says so — the
+            # same column carries precinct names ("Windy Hill 02") on other
+            # rows, which must not be written into jurisdiction.
+            division = pick(idx, "divisionName", "division")
+            county   = division if _nk(pick(idx, "divisionType")) == "county" else ""
+
+            record = {
+                "party":        utils.clean_name(pick(idx, "party", "partyName",
+                                                      "politicalParty", "affiliation",
+                                                      "candidatePartyName")),
+                "district":     utils.clean_name(pick(idx, "district", "districtName",
+                                                      "division", "divisionName",
+                                                      "districtNumber")),
+                "jurisdiction": utils.clean_name(pick(idx, "county", "countyName",
+                                                      "jurisdiction", "municipality")
+                                                 or county),
+                "office":       utils.clean_name(pick(idx, "office", "officeName",
+                                                      "contest", "contestName")),
+                "election_year": year if year.isdigit() else "",
+                "incumbent":    yes_no(pick(idx, "incumbent", "isIncumbent")),
+            }
+
+            prior = index.get(name)
+            if prior is None or (record["election_year"] or "0") >= (prior["election_year"] or "0"):
+                # Merge rather than replace: an older row may carry a party or
+                # county that the newest row leaves blank.
+                merged = dict(prior or {})
+                merged.update({k: v for k, v in record.items() if v})
+                for k in record:
+                    merged.setdefault(k, "")
+                index[name] = merged
+
+    if skipped_tally:
+        log.info(f"  {ELECTION_HISTORY_FILE}: skipped {skipped_tally:,} tally "
+                 f"rows (Total Ballots Cast and friends)")
+    log.registry_loaded(ELECTION_HISTORY_FILE, len(index), relation="candidates",
+                        bytes=path.stat().st_size, rows_read=rows_read)
+    return index
+
+
+def build_fallback_index(index: dict[str, dict]) -> dict[tuple[str, str], list[str]]:
+    """(first_token, last_token) → [full names], for middle-name-tolerant matching."""
+    fl: dict[tuple[str, str], list[str]] = {}
+    for name in index:
+        tokens = [t.rstrip(".") for t in name.split() if t.rstrip(".")]
+        if len(tokens) >= 2:
+            fl.setdefault((tokens[0], tokens[-1]), []).append(name)
+    return fl
+
+
+def match_election_history(name: str, index: dict, fl_index: dict) -> dict:
+    """Look up a candidate: exact name, then unambiguous first+last fallback."""
+    hit = index.get(name)
+    if hit:
+        return hit
+    tokens = [t.rstrip(".") for t in name.split() if t.rstrip(".")]
+    if len(tokens) >= 2:
+        matches = fl_index.get((tokens[0], tokens[-1]), [])
+        if len(matches) == 1:      # ambiguous first+last pairs are left unmatched
+            return index[matches[0]]
+    return {}
+
+
+# =============================== parse ================================
+
+def run():
+    log = get_logger("south carolina", "parse")
+    t0  = time.perf_counter()
+    log.info("Starting South Carolina parser")
+    log._emit("parse_started")
+
+    total_contributions = 0
+    total_expenditures  = 0
+    candidates: dict[str, dict] = {}   # normalized name → candidate row
+    committees: dict[str, dict] = {}   # normalized name → committee row
+    file_handles: list = []
+
+    def register_filer(name: str, office: str, district: str,
+                       election_year: str = "", raw_file: str = "", row_num=""):
+        """Record a filer seen on any screen, keeping the richest version.
+
+        Filers show up on all three screens with differing completeness — a
+        transaction row has office but no election year, a reports row has both.
+        Fields are filled in on first sight and never overwritten with blanks.
+        """
+        if not name:
+            return
+        cand = candidates.setdefault(name, {
+            "state":          STATE,
+            "candidate_name": name,
+            "office":         "",
+            "district":       "",
+            "election_year":  "",
+            "state_filer_id": "",
+            "raw_file":       raw_file,
+            "row_num":        row_num,
+        })
+        if office and not cand["office"]:
+            cand["office"] = office
+        if district and not cand["district"]:
+            cand["district"] = district
+        # Keep the latest election year seen for this filer
+        if election_year and election_year > (cand["election_year"] or ""):
+            cand["election_year"] = election_year
+
+        cmte = committees.setdefault(name, {
+            "state":          STATE,
+            "committee_name": name,
+            # Every filer on these screens is a candidate or public official —
+            # standalone PACs file through a different system and never appear.
+            "committee_type": "Candidate Committee",
+            "candidate_name": name,
+            "election_year":  "",
+            "state_filer_id": "",
+            "raw_file":       raw_file,
+            "row_num":        row_num,
+        })
+        if election_year and election_year > (cmte["election_year"] or ""):
+            cmte["election_year"] = election_year
+
+    try:
+        # Registered one at a time rather than as a list after the last call —
+        # if the fourth open_writer raises, the first three must still be in
+        # file_handles for the `finally` block to close them.
+        def _writer(filename: str, fieldnames: list[str]):
+            fh, w = open_writer(filename, fieldnames)
+            file_handles.append(fh)
+            return w
+
+        cont_w = _writer("contributions.csv.gz", C.CONTRIBUTIONS)
+        expn_w = _writer("expenditures.csv.gz",  C.EXPENDITURES)
+        cand_w = _writer("candidates.csv.gz",    C.CANDIDATES)
+        cmte_w = _writer("committees.csv.gz",    C.COMMITTEES)
+        _writer("loans_debts.csv.gz",            C.LOANS_DEBTS)  # header only
+
+        # Contributions.
+        for path in raw_files("contributions_*.json"):
+            ft = time.perf_counter()
+            count = skipped = 0
+            skip_why: dict[str, int] = {}
+            first_keys = None
+            try:
+                rows, file_year = load_envelope(path)
+                for row_num, raw in enumerate(rows, start=1):
+                    idx = index_row(raw)
+                    if first_keys is None:
+                        first_keys = set(idx)
+
+                    amount = parse_amount(pick(idx, "amount", "contributionAmount",
+                                               "amountContributed", "totalAmount"))
+                    # `conDate`/`contribDate` are speculative — the expenditures
+                    # feed abbreviates (expDate, expDesc, expId) and there is no
+                    # reason to think this one doesn't, but no contributions
+                    # sample has been checked. _check_total_skip below is what
+                    # actually catches it if none of these match.
+                    tx_date = parse_date(pick(idx, "conDate", "contribDate",
+                                              "date", "contributionDate",
+                                              "transactionDate", "dateContributed",
+                                              "receivedDate"))
+                    filer = person_name(pick(idx, "candidateName", "candidate",
+                                             "filerName", "recipientName",
+                                             "committeeName"), strip_title=True)
+
+                    # committee_name, amount and date are tier-1 required — a row
+                    # missing any of them can't be traced or summed, so drop it
+                    # rather than emit a row that fails validation.
+                    if not filer or amount == "" or not tx_date:
+                        skipped += 1
+                        _tally_skip(skip_why, filer, amount, tx_date)
+                        continue
+
+                    office, district = split_office(
+                        pick(idx, "officeRun", "officeRunContributedTo", "office",
+                             "officeSought"))
+                    city, st, zipc = split_address(
+                        pick(idx, "contributorAddress", "address",
+                             "contributorFullAddress"))
+                    election_date = parse_date(pick(idx, "electionDate",
+                                                    "electionDateContributedTo"))
+
+                    cont_w.writerow({
+                        "state":             STATE,
+                        "committee_name":    filer,
+                        "amount":            amount,
+                        "date":              tx_date,
+                        "transaction_type":  clean(pick(idx, "contributionType",
+                                                        "transactionType", "type")),
+                        "contributor_name":  person_name(pick(idx, "contributorName",
+                                                              "contributor", "donorName")),
+                        # "Group?" is the only contributor classification the
+                        # portal exposes — an individual/organization flag, not a
+                        # donor category. Mapped to canonical labels in
+                        # src/aliases/contributor_types.csv.
+                        "contributor_type":  {"Yes": "Group", "No": "Individual"}.get(
+                                                 yes_no(pick(idx, "group", "isGroup",
+                                                             "contributorIsGroup",
+                                                             "groupIndicator")), ""),
+                        "contributor_city":  city,
+                        "contributor_state": st,
+                        "contributor_zip":   zipc,
+                        "employer":          clean(pick(idx, "contributorEmployer",
+                                                        "employer")),
+                        "occupation":        clean(pick(idx, "contributorOccupation",
+                                                        "occupation")),
+                        "candidate_name":    filer,
+                        "office":            office,
+                        "election_year":     year_of(election_date) or file_year,
+                        "filing_id":         clean(pick(idx, "contributionId", "id",
+                                                        "reportId", "transactionId")),
+                        "raw_file":          path.name,
+                        "row_num":           row_num,
+                    })
+                    register_filer(filer, office, district,
+                                   year_of(election_date) or file_year,
+                                   path.name, row_num)
+                    count += 1
+
+                _check_total_skip(log, path.name, "contributions", count,
+                                  skipped, skip_why, first_keys)
+                log.file_parsed(path.name, "contributions", count, skipped,
+                                duration_s=round(time.perf_counter() - ft, 2),
+                                bytes=path.stat().st_size)
+                total_contributions += count
+            except Exception as e:
+                log.file_parse_error(path.name, str(e))
+
+        # Expenditures.
+        for path in raw_files("expenditures_*.json"):
+            ft = time.perf_counter()
+            count = skipped = 0
+            skip_why: dict[str, int] = {}
+            first_keys = None
+            try:
+                rows, file_year = load_envelope(path)
+                for row_num, raw in enumerate(rows, start=1):
+                    idx = index_row(raw)
+                    if first_keys is None:
+                        first_keys = set(idx)
+
+                    amount = parse_amount(pick(idx, "amount", "expenditureAmount",
+                                               "amountPaid", "totalAmount"))
+                    # `expDate` is what the API actually sends. Its absence from
+                    # this list emptied every expenditure row for every year —
+                    # 510k rows across 2008-2026 — while the parser still
+                    # reported success, because a row missing a required field
+                    # is a legitimate skip and 100% skipped looked like 100%
+                    # unusable data rather than one wrong alias.
+                    tx_date = parse_date(pick(idx, "expDate", "date",
+                                              "expenditureDate", "transactionDate",
+                                              "datePaid"))
+                    filer = person_name(pick(idx, "candidateName", "candidate",
+                                             "filerName", "committeeName"),
+                                        strip_title=True)
+
+                    if not filer or amount == "" or not tx_date:
+                        skipped += 1
+                        _tally_skip(skip_why, filer, amount, tx_date)
+                        continue
+
+                    office, district = split_office(
+                        pick(idx, "officeRun", "office", "officeSought"))
+                    city, st, zipc = split_address(
+                        pick(idx, "vendorAddress", "payeeAddress", "address"))
+
+                    expn_w.writerow({
+                        "state":            STATE,
+                        "committee_name":   filer,
+                        "amount":           amount,
+                        "date":             tx_date,
+                        "transaction_type": clean(pick(idx, "expenditureType",
+                                                       "transactionType", "type")),
+                        "payee_name":       person_name(pick(idx, "vendorName",
+                                                             "payeeName", "vendor",
+                                                             "payee")),
+                        # expDesc/expId, like expDate, are the abbreviated names
+                        # this API really uses.
+                        "purpose":          clean(pick(idx, "expDesc",
+                                                       "expenditureDescription",
+                                                       "description", "purpose")),
+                        "category":         clean(pick(idx, "expenditureCategory",
+                                                       "category")),
+                        "payee_city":       city,
+                        "payee_state":      st,
+                        "payee_zip":        zipc,
+                        "candidate_name":   filer,
+                        "office":           office,
+                        "election_year":    file_year,
+                        "filing_id":        clean(pick(idx, "expId", "expenditureId",
+                                                       "id", "reportId",
+                                                       "transactionId")),
+                        "raw_file":         path.name,
+                        "row_num":          row_num,
+                    })
+                    register_filer(filer, office, district, file_year,
+                                   path.name, row_num)
+                    count += 1
+
+                _check_total_skip(log, path.name, "expenditures", count,
+                                  skipped, skip_why, first_keys)
+                log.file_parsed(path.name, "expenditures", count, skipped,
+                                duration_s=round(time.perf_counter() - ft, 2),
+                                bytes=path.stat().st_size)
+                total_expenditures += count
+            except Exception as e:
+                log.file_parse_error(path.name, str(e))
+
+        # Filed reports.
+        # Filed disclosure reports. No transactions here — this pass exists to
+        # pick up filers who reported no itemized activity, and to attach the
+        # election year / office that transaction rows don't carry.
+        reports_seen = 0
+        for path in raw_files("reports_*.json"):
+            ft = time.perf_counter()
+            count = 0
+            try:
+                rows, file_year = load_envelope(path)
+                for row_num, raw in enumerate(rows, start=1):
+                    idx  = index_row(raw)
+                    name = person_name(pick(idx, "candidateName", "candidate",
+                                            "filerName", "personName"),
+                                       strip_title=True)
+                    if not name:
+                        continue
+
+                    office, district = split_office(
+                        pick(idx, "office", "officeName", "officeRun"))
+                    election_year = clean(pick(idx, "electionYear", "year")) or file_year
+
+                    register_filer(name, office, district, election_year,
+                                   path.name, row_num)
+
+                    # personId is the portal's only person-level identifier and
+                    # only appears here — carry it for traceability even though
+                    # person_id is name-derived (see module docstring).
+                    filer_id = clean(pick(idx, "personId", "personID", "filerId"))
+                    if filer_id:
+                        candidates[name]["state_filer_id"] = filer_id
+                        committees[name]["state_filer_id"] = filer_id
+                    count += 1
+
+                reports_seen += count
+                log.file_parsed(path.name, "candidates", count, 0,
+                                duration_s=round(time.perf_counter() - ft, 2),
+                                bytes=path.stat().st_size)
+            except Exception as e:
+                log.file_parse_error(path.name, str(e))
+
+        # Tier-2 backfill, then flush candidates and committees.
+        history  = load_election_history(log)
+        fl_index = build_fallback_index(history)
+
+        enriched = 0
+        for name, cand in candidates.items():
+            hit = match_election_history(name, history, fl_index)
+            if hit:
+                enriched += 1
+
+            first, last = name_parts(name)
+            cand_row = dict(cand)
+            cand_row.update({
+                "candidate_first": first,
+                "candidate_last":  last,
+                # Election-history values only fill gaps — the ethics portal is
+                # authoritative for anything it actually publishes.
+                "office":          cand["office"]        or hit.get("office", ""),
+                "district":        cand["district"]      or hit.get("district", ""),
+                "election_year":   cand["election_year"] or hit.get("election_year", ""),
+                "jurisdiction":    hit.get("jurisdiction", ""),
+                "party":           hit.get("party", ""),
+                "incumbent":       hit.get("incumbent", ""),
+            })
+            cand_w.writerow(cand_row)
+
+        for cmte in committees.values():
+            cmte_w.writerow(cmte)
+
+        log.enrichment_summary(
+            candidates_total=len(candidates),
+            candidates_enriched=enriched,
+            committees_total=len(committees),
+            election_history_entries=len(history),
+            reports_rows=reports_seen,
+        )
+
+        for fh in file_handles:
+            fh.close()
+        file_handles = []      # prevent a double close in `finally`
+
+        # name_hash: the portal exposes no filer ID on transaction rows, so the
+        # normalized name is the only key shared by all three screens.
+        utils.assign_person_ids(CLEAN_DIR / "candidates.csv.gz", id_model="name_hash")
+        utils.assign_committee_person_ids(CLEAN_DIR / "committees.csv.gz",
+                                          CLEAN_DIR / "candidates.csv.gz")
+
+        def _out_bytes(name: str) -> int:
+            p = CLEAN_DIR / name
+            return p.stat().st_size if p.exists() else 0
+
+        log.file_parsed("contributions.csv.gz", "contributions", total_contributions,
+                        role="output", bytes=_out_bytes("contributions.csv.gz"))
+        log.file_parsed("expenditures.csv.gz", "expenditures", total_expenditures,
+                        role="output", bytes=_out_bytes("expenditures.csv.gz"))
+        log.file_parsed("candidates.csv.gz", "candidates", len(candidates),
+                        role="output", bytes=_out_bytes("candidates.csv.gz"))
+        log.file_parsed("committees.csv.gz", "committees", len(committees),
+                        role="output", bytes=_out_bytes("committees.csv.gz"))
+        log.file_parsed("loans_debts.csv.gz", "loans_debts", 0,
+                        role="output", bytes=_out_bytes("loans_debts.csv.gz"))
+
+        duration = round(time.perf_counter() - t0, 1)
+        log.info(f"Done in {duration}s")
+        log._emit("parse_completed", status="completed", duration_s=duration,
+                  contributions=total_contributions, expenditures=total_expenditures,
+                  committees=len(committees), candidates=len(candidates))
+
+    except KeyboardInterrupt:
+        log.warning("Interrupted")
+        log._emit("parse_completed", status="interrupted",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  contributions=total_contributions, expenditures=total_expenditures,
+                  committees=len(committees), candidates=len(candidates))
+        raise
+
+    except Exception as e:
+        log._emit("parse_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  contributions=total_contributions, expenditures=total_expenditures,
+                  committees=len(committees), candidates=len(candidates),
+                  error_type=type(e).__name__, error=str(e))
+        raise
+
+    finally:
+        for fh in file_handles:
+            try:
+                fh.close()
+            except Exception:
+                pass
+
+
+# ================================ CLI =================================
+
+if __name__ == "__main__":
+    import argparse
+    argparse.ArgumentParser(
+        description="Parse South Carolina raw data into 5 normalized relations."
+    ).parse_known_args()
+    try:
+        run()
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception:
+        sys.exit(1)
