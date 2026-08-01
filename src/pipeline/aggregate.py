@@ -368,9 +368,17 @@ def run():
                     """)
                     # LIKE-based fallbacks for states that embed district info in the office field
                     # (e.g. GA "State Representative District: 15" → "State Representative")
+                    # SC patterns are uppercase because the SC parser normalizes
+                    # office through utils.clean_name; LIKE is case-sensitive.
                     for like_state, like_pattern, canon in [
                         ("GA", "State Representative%", "State Representative"),
                         ("GA", "State Senate%",         "State Senator"),
+                        ("SC", "SC SENATE%",            "State Senator"),
+                        ("SC", "SC HOUSE%",             "State Representative"),
+                        ("SC", "SCHOOL BOARD TRUSTEE%", "School Board Trustee"),
+                        ("SC", "COUNTY COUNCIL%",       "County Council"),
+                        ("SC", "%SHERIFF",              "County Sheriff"),
+                        ("SC", "%CORONER",              "County Coroner"),
                     ]:
                         con.execute(f"""
                             UPDATE candidates

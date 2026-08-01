@@ -444,6 +444,18 @@ def run(state: str):
     if not clean_dir.exists():
         clean_dir = PROJECT_ROOT / "data" / state.capitalize() / "cleaned"
     if not clean_dir.exists():
+        # Multi-word states ("south carolina", "new hampshire") don't survive
+        # .capitalize() — it yields "South carolina", not "South Carolina". On a
+        # case-insensitive filesystem the first lookup covers for that; on a
+        # case-sensitive one it doesn't. Match the directory case-insensitively,
+        # the same way tabulate.py already does.
+        data_dir = PROJECT_ROOT / "data"
+        matches  = ([d for d in data_dir.iterdir()
+                     if d.is_dir() and d.name.lower() == state_lower]
+                    if data_dir.exists() else [])
+        if matches:
+            clean_dir = matches[0] / "cleaned"
+    if not clean_dir.exists():
         print(f"ERROR: cleaned dir not found for state '{state}'")
         sys.exit(1)
 
