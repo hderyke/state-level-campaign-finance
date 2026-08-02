@@ -92,6 +92,35 @@ def clean(val) -> str:
     return (val or "").strip()
 
 
+# Virginia's COMET system seeds QA/smoke-test filings into the public bulk
+# export — Elvis from "Graceland TN", Rick Astley "Somewhere In England",
+# "Tester Mc Tester", etc., some with absurd multi-million-dollar amounts that
+# otherwise top every ranking. Each files under a test committee marked either
+# with an "XXX" wrapper (XXXXX_SMOKETEST_XXXXX, XXX_CAB-1528_..._XXX — CAB is a
+# ticket prefix, COMET is VA's own system name; all 14 "XXX" committees in the
+# full dataset are QA fixtures, and no real committee name contains "XXX") or
+# one of the explicit joke names below. Real committees for people named
+# Tester/Testerman ("Testerman for Sheriff", "Pamela Tester Wilson") do NOT
+# contain "XXX" and aren't in the set, so they're kept. Enumerated from the
+# full cleaned dataset 2026-07-23 — see docs/states/virginia.md Data Notes.
+_TEST_COMMITTEE_NAMES = {
+    "Test PAC - Ignore",
+    "TEST Commitee",
+    "TEST Vendor Filer for LER",
+    "Test For Schedule Generation- Hamburger Menu",
+    "John Jacobs Election Celebration-test",
+}
+
+
+def is_test_committee(name: str) -> bool:
+    """True if `name` is one of Virginia's QA/smoke-test committees — an
+    'XXX'-wrapped COMET fixture or an explicit joke filer. Test filings (and
+    every schedule row hanging off their reports) are dropped from all output
+    tables so they don't pollute rankings/totals."""
+    n = clean(name)
+    return "XXX" in n or n in _TEST_COMMITTEE_NAMES
+
+
 def parse_amount(val) -> str:
     """'50.00', '.00', '-534.86' -> plain numeric string. '' on failure."""
     v = clean(val).replace("$", "").replace(",", "")
@@ -264,6 +293,7 @@ def run():
         committees_seen: dict[str, dict] = {}   # CommitteeCode -> latest committee row
         candidates_seen: dict[str, dict] = {}   # CommitteeCode -> latest candidate row
         final_committees: set[str] = set()
+        test_report_ids: set[str] = set()       # ReportIds of QA/smoke-test filings — dropped everywhere
 
         for period_dir in periods:
             report_path = period_dir / "Report.csv"
@@ -281,6 +311,14 @@ def run():
 
                     fid           = clean(row.get("CommitteeCode", ""))
                     cmte_name     = clean(row.get("CommitteeName", ""))
+
+                    # QA/smoke-test filing — record its ReportId so Pass 2 drops
+                    # its schedule rows, and skip building any registry/committee/
+                    # candidate entry for it. See is_test_committee().
+                    if is_test_committee(cmte_name):
+                        test_report_ids.add(report_id)
+                        continue
+
                     cmte_type     = clean(row.get("CommitteeType", ""))
                     cand_name     = clean(row.get("CandidateName", ""))
                     office        = clean(row.get("OfficeSought", ""))
@@ -345,7 +383,7 @@ def run():
             finally:
                 raw_fh.close()
 
-            log.file_parsed(report_path.name, "report_registry", count,
+            log.file_parsed(raw_file_label(report_path), "report_registry", count,
                             duration_s=round(time.perf_counter() - ft, 2),
                             bytes=report_path.stat().st_size)
 
@@ -372,8 +410,13 @@ def run():
         log.info(f"  committees: {committees_written:,}  candidates: {candidates_written:,}")
 
         # ── Pass 2: Schedule files -> contributions / expenditures / loans_debts ──
-        def registry_lookup(report_id: str, period_dir: Path) -> dict:
-            nonlocal legacy_fallback_rows
+        test_rows_skipped = 0
+
+        def registry_lookup(report_id: str, period_dir: Path) -> dict | None:
+            nonlocal legacy_fallback_rows, test_rows_skipped
+            if report_id in test_report_ids:
+                test_rows_skipped += 1
+                return None   # QA/smoke-test filing — caller skips the row
             entry = report_registry.get(report_id)
             if entry is not None:
                 return entry
@@ -409,12 +452,17 @@ def run():
                 ft = time.perf_counter()
                 counts = handler(path, registry_lookup, period_dir,
                                  cont_w, expn_w, loan_w)
-                log.file_parsed(path.name, counts["relation"], counts["rows"],
+                log.file_parsed(raw_file_label(path), counts["relation"], counts["rows"],
                                 duration_s=round(time.perf_counter() - ft, 2),
                                 bytes=path.stat().st_size)
                 total_contributions += counts.get("contributions", 0)
                 total_expenditures  += counts.get("expenditures", 0)
                 total_loans         += counts.get("loans", 0)
+
+        if test_report_ids:
+            log.warning(f"  suppressed {len(test_report_ids):,} VA QA/smoke-test committee "
+                        f"reports ({test_rows_skipped:,} schedule rows dropped) — "
+                        f"see docs/states/virginia.md Data Notes")
 
         if legacy_fallback_rows:
             log.warning(f"  {legacy_fallback_rows:,} rows from pre-2012 periods had no "
@@ -499,6 +547,8 @@ def _schedule_a_or_b(path: Path, lookup, period_dir: Path, cont_w, expn_w, loan_
 
             report_id = clean(row.get("ReportId", ""))
             reg = lookup(report_id, period_dir)
+            if reg is None:
+                continue   # QA/smoke-test filing — drop the row (see is_test_committee)
             is_individual = clean(row.get("IsIndividual", "")).lower() == "true"
 
             if kind == "A":
@@ -561,6 +611,8 @@ def _schedule_c(path: Path, lookup, period_dir: Path, cont_w, expn_w, loan_w) ->
 
             report_id = clean(row.get("ReportId", ""))
             reg = lookup(report_id, period_dir)
+            if reg is None:
+                continue   # QA/smoke-test filing — drop the row (see is_test_committee)
             is_individual = clean(row.get("IsIndividual", "")).lower() == "true"
             receipt_type = clean(row.get("ReceiptType", ""))
 
@@ -606,6 +658,8 @@ def _schedule_d(path: Path, lookup, period_dir: Path, cont_w, expn_w, loan_w) ->
 
             report_id = clean(row.get("ReportId", ""))
             reg = lookup(report_id, period_dir)
+            if reg is None:
+                continue   # QA/smoke-test filing — drop the row (see is_test_committee)
 
             expn_w.writerow({
                 "state":            STATE,
@@ -655,6 +709,8 @@ def _schedule_e(path: Path, lookup, period_dir: Path, cont_w, expn_w, loan_w) ->
 
             report_id = clean(row.get("ReportId", ""))
             reg = lookup(report_id, period_dir)
+            if reg is None:
+                continue   # QA/smoke-test filing — drop the row (see is_test_committee)
             code = clean(row.get("TransactionType", "")).upper()
             record_type = _LOAN_TRANSACTION_TYPES.get(code, f"Loan ({code})" if code else "Loan")
 
@@ -697,6 +753,8 @@ def _schedule_f(path: Path, lookup, period_dir: Path, cont_w, expn_w, loan_w) ->
 
             report_id = clean(row.get("ReportId", ""))
             reg = lookup(report_id, period_dir)
+            if reg is None:
+                continue   # QA/smoke-test filing — drop the row (see is_test_committee)
 
             loan_w.writerow({
                 "state":               STATE,
@@ -738,6 +796,8 @@ def _schedule_i(path: Path, lookup, period_dir: Path, cont_w, expn_w, loan_w) ->
 
             report_id = clean(row.get("ReportId", ""))
             reg = lookup(report_id, period_dir)
+            if reg is None:
+                continue   # QA/smoke-test filing — drop the row (see is_test_committee)
 
             expn_w.writerow({
                 "state":            STATE,

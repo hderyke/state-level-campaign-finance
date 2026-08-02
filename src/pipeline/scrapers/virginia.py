@@ -52,7 +52,10 @@ Project integration:
     Manifest (data/Virginia/manifest.csv): period, filename, source_url,
         bytes, scraped_at — one row per successfully downloaded file.
     Logging: src.reporting.logger.get_logger("virginia", "scrape")
-        - page_scrape_* for the per-period directory-listing fetches
+        - plain info/warning for the per-period directory-listing fetches
+          (discovery steps, deliberately not page_scrape events — VA's real
+          output is the downloaded CSVs, so these shouldn't appear as rows in
+          the report's "Scraped files" table)
         - file_download_* for each individual CSV download
 
 CLI:
@@ -173,7 +176,10 @@ def discover_files(session: requests.Session, period_url: str, log) -> list[tupl
         resp = session.get(period_url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
     except requests.RequestException as e:
-        log.page_scrape_error(entity="period", page_id=period_url, error=str(e))
+        # Plain warning rather than a page_scrape event: this is a directory-
+        # listing discovery fetch, not a scraped data page, so it shouldn't land
+        # in the report's "Scraped files" table (which keys on filename).
+        log.warning(f"  ✗ failed to list {period_url}: {e}")
         return []
 
     soup = BeautifulSoup(resp.text, "html.parser")
@@ -319,8 +325,12 @@ def run(
             time.sleep(RATE_LIMIT_S)
             t_period = time.perf_counter()
             files = discover_files(session, period_url, log)
-            log.page_scrape_ok(entity="period", page_id=period,
-                               duration_s=time.perf_counter() - t_period)
+            # Plain info, not a page_scrape event — listing a period directory is
+            # a discovery step, not a scraped data page. VA's real output is the
+            # downloaded CSVs (report's "Downloaded files"), so emitting
+            # page_scrape here only produced empty "Scraped files" rows.
+            log.info(f"  listed {period} — {len(files)} file(s) "
+                     f"({time.perf_counter() - t_period:.1f}s)")
 
             is_current = period == cur
 
