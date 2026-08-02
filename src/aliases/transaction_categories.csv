@@ -285,3 +285,36 @@ NH,Loan Forgiven,Loan
 # has one of the two," no blanks to fall back on ""Contribution"" in practice).",
 WA,Cash,Monetary
 WA,In-kind,In-Kind
+# == Virginia ==================================================================,,
+"# Only Schedule A's fixed ""Contribution"" value is mapped here. Schedule B (in-kind)",,
+# and Schedule C (other receipts) transaction_type values carry a dynamic,,
+# parenthetical/suffix appended by the parser (ProductOrService / ReceiptType,,
+"# e.g. ""In-Kind Contribution (Website design)"""," ""Other Receipt: Interest Received"")",
+# so they never match a fixed raw string here — intentionally left unmapped,,
+# rather than guessed (see docs/states/virginia.md).,,
+VA,Contribution,Monetary
+# == Oregon ====================================================================,,
+# transaction_type is ORESTAR's raw Sub Type field, contribution side. Three,,
+# Sub Types seen in the raw data never reach this file at all -- "Refunds and,,
+# Rebates"/"Cash Balance Adjustment"/"Nonpartisan Activity" are deliberately,,
+# left unrouted by the parser (direction is genuinely ambiguous or there's no,,
+# real counterparty) rather than guessed into contributions or expenditures.,,
+OR,Cash Contribution,Monetary
+OR,In-Kind Contribution,In-Kind
+OR,Items Sold at Fair Market Value,Monetary
+OR,Return or Refund of Contribution,Refund
+OR,Lost or Returned Check,Refund
+OR,Miscellaneous Other Receipt,Other
+OR,Interest/Investment Income,Other
+# == Wisconsin ==================================================================,,
+# Category vocabulary is ID-backed in the source (Transaction Category ID);,,
+# values not observed in the downloads are deliberately left unmapped.,,
+WI,Monetary,Monetary
+WI,In-Kind,In-Kind
+WI,Loan Received,Loan
+WI,Returned Contribution,Refund
+WI,Refund,Refund
+WI,Transfer,Transfer
+"# An independent expenditure is spending, not a donation to the filer — Other",,
+# keeps it out of donor rankings on the contributions side.,,
+WI,Independent Expenditure,Other
