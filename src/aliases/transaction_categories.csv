@@ -306,3 +306,15 @@ OR,Return or Refund of Contribution,Refund
 OR,Lost or Returned Check,Refund
 OR,Miscellaneous Other Receipt,Other
 OR,Interest/Investment Income,Other
+# == Wisconsin ==================================================================,,
+# Category vocabulary is ID-backed in the source (Transaction Category ID);,,
+# values not observed in the downloads are deliberately left unmapped.,,
+WI,Monetary,Monetary
+WI,In-Kind,In-Kind
+WI,Loan Received,Loan
+WI,Returned Contribution,Refund
+WI,Refund,Refund
+WI,Transfer,Transfer
+"# An independent expenditure is spending, not a donation to the filer — Other",,
+# keeps it out of donor rankings on the contributions side.,,
+WI,Independent Expenditure,Other
