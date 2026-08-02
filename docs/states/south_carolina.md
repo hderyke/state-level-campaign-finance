@@ -11,8 +11,8 @@
 | **Secondary source** | [SC Election Commission election history](https://electionhistory.scvotes.gov/search) (CSV export via `sc.elstats.civera.com`) — tier-2 backfill only |
 | **Access method** | Selenium (Chrome + CDP network logging). The scraper runs one UI search per screen to capture the app's own JSON search request, then replays that request per year with an in-page `fetch()` |
 | **Coverage** | 2008 – present (the earliest option in every year dropdown on the portal) |
-| **person_id model** | `name_hash` — the portal exposes no filer ID on any transaction row; see [Parser](#parser) |
-| **has_filer_id** | `0` in `src/aliases/states.csv` |
+| **person_id model** | `name_hash` — the portal's id is per candidacy, not per person; see [Parser](#parser) |
+| **has_filer_id** | `1` in `src/aliases/states.csv` — `state_filer_id` comes from `candidateId` / `candidateFilerId` |
 
 ---
 
@@ -37,11 +37,23 @@ Each is the scraper's envelope around the search response:
 | Expenditures | Date, Amount, Candidate Name, Office Run, Vendor Name, Vendor Address, Description |
 | Reports | Report Name, Candidate Name, Office, Election Year, Election Type, Last Updated |
 
-Notable absences across all three: no filer ID, no committee registry, no party, no district field, no contributor type beyond a yes/no "Group?" flag, no transaction type, no amended flag, and no separate address components — address is one unsplit line.
+Notable absences across all three: no committee registry, no party, no district field, no contributor type beyond a yes/no "Group?" flag, no transaction type, no amended flag, and no separate address components — address is one unsplit line.
 
-### `election_history.csv`
+The grid column list above is not the field list. The search response carries keys the grid never renders, and the parser reads several of them — `candidateId` / `candidateFilerId` (the filer id) among them. It is also not a reliable guide to key *names*: the contributions grid heading "Office Run Contributed To" led to aliases `officeRun` / `officeRunContributedTo`, neither of which the API sends — it uses `officeName`, and `contributions.office` sat at 0% until that was corrected. Run `tools/sc_diagnose.py` to see the keys an endpoint actually returns rather than inferring them from the UI.
 
-Full CSV export from the SC Election Commission's election history search, covering 2008 – current year. Supplies `party`, `district`, `jurisdiction` (county) and `incumbent`, which the ethics portal publishes nowhere. Joined on candidate name at parse time.
+### `election_history_{year}.csv`
+
+CSV export from the SC Election Commission's election history search, **one file per year** covering 2008 – current year, each with its own header. Supplies `party`, `district`, `jurisdiction` (county) and `incumbent`, which the ethics portal publishes nowhere. Joined on candidate name at parse time.
+
+The scraper already requested this a year at a time (see "Election-history export defects"); the files are now stored that way too, rather than being concatenated into one `election_history.csv`. Three things follow from that:
+
+- **A truncated year can be re-downloaded on its own.** Under the combined layout there was no way to append to a year's rows once they sat in the middle of the file, so recovering one bad year meant re-requesting every year — roughly 200 MB each.
+- **Skip/refresh is a per-year decision**, on the same rules as the three portal relations, instead of all-or-nothing for the whole 2008–present range.
+- **No file is larger than one year.** The combined export ran to hundreds of MB even when truncated.
+
+A year is written through a `.part` file and moved into place only once its download and any stage-slice recovery have finished, so an interrupted run can't leave a half-written year that the next run's file-existence check would accept as complete.
+
+**Migrating from the combined layout:** the parser reads a pre-split `election_history.csv` when no per-year files exist, so an existing `raw/` still parses without a re-scrape. Once per-year files are present the combined file is ignored; the scraper logs its size and that it's safe to delete.
 
 ### `api_recipe.json`
 
@@ -49,9 +61,11 @@ Not raw data — a cache of the discovered search request per screen (`{method, 
 
 ### `manifest.csv`
 
-`relation, year, filename, downloaded_at, row_count, partial_years`. One row per relation-year, plus one for `election_history`.
+`relation, year, filename, downloaded_at, row_count, partial_years`. One row per relation-year, including one per `election_history` year.
 
-`partial_years` is space-separated and populated only for `election_history` — it lists the years the service truncated mid-stream and stage-slicing could not fully recover (see "Election-history export defects"). Empty means the export is complete as far as the scraper can tell. A non-empty value makes the next run re-download rather than skip, and the parser warns when it loads a file recorded this way. The column is read defensively: a manifest written before it existed is treated as "none", not as an error.
+`partial_years` is populated only for `election_history`, and holds the years *in that file* the service truncated mid-stream and stage-slicing could not fully recover (see "Election-history export defects") — so at most one year, the file's own. Empty means the year is complete as far as the scraper can tell. A non-empty value makes the next run re-download that year rather than skip it, and the parser warns at load time. The column is read defensively: a manifest written before it existed is treated as "none", not as an error.
+
+The plural name and space-separated format are a holdover from the combined layout, where one row covered every year and this listed all the truncated ones. Both are kept so a manifest written by the older scraper still parses; the meaning is unchanged. A leftover combined row (keyed `2008-2026` rather than a single year) is dropped on the next election-history run — it describes a file the scraper no longer writes.
 
 ---
 
@@ -97,7 +111,7 @@ Performance logging is Chrome/Chromium-only; this scraper will not run against F
 
 ### Election-history download
 
-`sc.elstats.civera.com` is a different origin from the ethics portal, so the in-page `fetch()` used for the year replays cannot reach it — CORS would block the response. Instead Chrome navigates directly at the CSV URL and the file is collected out of the browser's download directory (`data/South Carolina/.downloads/`, transient — the file is moved into `raw/` as `election_history.csv` and the original deleted). If the server serves the CSV inline rather than as an attachment, no file appears and the scraper falls back to reading the rendered body text. The result is sanity-checked for a comma in its header line before being written.
+`sc.elstats.civera.com` is a different origin from the ethics portal, so the in-page `fetch()` used for the year replays cannot reach it — CORS would block the response. Instead Chrome navigates directly at the CSV URL and the file is collected out of the browser's download directory (`data/South Carolina/.downloads/`, transient — its contents are streamed into `raw/election_history_{year}.csv` and the original deleted). If the server serves the CSV inline rather than as an attachment, no file appears and the scraper falls back to reading the rendered body text. The result is sanity-checked for a comma in its header line before being written.
 
 The service saves as `elstats_search_<hash>.csv`. `_wait_for_download` matches on "a new, complete, non-scratch file" rather than on the extension — the export is the only thing a run downloads, so the extension adds nothing, and the header-comma check settles whether the bytes are CSV. Stale entries are purged before each download so `before` is a clean baseline.
 
@@ -119,7 +133,7 @@ and closes the connection. The observed 2008–present request died on a 2022 co
 
 The stage vocabulary is read out of the truncated year's own header/rows first (that spells each value exactly as the service does) and topped up from `_STAGE_SLICE_FALLBACK` to cover stages that were cut off before appearing. **Whether the `stages` filter accepts these display names or numeric IDs is unconfirmed** — no live request has been made against it. The recovery path is written so a wrong guess is inert rather than harmful: the original partial is always the floor, slices only ever append, and a year is cleared of its partial flag only when at least one slice returned rows (proving the filter is honoured), none was itself cut short, and none failed to download. An empty slice counts as a real "no contests at this stage" only under that same proof, because the API returns an empty body for a rejected search object as well as for a genuinely empty one. If recovery never improves a year, check `_STAGE_SLICE_FALLBACK` first — the log line "no stage slice returned any rows" is the specific symptom of a rejected filter value.
 
-Years that survive all that are written to `manifest.csv` as `partial_years`, which makes the next run re-download instead of skipping and makes the parser warn at load time. Per-year scratch files live in `data/South Carolina/.history_tmp/` — deliberately not in `.downloads/`, which is purged before every request.
+Years that survive all that are written to `manifest.csv` as `partial_years` on that year's own row, which makes the next run re-download **that year alone** instead of skipping it, and makes the parser warn at load time. Recovery slices append directly to the year's in-progress `.part` file in `raw/`; there is no separate scratch directory, and in particular nothing is staged in `.downloads/`, which is purged before every request.
 
 **46% of rows are not people.** `candidate_name` carries per-contest tallies — `Total Ballots Cast`, `Total Votes Cast`, `Overvotes/Undervotes` — which `person_name()` normalizes into perfectly plausible names. In a 300k-row sample, 138,210 rows were tallies. `_TALLY_ROWS` in the parser drops them before they reach the name index, where the first+last fallback join could otherwise match a real filer against one.
 
@@ -127,7 +141,7 @@ Years that survive all that are written to `manifest.csv` as `partial_years`, wh
 
 **`incumbent` has no source column at all.** The export has 26 columns and none of them is incumbency (`is_winner` is a different fact). The tier-2 table below still lists `incumbent` as sourced from this file; it will be empty for every candidate.
 
-**Grain is ~383× finer than needed.** 4,710,175 rows collapse to 3,805 distinct candidates and 12,303 distinct (candidate, year, party, district, office) tuples — the export is at candidate × precinct × vote-channel grain and the parser reads none of that. Downloads are now streamed line by line into the combined CSV rather than `read_text()`-ed, which previously materialized the whole export as a Python `str` and again as a list from `splitlines()`.
+**Grain is ~383× finer than needed.** 4,710,175 rows collapse to 3,805 distinct candidates and 12,303 distinct (candidate, year, party, district, office) tuples — the export is at candidate × precinct × vote-channel grain and the parser reads none of that. Downloads are streamed line by line into the year's CSV rather than `read_text()`-ed, which previously materialized the whole export as a Python `str` and again as a list from `splitlines()`. The parser reads the per-year files in year order into a single name index — "most recent contest wins" compares each row's own `election_year`, so the split makes no difference to the result.
 
 ### Year discovery
 
@@ -153,7 +167,7 @@ If the search still doesn't resolve, a screenshot, the page's visible text, and 
 
 ### Flags
 
-Standard vertical flags (`--force`, `--start-year`, `--end-year`) are fully supported. Horizontal: `--transactions` → contributions + expenditures, `--entities` → the reports screen plus `election_history.csv`. `--candidates` and `--committees` both resolve to entities — SC publishes no separate registry for either.
+Standard vertical flags (`--force`, `--start-year`, `--end-year`) are fully supported. Horizontal: `--transactions` → contributions + expenditures, `--entities` → the reports screen plus the `election_history_{year}.csv` files. `--candidates` and `--committees` both resolve to entities — SC publishes no separate registry for either.
 
 Two extra flags: `--rediscover` (ignore the cached recipe) and `--headed` (run Chrome visibly, useful when discovery fails).
 
@@ -196,7 +210,11 @@ SC's "Office Run" is free text with the district glued on: `SC Senate District 1
 
 ### person_id: `name_hash`
 
-There is no filer ID on any transaction row. The only identifiers on the site — `personId`, `seiId`, `officeId` — appear in report-detail deep links, not in the search results. The normalized name is the only key shared by all three screens, so `name_hash` is the only model that produces a consistent identity across transaction-derived and report-derived filers. `states.csv` sets `has_filer_id=0`, which downgrades the `state_filer_id` fill-rate check from tier 1 to tier 2. Where a reports row *does* carry `personId`, the parser writes it to `state_filer_id` for traceability even though `person_id` is name-derived.
+The transaction screens *do* carry an identifier, and `state_filer_id` now holds it — this section previously said otherwise, and was wrong. Contributions return it as `candidateId`, expenditures as `candidateFilerId`, and the two are a single id space (Henry McMaster is `{15051, 11951}` on both). Both are 100% filled. `states.csv` sets `has_filer_id=1` accordingly, so the `state_filer_id` fill-rate check runs at tier 1 with no exemption.
+
+`person_id` still uses `name_hash`, because that id is **per candidacy, not per person**. Measured over 2017: contributions carried 838 ids across 820 names, expenditures 1,019 across 995. No id ever spanned two names — so recording it can never merge distinct filers — but ~2% of names span several ids, and Kevin L Bryant has three. Keying `person_id` on it would split one senator into three people, a worse error than the name collisions `name_hash` risks. Where a filer has several ids the parser keeps the most recent, since that is the one that still resolves against the portal.
+
+**Why this was missed.** The parser read `state_filer_id` from a `personId` on the reports screen. The portal has since stopped sending it — a 2019 reports file carries no identifier of any kind — so the lookup silently resolved to nothing and `state_filer_id` validated at 0%. The tier-1 downgrade added for that gap was covering a dead code path, not an absence of data. `tools/sc_diagnose.py` (Q3) is what surfaced it, and re-running that is the way to check the assumption still holds.
 
 ### Committees
 
@@ -204,7 +222,7 @@ SC has no committee registry of any kind. Committees are synthesized one per dis
 
 ### Election-history backfill
 
-`party`, `jurisdiction` and `incumbent` come exclusively from `election_history.csv`; `office`, `district` and `election_year` fall back to it only when the ethics portal left them blank. Matching is by normalized candidate name — exact first, then an unambiguous first+last fallback, mirroring `utils.assign_committee_person_ids`. When a candidate appears in several contests the most recent one wins, merged over older rows so an older party or county isn't lost to a newer blank. Unmatched candidates keep those columns empty; the join rate is reported through `log.enrichment_summary`.
+`party`, `jurisdiction` and `incumbent` come exclusively from the `election_history_{year}.csv` files; `office`, `district` and `election_year` fall back to it only when the ethics portal left them blank. Matching is by normalized candidate name — exact first, then an unambiguous first+last fallback, mirroring `utils.assign_committee_person_ids`. When a candidate appears in several contests the most recent one wins, merged over older rows so an older party or county isn't lost to a newer blank. Unmatched candidates keep those columns empty; the join rate is reported through `log.enrichment_summary`.
 
 ### Loans and debts
 

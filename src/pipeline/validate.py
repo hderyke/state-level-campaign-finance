@@ -38,6 +38,37 @@ csv.field_size_limit(10 * 1024 * 1024)  # 10 MB should be more than enough
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.reporting.logger import get_logger, run_dir_for
 
+# ── State name normalization ──────────────────────────────────────────────────
+
+def state_key(state: str) -> str:
+    """Canonical lookup key for a state name: lowercase, single-space-separated.
+
+    A state reaches this module under at least three spellings — the CLI and
+    directory form `south_carolina`, the states.csv form `South Carolina`, and
+    whatever the caller typed. Every table keyed by state name in this file is
+    built through this function and read through it, so the three converge.
+
+    This was a real failure, not a hypothetical. `run()` used a bare
+    `state.lower()`, which leaves `south_carolina` with its underscore while
+    STATE_ABBR and STATES_WITHOUT_FILER_ID are keyed on the space form straight
+    out of states.csv. Both lookups missed, and each miss failed silently in a
+    way that looked like bad data rather than a bad key:
+
+      - STATE_ABBR missed, so `state_upper` fell back to "SOUTH_CAROLINA", and
+        check_state_col then compared every row's `state` against that instead
+        of "SC" — failing all four tables on 100% of rows.
+      - STATES_WITHOUT_FILER_ID missed, so `state_filer_id` was held to a
+        tier-1 fill rate the source structurally cannot meet, despite
+        states.csv recording has_filer_id=0 for it.
+
+    South Carolina was the first state that is both multi-word AND has no filer
+    ID, which is why nothing caught this earlier: Alaska, Idaho, Kansas and
+    Kentucky are single words, and the multi-word states registered before it
+    all have filer IDs.
+    """
+    return " ".join((state or "").replace("_", " ").replace("-", " ").lower().split())
+
+
 # ── States without a real filer ID in their source data ───────────────────────
 # Read from src/aliases/states.csv's has_filer_id column (0 = no numeric filer ID
 # anywhere in the source; state_filer_id is structurally unfillable for these
@@ -46,7 +77,7 @@ from src.reporting.logger import get_logger, run_dir_for
 _STATES_CSV = Path(__file__).resolve().parents[2] / "src" / "aliases" / "states.csv"
 with open(_STATES_CSV, encoding="utf-8") as _f:
     STATES_WITHOUT_FILER_ID = {
-        row["name"].strip().lower()
+        state_key(row["name"])
         for row in csv.DictReader(_f)
         # states.csv rows without a has_filer_id column (e.g. a state registered
         # before this column existed) get None from DictReader, not "1" — default
@@ -436,9 +467,15 @@ def drift_check(table: str, current: int, previous: int | None) -> dict | None:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def run(state: str):
-    state_lower = state.lower()
-    state_upper = STATE_ABBR.get(state_lower, state.upper())  # "alabama" → "AL"
-    clean_dir   = PROJECT_ROOT / "data" / state_lower / "cleaned"
+    # Two forms, deliberately. `state_name` ("south carolina") is the lookup key
+    # and the ONLY thing the name-keyed tables are consulted with — see
+    # state_key() for what went wrong when this was a bare .lower(). `state_slug`
+    # ("south_carolina") is the filesystem/report form, which has to stay
+    # underscored so report filenames and docs/states/*.md paths keep resolving.
+    state_name  = state_key(state)
+    state_slug  = state_name.replace(" ", "_")
+    state_upper = STATE_ABBR.get(state_name, state_slug.upper())  # "alabama" → "AL"
+    clean_dir   = PROJECT_ROOT / "data" / state_slug / "cleaned"
 
     # Try capitalized dir too (Alabama vs alabama)
     if not clean_dir.exists():
@@ -449,9 +486,14 @@ def run(state: str):
         # case-insensitive filesystem the first lookup covers for that; on a
         # case-sensitive one it doesn't. Match the directory case-insensitively,
         # the same way tabulate.py already does.
+        #
+        # Compared through state_key rather than .lower(), so the scan also
+        # bridges the separator: the scrapers write "data/South Carolina/" while
+        # the CLI and reports use "south_carolina", and a .lower() comparison
+        # matches neither against the other.
         data_dir = PROJECT_ROOT / "data"
         matches  = ([d for d in data_dir.iterdir()
-                     if d.is_dir() and d.name.lower() == state_lower]
+                     if d.is_dir() and state_key(d.name) == state_name]
                     if data_dir.exists() else [])
         if matches:
             clean_dir = matches[0] / "cleaned"
@@ -459,12 +501,12 @@ def run(state: str):
         print(f"ERROR: cleaned dir not found for state '{state}'")
         sys.exit(1)
 
-    log = get_logger(state_lower, "validate")
+    log = get_logger(state_slug, "validate")
     t0  = time.perf_counter()
     log._emit("validate_started")
 
     try:
-        _run(state_lower, state_upper, clean_dir, log, t0)
+        _run(state_name, state_slug, state_upper, clean_dir, log, t0)
     except KeyboardInterrupt:
         log._emit("validate_completed", status="interrupted",
                   duration_s=round(time.perf_counter() - t0, 1))
@@ -476,7 +518,13 @@ def run(state: str):
         raise
 
 
-def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
+def _run(state_name: str, state_lower: str, state_upper: str, clean_dir: Path,
+         log, t0: float):
+    """state_name is the space-separated lookup key; state_lower the slug form.
+
+    Only STATES_WITHOUT_FILER_ID is consulted with state_name — everything else
+    below is a path or a display string and wants the slug.
+    """
     print(f"\n{'='*60}")
     print(f"  Validating {state_upper} — {clean_dir}")
     print(f"{'='*60}\n")
@@ -492,7 +540,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
             pass
 
     tables = ["candidates", "committees", "contributions", "expenditures"]
-    lacks_filer_id = state_lower in STATES_WITHOUT_FILER_ID
+    lacks_filer_id = state_name in STATES_WITHOUT_FILER_ID
     all_rows      = {}
     row_counts    = {}
     sampled_tables = {}   # table → total row count when sampling was applied
@@ -604,12 +652,33 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
                        if f["check"] not in ("file_exists", "columns", "nonempty", "committee_id")]
     passed = not tier1_failures
 
+    # `fill:<col>` failures are already legible as a ✗ against that column in the
+    # fill-rate table below. Every other value check — state_col, amounts, dates,
+    # row_num — has nowhere to appear there, so until this block existed those
+    # failures were counted in the FAIL total and never shown.
+    #
+    # That is how a South Carolina run reported "6 tier 1 check(s) failed" while
+    # displaying exactly two ✗: the other four were state_col failures, one per
+    # table, caused by a state-name key miss (see state_key). The report gave no
+    # way to tell which four checks were failing or why, and the only place the
+    # detail existed was the JSON under `tier1_failures`.
+    unshown_failures = [f for f in value_failures
+                        if not f["check"].startswith("fill:")]
+
     if schema_failures:
         print("TIER 1 — Schema errors")
         print("-" * 40)
         for f in schema_failures:
             for err in f["errors"]:
                 print(f"  ✗ [{f['table']}] {err}")
+        print()
+
+    if unshown_failures:
+        print("TIER 1 — Value errors")
+        print("-" * 40)
+        for f in unshown_failures:
+            for err in f["errors"]:
+                print(f"  ✗ [{f['table']}] {f['check']}: {err}")
         print()
 
     def _bar(rate: float) -> str:
@@ -711,7 +780,18 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
     if passed:
         print(f"  RESULT: PASS — {state_upper} data looks good")
     else:
-        print(f"  RESULT: FAIL — {len(tier1_failures)} tier 1 check(s) failed")
+        # Broken down by where each failure was reported, so the total can
+        # always be reconciled against what is on screen. A bare count is what
+        # made the SC state_col failures so hard to find: the number said six
+        # and the visible marks said two, with nothing to explain the gap.
+        fill_failures = len(value_failures) - len(unshown_failures)
+        parts = [f"{len(schema_failures)} schema"] if schema_failures else []
+        if unshown_failures:
+            parts.append(f"{len(unshown_failures)} value")
+        if fill_failures:
+            parts.append(f"{fill_failures} fill-rate")
+        print(f"  RESULT: FAIL — {len(tier1_failures)} tier 1 check(s) failed"
+              + (f" ({', '.join(parts)})" if parts else ""))
     print("=" * 60)
 
     # ── Build tier-1 fill rates for JSON (same computation used for printing) ──

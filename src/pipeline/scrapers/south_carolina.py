@@ -93,6 +93,16 @@ download dir and `Page.setDownloadBehavior`. If the server serves the CSV
 inline rather than as an attachment, no file appears and the scraper falls back
 to reading the rendered body text.
 
+Election history is requested and stored ONE YEAR PER FILE —
+raw/election_history_<year>.csv, each with its own header — matching how the
+three portal relations are stored. It used to be concatenated into a single
+election_history.csv, which made the whole export all-or-nothing: a year the
+service truncated could not be re-downloaded without re-requesting every other
+year, because there is no way to append to a year's rows once they sit in the
+middle of a combined file. Per-year files also let the manifest carry a real
+per-year skip/refresh decision, and keep any one file to a size the parser can
+stream comfortably (a single year runs to hundreds of MB).
+
 CAVEATS
 -------
   - Requires Selenium and Google Chrome: `pip install selenium`. Selenium 4.6+
@@ -122,7 +132,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import sys
 import time
 from datetime import datetime
@@ -140,19 +149,20 @@ RAW_DIR      = STATE_DIR / "raw"
 MANIFEST     = STATE_DIR / "manifest.csv"
 RECIPE       = STATE_DIR / "api_recipe.json"
 DOWNLOAD_DIR = STATE_DIR / ".downloads"   # Chrome's download target; transient
-# Per-year election-history scratch. Deliberately NOT inside DOWNLOAD_DIR:
-# _download_history_csv purges that directory before every request so `before`
-# is a clean baseline, which would delete the very file the recovery path is
-# accumulating into.
-HISTORY_TMP  = STATE_DIR / ".history_tmp"
 
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-# `partial_years` records which election-history years the service truncated
-# mid-stream (see _STREAM_ERROR). Empty for every other relation and for a
-# clean election-history run. Without it a partial export is indistinguishable
-# from a complete one on disk, and the run that produced the warning is the only
-# place that knowledge exists.
+# `partial_years` records whether the service truncated this election-history
+# year mid-stream (see _STREAM_ERROR): the year itself when it did, empty when
+# it didn't. Empty for every other relation. Without it a partial export is
+# indistinguishable from a complete one on disk, and the run that produced the
+# warning is the only place that knowledge exists.
+#
+# The column name is a holdover from when election history was one combined
+# file and this held a space-separated list of every truncated year. It is kept
+# rather than renamed so a manifest written by the older scraper still parses,
+# and the meaning is unchanged — it is still "the years in this file that are
+# partial", of which a per-year file has at most one.
 MANIFEST_COLS = ["relation", "year", "filename", "downloaded_at", "row_count",
                  "partial_years"]
 
@@ -188,7 +198,15 @@ FALLBACK_FIRST_YEAR = 2008
 
 # SC Election Commission election history (tier-2 backfill)
 ELECTION_HISTORY_URL  = "https://sc.elstats.civera.com/api/download_search.csv"
-ELECTION_HISTORY_FILE = "election_history.csv"
+
+# One file per year, mirroring the {relation}_{year} naming the three portal
+# relations already use. The parser globs for this prefix.
+ELECTION_HISTORY_RELATION = "election_history"
+
+# What the scraper wrote before election history was split per year. Never
+# written now; recognized only so a run can tell the operator the old file is
+# no longer read and is safe to delete.
+LEGACY_ELECTION_HISTORY_FILE = "election_history.csv"
 # Their search screen defaults to 2008 as the floor; earlier contests aren't in
 # the dataset, so asking for them just returns the same rows.
 ELECTION_HISTORY_FLOOR = 2008
@@ -1174,6 +1192,17 @@ def _append_history_year(source: Path | str, out, write_header: bool,
     return rows, truncated, header
 
 
+def history_filename(year: int) -> str:
+    """raw/ filename for one election-history year.
+
+    Kept as a function rather than an f-string at each call site because the
+    parser derives its glob from the same prefix — the two have to agree, and a
+    single definition is the only way to make that structural rather than a
+    convention someone has to remember.
+    """
+    return f"{ELECTION_HISTORY_RELATION}_{year}.csv"
+
+
 def _history_url(year: int, stage: dict | None = None) -> str:
     """Export URL for one year, optionally narrowed to a single stage.
 
@@ -1296,9 +1325,9 @@ def _recover_year(log, driver, year: int, kept: Path,
     return recovered
 
 
-def download_election_history(log, driver, first_year: int,
-                              last_year: int) -> tuple[str, int, list[int]] | None:
-    """Download the SC Election Commission's election history, one year per request.
+def download_history_year(log, driver,
+                          year: int) -> tuple[str, int, bool] | None:
+    """Download one election-history year into raw/election_history_<year>.csv.
 
     Cross-origin to the ethics portal, so this navigates Chrome at the URL and
     collects the resulting download rather than using the in-page fetch() the
@@ -1315,91 +1344,55 @@ def download_election_history(log, driver, first_year: int,
     is reported, and the remaining years still land. It also keeps each response
     small enough to finish inside DOWNLOAD_TIMEOUT.
 
-    Years are written into one combined raw/election_history.csv, header once.
+    The year is written through a .part file and moved into place only once the
+    download (and any stage-by-stage recovery) has finished, so an interrupted
+    run cannot leave a half-written year in raw/ that the next run's
+    file-existence check would then accept as complete.
 
-    Each year lands in its own scratch file before being concatenated. A year
-    that truncates is retried stage by stage against that scratch (see
-    _recover_year), which needs the year's rows addressable on their own — once
-    they are in the combined file there is no way to append to that year without
-    rewriting everything after it.
-
-    Returns (filename, total_rows, partial_years).
+    Returns (filename, rows, truncated), or None if the year could not be
+    downloaded at all. `truncated` is True when the service cut the stream —
+    the file is real and worth keeping, but is known to be missing its oldest
+    contests (see _recover_year).
     """
-    filename = ELECTION_HISTORY_FILE
+    filename = history_filename(year)
     out_path = RAW_DIR / filename
     part     = out_path.with_name(out_path.name + ".part")
 
     log.file_download_start(filename=filename)
     t0 = time.perf_counter()
 
-    total_rows = 0
-    ok_years, failed, truncated_years = [], [], []
-
+    # Digests of this year's rows only. Scoped per year so the set is released
+    # between years rather than growing to the full nine-million-row export,
+    # and because cross-year duplicates are not possible anyway.
+    seen: set[bytes] = set()
+    cut = False
     try:
         with open(part, "w", encoding="utf-8", newline="") as out:
-            for year in range(first_year, last_year + 1):
-                scratch = HISTORY_TMP / f"year_{year}.csv"
-                # Digests of this year's rows only. Scoped per year so the set
-                # is released between years rather than growing to the full
-                # nine-million-row export, and because cross-year duplicates
-                # are not possible anyway.
-                seen: set[bytes] = set()
-                try:
-                    HISTORY_TMP.mkdir(parents=True, exist_ok=True)
-                    with open(scratch, "w", encoding="utf-8", newline="") as ys:
-                        source = _download_history_csv(driver,
-                                                       _history_url(year))
-                        rows, cut, header = _append_history_year(
-                            source, ys, write_header=False, seen=seen)
-                    if cut:
-                        log.warning(f"  [election_history] {year}: the service "
-                                    f"ended the stream early — {rows:,} rows "
-                                    f"before the cut, attempting stage-by-stage "
-                                    f"recovery")
-                        rows += _recover_year(log, driver, year, scratch, seen)
-                except Exception as e:
-                    # Per docs/contributing.md §4 one bad year is a per-file
-                    # failure, not a reason to abandon the other eighteen.
-                    log.warning(f"  [election_history] {year}: {e}")
-                    failed.append(year)
-                    scratch.unlink(missing_ok=True)
-                    continue
-
-                if not ok_years:
-                    out.write(header + "\n")
-                with open(scratch, encoding="utf-8", newline="") as ys:
-                    shutil.copyfileobj(ys, out)
-                scratch.unlink(missing_ok=True)
-
-                total_rows += rows
-                ok_years.append(year)
-                if cut:
-                    truncated_years.append(year)
-                    log.warning(f"  [election_history] {year}: PARTIAL "
-                                f"({rows:,} rows kept after recovery)")
-                time.sleep(0.5)
-
-        if not ok_years:
-            raise RuntimeError(f"no year returned usable CSV "
-                               f"({first_year}-{last_year})")
-        os.replace(part, out_path)
+            source = _download_history_csv(driver, _history_url(year))
+            # Header per file now, not once for a combined export: each year
+            # has to stand on its own as a readable CSV.
+            rows, cut, _ = _append_history_year(source, out,
+                                                write_header=True, seen=seen)
+        if cut:
+            log.warning(f"  [election_history] {year}: the service ended the "
+                        f"stream early — {rows:,} rows before the cut, "
+                        f"attempting stage-by-stage recovery")
+            rows += _recover_year(log, driver, year, part, seen)
     except Exception as e:
-        Path(part).unlink(missing_ok=True)
+        part.unlink(missing_ok=True)
         log.file_download_error(filename=filename, error=str(e))
         return None
 
-    if failed:
-        log.warning(f"  [election_history] {len(failed)} year(s) returned nothing: "
-                    f"{failed}")
-    if truncated_years:
-        log.warning(f"  [election_history] {len(truncated_years)} year(s) are "
-                    f"partial: {truncated_years} — party/district/jurisdiction "
-                    f"backfill will be incomplete for them")
+    os.replace(part, out_path)
+    if cut:
+        log.warning(f"  [election_history] {year}: PARTIAL ({rows:,} rows kept "
+                    f"after recovery) — party/district/jurisdiction backfill "
+                    f"will be incomplete for contests in this year")
 
     log.file_download_ok(filename=filename, bytes=out_path.stat().st_size,
-                         rows=total_rows,
+                         rows=rows,
                          duration_s=round(time.perf_counter() - t0, 2))
-    return filename, total_rows, truncated_years
+    return filename, rows, cut
 
 
 # ============================ year scoping ============================
@@ -1501,8 +1494,8 @@ def run(
 
     # Relations this run will actually re-fetch. election_history only rides
     # along when entities are in scope, so a --force --contributions run must
-    # not wipe its manifest entry.
-    in_scope = set(targets) | ({"election_history"} if do_entities else set())
+    # not wipe its manifest entries.
+    in_scope = set(targets) | ({ELECTION_HISTORY_RELATION} if do_entities else set())
 
     # Manifest scoping. Wipe the entries the run is about to refresh, so the
     # file-existence fallback below can't resurrect a skip for a year the
@@ -1511,12 +1504,20 @@ def run(
         strip_manifest(lambda r: r.get("relation") not in in_scope)
     elif year_range_active:
         def _keep(r: dict) -> bool:
-            if r.get("relation") not in targets:
+            # in_scope, not targets: election_history is year-keyed now, so a
+            # --start-year run has to clear its rows for the range too. While it
+            # was one combined row keyed on "2008-2026" this had to skip it,
+            # which is what the int() guard below was for.
+            if r.get("relation") not in in_scope:
                 return True
             try:
                 yr = int(r["year"])
             except (ValueError, KeyError, TypeError):
-                return True          # non-year rows (election_history) always kept
+                # A non-year key can now only be a combined election_history row
+                # left by the pre-split scraper. It describes a file this run no
+                # longer writes, so drop it rather than let it linger and be
+                # read as coverage the raw/ directory doesn't have.
+                return r.get("relation") != ELECTION_HISTORY_RELATION
             if start_year is not None and yr < start_year:
                 return True
             if end_year is not None and yr > end_year:
@@ -1615,51 +1616,76 @@ def run(
                 time.sleep(0.5)
 
         # Election history rides along with entities — it exists purely to fill
-        # the candidate columns the ethics portal doesn't publish.
+        # the candidate columns the ethics portal doesn't publish. One file and
+        # one manifest row per year, on the same skip rules as the three portal
+        # relations.
         if do_entities:
             eh_first = start_year or ELECTION_HISTORY_FLOOR
             eh_last  = end_year   or current_year
-            eh_range = f"{eh_first}-{eh_last}"
-            eh_path  = RAW_DIR / ELECTION_HISTORY_FILE
 
-            # Same current-year rule as the yearly files: a range ending in the
-            # current year is stale as soon as new results are certified, so it
-            # always refreshes. A wholly historical range already on disk is
-            # skipped.
-            eh_stale = (eh_last >= current_year or force or year_range_active)
-            # A file the service truncated is not a finished download. Skipping
-            # it would make the partial permanent for any range that doesn't
-            # reach the current year, so a recorded partial always re-runs —
-            # the poisoning contest is server-side and may well be fixed by now.
-            eh_partial = any(r.get("partial_years")
-                             for r in load_manifest()
-                             if r.get("relation") == "election_history"
-                             and str(r.get("year")) == eh_range)
-            if (not eh_stale and not eh_partial
-                    and ("election_history", eh_range) in done
-                    and eh_path.exists() and eh_path.stat().st_size > 0):
-                log.file_download_skip(filename=ELECTION_HISTORY_FILE)
-            else:
-                if eh_partial and not eh_stale:
-                    log.info("  [election_history] previous run was partial — "
-                             "re-downloading rather than skipping")
-                result = download_election_history(log, driver, eh_first, eh_last)
+            # Drop any combined row left by the pre-split scraper. It claims
+            # coverage for a file this run no longer writes, and its year key
+            # ("2008-2026") can never match a per-year lookup, so left alone it
+            # would sit in the manifest forever describing nothing.
+            strip_manifest(lambda r: not (
+                r.get("relation") == ELECTION_HISTORY_RELATION
+                and not str(r.get("year", "")).isdigit()))
+
+            # Years the service truncated mid-stream on a previous run. A file
+            # it cut short is not a finished download: skipping it would make
+            # the partial permanent for any range that doesn't reach the current
+            # year, so a recorded partial always re-runs — the poisoning contest
+            # is server-side and may well be fixed by now.
+            eh_partial = {str(r.get("year")) for r in load_manifest()
+                          if r.get("relation") == ELECTION_HISTORY_RELATION
+                          and (r.get("partial_years") or "").strip()}
+
+            legacy = RAW_DIR / LEGACY_ELECTION_HISTORY_FILE
+            if legacy.exists():
+                log.warning(
+                    f"  [election_history] {LEGACY_ELECTION_HISTORY_FILE} is "
+                    f"from the previous combined layout and is no longer read "
+                    f"once per-year files exist — safe to delete "
+                    f"({legacy.stat().st_size / 1e6:,.0f} MB)")
+
+            for year in range(eh_first, eh_last + 1):
+                key      = (ELECTION_HISTORY_RELATION, str(year))
+                filename = history_filename(year)
+                expected = RAW_DIR / filename
+
+                # Same current-year rule as the portal relations: results for
+                # the year in progress keep being certified, so it is stale by
+                # definition.
+                refresh = (year == current_year or year_range_active or force)
+                already = not refresh and str(year) not in eh_partial and (
+                    key in done
+                    or (expected.exists() and expected.stat().st_size > 0)
+                )
+                if already:
+                    log.file_download_skip(filename=filename)
+                    continue
+                if str(year) in eh_partial and not refresh:
+                    log.info(f"  [election_history] {year}: previous download "
+                             f"was partial — re-downloading rather than skipping")
+
+                result = download_history_year(log, driver, year)
                 if result is None:
                     files_err += 1
-                else:
-                    filename, row_count, partial_years = result
-                    upsert_manifest({
-                        "relation":      "election_history",
-                        "year":          eh_range,
-                        "filename":      filename,
-                        "downloaded_at": datetime.today().strftime("%Y-%m-%d"),
-                        "row_count":     row_count,
-                        # Space-separated: the manifest is CSV, and a comma-joined
-                        # list would need quoting that DictReader consumers of
-                        # this file are not all prepared for.
-                        "partial_years": " ".join(str(y) for y in partial_years),
-                    })
-                    files_ok += 1
+                    continue
+
+                filename, row_count, partial = result
+                upsert_manifest({
+                    "relation":      ELECTION_HISTORY_RELATION,
+                    "year":          year,
+                    "filename":      filename,
+                    "downloaded_at": datetime.today().strftime("%Y-%m-%d"),
+                    "row_count":     row_count,
+                    # The year itself when truncated, empty otherwise — see
+                    # MANIFEST_COLS for why the column keeps its plural name.
+                    "partial_years": str(year) if partial else "",
+                })
+                files_ok += 1
+                time.sleep(0.5)
 
         duration = round(time.perf_counter() - t0, 1)
         log.info(f"Done in {duration}s — {files_ok} ok, {files_err} errors")
@@ -1692,10 +1718,6 @@ def run(
             DOWNLOAD_DIR.rmdir()
         except OSError:
             pass   # non-empty (a failed download left a part file) or absent
-        # The per-year history scratch is pure temp: unlike DOWNLOAD_DIR there is
-        # nothing here worth preserving for diagnosis, and a year file is ~200 MB,
-        # so it comes out whole rather than only when already empty.
-        shutil.rmtree(HISTORY_TMP, ignore_errors=True)
 
 
 # ================================ CLI =================================

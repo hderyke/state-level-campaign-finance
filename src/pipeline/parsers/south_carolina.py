@@ -12,8 +12,12 @@ Raw inputs (all written by scrapers/south_carolina.py):
                                 report; the only bulk source of candidate,
                                 office, election-year and election-type data
                                 on the portal
-    election_history.csv        SC Election Commission election history export,
-                                used for tier-2 backfill (see below)
+    election_history_{year}.csv SC Election Commission election history export,
+                                one file per year, each with its own header;
+                                used for tier-2 backfill (see below). A single
+                                combined election_history.csv written by the
+                                pre-split scraper is still read when no per-year
+                                files are present.
 
 TOLERANT FIELD LOOKUP
 ---------------------
@@ -50,7 +54,7 @@ TIER-2 BACKFILL FROM ELECTION HISTORY
 -------------------------------------
 ethicsfiling.sc.gov publishes no party, district, incumbency or jurisdiction
 data anywhere, and has no candidate or committee registry to enrich from. Those
-columns are filled by joining candidates against election_history.csv on
+columns are filled by joining candidates against the election-history files on
 normalized candidate name — exact full name first, then an unambiguous
 first+last fallback, mirroring utils.assign_committee_person_ids. When a person
 appears in several contests the most recent one wins, so party reflects their
@@ -59,12 +63,25 @@ columns empty; the join rate is reported via log.enrichment_summary.
 
 OTHER NOTES
 -----------
-  - person_id uses id_model="name_hash". The portal exposes no filer ID on any
-    transaction row — the only identifiers on the site (personId/seiId/officeId)
-    live in report-detail deep links, so a name-derived key is the only thing
-    that can identify the same filer across all three screens. states.csv marks
-    SC has_filer_id=0 accordingly. Where a reports row does carry personId it is
-    still written to state_filer_id for traceability.
+  - person_id uses id_model="name_hash", but NOT because the portal has no
+    identifier — it has one, and state_filer_id now carries it. The
+    contributions screen returns it as `candidateId` and the expenditures screen
+    as `candidateFilerId`, and the two are one id space: Henry McMaster is
+    {15051, 11951} on both. Both are 100% filled.
+
+    It is not a person key, though. The portal issues an id per candidacy, so a
+    filer who runs again gets another one: over 2017, contributions carried 838
+    ids across 820 names and expenditures 1,019 across 995, with ~2% of names
+    holding several (Kevin L Bryant has three). No id ever spanned two names, so
+    recording it cannot merge distinct filers — but keying person_id on it would
+    split one person into three, which is worse than the name collisions
+    name_hash risks. Hence: name_hash for person_id, the portal's id for
+    state_filer_id, most recent candidacy winning where a filer has several.
+
+    The reports screen used to be the only source of state_filer_id, through a
+    `personId` the portal has since stopped sending — a 2019 reports file
+    carries no identifier at all. That dead lookup, not an absence of data, is
+    why state_filer_id validated at 0%.
   - Every filer in this dataset is a candidate or public official — the screens
     sit under /candidates-public-officials — so committees are written with
     committee_type "Candidate Committee". Standalone PACs file elsewhere and do
@@ -102,7 +119,19 @@ CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 
 STATE = "SC"
 
-ELECTION_HISTORY_FILE = "election_history.csv"
+# The scraper writes election history one file per year —
+# raw/election_history_<year>.csv, each with its own header. See
+# scrapers/south_carolina.py for why it is split rather than combined.
+ELECTION_HISTORY_RELATION = "election_history"
+ELECTION_HISTORY_GLOB     = f"{ELECTION_HISTORY_RELATION}_*.csv"
+
+# What the scraper wrote before the split. Read only when no per-year files
+# exist, so a raw/ directory captured by the older scraper still parses without
+# a re-scrape — this export is hundreds of MB per year and re-downloading it to
+# satisfy a rename would be a poor trade. Never preferred over per-year files:
+# a directory holding both is one mid-migration, where the per-year files are
+# the current truth and the combined file is the stale copy.
+LEGACY_ELECTION_HISTORY_FILE = "election_history.csv"
 
 
 # ========================= tolerant field lookup ======================
@@ -120,6 +149,11 @@ def _nk(key: str) -> str:
 _TALLY_ROWS = {_nk(s) for s in (
     "Total Ballots Cast", "Total Votes Cast", "Overvotes/Undervotes",
     "Overvotes", "Undervotes", "Write-In", "Write-Ins", "Blank Votes",
+    # Ballot-measure response options. These sit in candidate_name on
+    # question rows exactly as the tallies do, and are normally caught earlier
+    # by the question_text check in _index_history_file — this is the backstop
+    # for a question row that arrives without question_text populated.
+    "Yes", "No", "For", "Against",
 )}
 
 
@@ -351,8 +385,28 @@ def split_address(val: str) -> tuple[str, str, str]:
 # "SC Senate District 10", "School Board Trustee District GREENVILLE",
 # "Coroner No. 2" — the district is glued onto the office string and there is no
 # separate field for it anywhere in the source.
+#
+# The `(?![A-Z])` is load-bearing. `\b` only anchors the LEFT edge of the
+# keyword, so `NO` also matched the first two letters of any word starting with
+# it, and the capture then swallowed the rest of the string: "NORTH AUGUSTA CITY
+# COUNCIL" produced the district "RTH AUGUSTA CITY COUNCIL". North Augusta,
+# North Charleston and Norway are all real SC municipalities, so this was
+# firing on live data via the expenditures screen.
+#
+# The lookahead is applied to the word keywords only, not to `#` — a bare `#`
+# is legitimately followed by a letter ("Seat #A"), and requiring a non-letter
+# after it would drop those.
+#
+# `\b` likewise scopes to the word keywords only. It used to sit in front of the
+# whole group, including the `#` branch, where it could never match: `\b` needs a
+# word character on one side, and in "Council #3" the `#` has a space to its left
+# and a digit to its right. That branch was dead for every string with a space
+# before the `#` — which is all of them — so "Council #3" returned no district
+# while "Council Seat #A" worked, the `#` there being consumed by the `[:#]?`
+# separator rather than matched as a keyword.
 _DISTRICT_RE = re.compile(
-    r"\b(?:DISTRICT|DIST\.?|SEAT|NO\.?|#)\s*[:#]?\s*(?P<d>[A-Z0-9][A-Z0-9 .#/-]*)$"
+    r"(?:\b(?:DISTRICT|DIST|SEAT|NO)\.?(?![A-Z])|#)"
+    r"\s*[:#]?\s*(?P<d>[A-Z0-9][A-Z0-9 .#/-]*)$"
 )
 
 
@@ -417,6 +471,12 @@ def open_writer(filename: str, fieldnames: list[str]):
 def _manifest_partial_years() -> list[str]:
     """Truncated election-history years, as recorded by the scraper.
 
+    Returns a flat sorted list of year strings. Each manifest row's
+    `partial_years` cell holds the years IN THAT FILE that the service cut short
+    — one year at most now that the export is stored per year, but a
+    space-separated list in rows written by the pre-split scraper, so the cell
+    is split rather than taken whole.
+
     Read defensively: the manifest predates the `partial_years` column, so a
     file written by an older scraper simply won't have it, and that is not an
     error — it means "unknown", which reads the same as "none" here.
@@ -424,13 +484,45 @@ def _manifest_partial_years() -> list[str]:
     manifest = RAW_DIR.parent / "manifest.csv"
     if not manifest.exists():
         return []
+    years: set[str] = set()
     try:
         with open(manifest, newline="", encoding="utf-8") as f:
-            return [r["partial_years"] for r in csv.DictReader(f)
-                    if r.get("relation") == "election_history"
-                    and (r.get("partial_years") or "").strip()]
+            for r in csv.DictReader(f):
+                if r.get("relation") != ELECTION_HISTORY_RELATION:
+                    continue
+                years.update((r.get("partial_years") or "").split())
     except OSError:
         return []
+    return sorted(years)
+
+
+def _election_history_paths(log) -> list[Path]:
+    """Election-history files to read, newest-relevant order irrelevant.
+
+    Per-year files first; the pre-split combined file only when there are none
+    (see LEGACY_ELECTION_HISTORY_FILE). Sorted by year so the "most recent
+    contest wins" rule in load_election_history sees years in ascending order —
+    that rule compares election_year per row and doesn't depend on file order,
+    but reading in order keeps the warnings and any partial-file diagnosis
+    legible.
+    """
+    paths = sorted(RAW_DIR.glob(ELECTION_HISTORY_GLOB),
+                   key=lambda p: (_year_of_history_file(p), p.name))
+    if paths:
+        return paths
+    legacy = RAW_DIR / LEGACY_ELECTION_HISTORY_FILE
+    if legacy.exists():
+        log.warning(f"  no {ELECTION_HISTORY_GLOB} files — falling back to "
+                    f"{LEGACY_ELECTION_HISTORY_FILE} from the previous combined "
+                    f"layout. Re-run the scraper to split it by year.")
+        return [legacy]
+    return []
+
+
+def _year_of_history_file(path: Path) -> int:
+    """Year in an election_history_<year>.csv name; 0 when there isn't one."""
+    m = re.search(r"_(\d{4})\.csv$", path.name)
+    return int(m.group(1)) if m else 0
 
 
 def _tally_skip(why: dict, filer, amount, tx_date) -> None:
@@ -467,36 +559,43 @@ def _check_total_skip(log, name: str, relation: str, count: int, skipped: int,
                     f"{sorted(sample)}")
 
 
-def load_election_history(log) -> dict[str, dict]:
-    """Index the SC Election Commission export by normalized candidate name.
+def _index_history_file(path: Path,
+                        index: dict[str, dict]) -> tuple[int, int, int]:
+    """Fold one election-history CSV into `index`.
 
-    Returns {NORMALIZED NAME: {party, district, jurisdiction, election_year,
-    incumbent}}. When a candidate appears in several contests the most recent
-    one wins — party affiliation and district can both change between cycles,
-    and the latest ballot appearance is the most useful single answer.
+    Returns (rows_read, tally_skipped, question_skipped).
+
+    `index` is passed in and mutated rather than returned per file because the
+    "most recent contest wins" rule has to be applied across the whole export,
+    not within a year: merging separately-built per-year indexes afterwards
+    would have to re-implement the same comparison, and getting the two copies
+    to agree is exactly the kind of duplication that drifts.
     """
-    path = RAW_DIR / ELECTION_HISTORY_FILE
-    if not path.exists():
-        log.warning(f"  {ELECTION_HISTORY_FILE} not found — "
-                    f"party/district/incumbent backfill skipped")
-        return {}
-
-    # The scraper records years the service truncated mid-stream. Those years
-    # are present in the file but incomplete, so a candidate whose only ballot
-    # appearance falls in one can come back unmatched — or matched to an older
-    # contest — with nothing in the join rate to suggest why.
-    for year_list in _manifest_partial_years():
-        log.warning(f"  {ELECTION_HISTORY_FILE}: year(s) {year_list} were "
-                    f"downloaded PARTIAL — party/district/jurisdiction backfill "
-                    f"is incomplete for candidates whose contests fall in them")
-
-    index: dict[str, dict] = {}
-    rows_read = 0
-    skipped_tally = 0
+    rows_read = skipped_tally = skipped_question = 0
     with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
         for raw in csv.DictReader(f):
             rows_read += 1
             idx  = index_row(raw)
+
+            # Ballot-measure rows, dropped structurally rather than by name.
+            #
+            # 13.8% of this export describes ballot questions, not contests, and
+            # those rows still fill candidate_name — with the measure's response
+            # options. Measured over 300,000 rows, question rows contained
+            # exactly five distinct values (YES, NO, TOTAL VOTES CAST,
+            # OVERVOTES/UNDERVOTES, TOTAL BALLOTS CAST) in equal counts and no
+            # real people at all, so nothing is lost by skipping the row type
+            # outright. Three of those five were already in _TALLY_ROWS; YES and
+            # NO were not, and were entering the name index as candidates.
+            #
+            # Testing question_text rather than adding YES/NO to the blocklist
+            # is the difference between a rule about what a row IS and a list of
+            # strings that has to be extended every time the service adds a
+            # response option ("FOR"/"AGAINST", a bond measure's "IN FAVOR").
+            if pick(idx, "questionText", "question_text", "questionType"):
+                skipped_question += 1
+                continue
+
             name = person_name(pick(idx, "candidate", "candidateName",
                                     "candidate_name", "name", "contestant"),
                                strip_title=True)
@@ -553,11 +652,66 @@ def load_election_history(log) -> dict[str, dict]:
                     merged.setdefault(k, "")
                 index[name] = merged
 
+    return rows_read, skipped_tally, skipped_question
+
+
+def load_election_history(log) -> dict[str, dict]:
+    """Index the SC Election Commission export by normalized candidate name.
+
+    Reads every raw/election_history_<year>.csv (or the pre-split combined file
+    if that is all that's there — see _election_history_paths) into one index.
+
+    Returns {NORMALIZED NAME: {party, district, jurisdiction, election_year,
+    incumbent}}. When a candidate appears in several contests the most recent
+    one wins — party affiliation and district can both change between cycles,
+    and the latest ballot appearance is the most useful single answer. That
+    comparison is on the row's own election_year, so which file a contest
+    arrived in makes no difference to the result.
+    """
+    paths = _election_history_paths(log)
+    if not paths:
+        log.warning(f"  no {ELECTION_HISTORY_GLOB} in raw/ — "
+                    f"party/district/incumbent backfill skipped")
+        return {}
+
+    # The scraper records years the service truncated mid-stream. Those years
+    # are present but incomplete, so a candidate whose only ballot appearance
+    # falls in one can come back unmatched — or matched to an older contest —
+    # with nothing in the join rate to suggest why.
+    partial = _manifest_partial_years()
+    if partial:
+        log.warning(f"  election history year(s) {', '.join(partial)} were "
+                    f"downloaded PARTIAL — party/district/jurisdiction backfill "
+                    f"is incomplete for candidates whose contests fall in them")
+
+    index: dict[str, dict] = {}
+    rows_read = skipped_tally = skipped_question = total_bytes = 0
+    for path in paths:
+        try:
+            read, tallies, questions = _index_history_file(path, index)
+        except OSError as e:
+            # One unreadable year is not a reason to drop the backfill for the
+            # other eighteen — mirrors the scraper's per-year failure handling.
+            log.warning(f"  {path.name}: {e} — skipping this year")
+            continue
+        rows_read       += read
+        skipped_tally   += tallies
+        skipped_question += questions
+        total_bytes     += path.stat().st_size
+
+    if skipped_question:
+        log.info(f"  election history: skipped {skipped_question:,} ballot-question "
+                 f"rows (Yes/No and their tallies, not candidates)")
     if skipped_tally:
-        log.info(f"  {ELECTION_HISTORY_FILE}: skipped {skipped_tally:,} tally "
-                 f"rows (Total Ballots Cast and friends)")
-    log.registry_loaded(ELECTION_HISTORY_FILE, len(index), relation="candidates",
-                        bytes=path.stat().st_size, rows_read=rows_read)
+        log.info(f"  election history: skipped {skipped_tally:,} tally rows "
+                 f"(Total Ballots Cast and friends)")
+    # Reported as one registry across all the files, because that is what it is
+    # downstream: a single name index. `files` carries the split so a thin index
+    # can be traced back to a year that failed to download.
+    log.registry_loaded(f"{ELECTION_HISTORY_RELATION} ({len(paths)} file(s))",
+                        len(index), relation="candidates",
+                        bytes=total_bytes, rows_read=rows_read,
+                        files=len(paths))
     return index
 
 
@@ -598,13 +752,22 @@ def run():
     committees: dict[str, dict] = {}   # normalized name → committee row
     file_handles: list = []
 
+    # name → the election year the currently-stored state_filer_id came from.
+    # Kept outside the row dicts because it is bookkeeping for the "most recent
+    # id wins" rule below, not a column anyone downstream should see.
+    filer_id_year: dict[str, str] = {}
+
     def register_filer(name: str, office: str, district: str,
-                       election_year: str = "", raw_file: str = "", row_num=""):
+                       election_year: str = "", raw_file: str = "", row_num="",
+                       filer_id: str = ""):
         """Record a filer seen on any screen, keeping the richest version.
 
         Filers show up on all three screens with differing completeness — a
         transaction row has office but no election year, a reports row has both.
         Fields are filled in on first sight and never overwritten with blanks.
+
+        `filer_id` is the exception to "first sight wins": see the state_filer_id
+        block below for why it takes the most recent value instead.
         """
         if not name:
             return
@@ -626,6 +789,25 @@ def run():
         if election_year and election_year > (cand["election_year"] or ""):
             cand["election_year"] = election_year
 
+        # state_filer_id — most recent wins, unlike every other field here.
+        #
+        # The portal issues a new id per candidacy, not per person: measured on
+        # 2017, contributions carried 838 ids over 820 names and expenditures
+        # 1,019 over 995, with no id ever spanning two names but ~2% of names
+        # spanning several ids (KEVIN L BRYANT has three). So the id is safe to
+        # record — it can never merge two people — but it is not a person key,
+        # which is why person_id stays on name_hash. Splitting Bryant into three
+        # people would be a worse error than the name collisions name_hash risks.
+        #
+        # "First sight wins" would pin a filer to their earliest candidacy, whose
+        # id may no longer resolve on the portal; the most recent id is the one
+        # that matches the site today, which is the entire point of carrying it.
+        # Ties go to the incumbent value, so a re-run over the same files is
+        # stable.
+        if filer_id and election_year >= filer_id_year.get(name, ""):
+            cand["state_filer_id"] = filer_id
+            filer_id_year[name] = election_year
+
         cmte = committees.setdefault(name, {
             "state":          STATE,
             "committee_name": name,
@@ -640,6 +822,11 @@ def run():
         })
         if election_year and election_year > (cmte["election_year"] or ""):
             cmte["election_year"] = election_year
+        # Committees are written one-per-filer from the same names, so they
+        # carry the same id — kept in step with the candidate row above rather
+        # than tracked separately.
+        if filer_id and cand["state_filer_id"]:
+            cmte["state_filer_id"] = cand["state_filer_id"]
 
     try:
         # Registered one at a time rather than as a list after the last call —
@@ -692,9 +879,22 @@ def run():
                         _tally_skip(skip_why, filer, amount, tx_date)
                         continue
 
+                    # `officeName` is the key this endpoint actually uses, and it
+                    # is 100% filled — confirmed against contributions_2017.json
+                    # (29,699 rows). It has to come first: the aliases that used
+                    # to lead this list ("officeRun", "officeRunContributedTo")
+                    # were guesses from the grid's column header, "Office Run
+                    # Contributed To", and match nothing the API sends. The
+                    # result was contributions.office at 0% while
+                    # expenditures.office sat at 100% from the same split_office
+                    # call — and because this feeds register_filer below, it also
+                    # suppressed office and district on the candidates table.
+                    #
+                    # Deliberately NOT `officeRunId`, the other office-ish key
+                    # here: it is an opaque numeric id ("20257"), not a name.
                     office, district = split_office(
-                        pick(idx, "officeRun", "officeRunContributedTo", "office",
-                             "officeSought"))
+                        pick(idx, "officeName", "officeRun",
+                             "officeRunContributedTo", "office", "officeSought"))
                     city, st, zipc = split_address(
                         pick(idx, "contributorAddress", "address",
                              "contributorFullAddress"))
@@ -733,9 +933,15 @@ def run():
                         "raw_file":          path.name,
                         "row_num":           row_num,
                     })
+                    # `candidateId` here and `candidateFilerId` on the
+                    # expenditures screen are the SAME id space — Henry McMaster
+                    # is {15051, 11951} on both — so a filer's id is consistent
+                    # across screens even though the key name is not.
                     register_filer(filer, office, district,
                                    year_of(election_date) or file_year,
-                                   path.name, row_num)
+                                   path.name, row_num,
+                                   filer_id=clean(pick(idx, "candidateId",
+                                                       "candidateFilerId")))
                     count += 1
 
                 _check_total_skip(log, path.name, "contributions", count,
@@ -780,8 +986,14 @@ def run():
                         _tally_skip(skip_why, filer, amount, tx_date)
                         continue
 
+                    # This screen sends it as `office` and always has. The other
+                    # names are tolerance, not observation — `officeName` is
+                    # included because the contributions screen uses exactly that
+                    # for the same value, and the two screens have already been
+                    # seen to disagree about key names for identical fields.
                     office, district = split_office(
-                        pick(idx, "officeRun", "office", "officeSought"))
+                        pick(idx, "office", "officeName", "officeRun",
+                             "officeSought"))
                     city, st, zipc = split_address(
                         pick(idx, "vendorAddress", "payeeAddress", "address"))
 
@@ -814,8 +1026,16 @@ def run():
                         "raw_file":         path.name,
                         "row_num":          row_num,
                     })
+                    # Deliberately NOT campaignId or credentialId, the other two
+                    # ids this screen carries: campaignId is per campaign (51
+                    # names spanned several in 2017, against 23 for
+                    # candidateFilerId) and credentialId is a parallel numbering
+                    # that shares candidateFilerId's cardinality but none of its
+                    # values, so it would not join to the contributions screen.
                     register_filer(filer, office, district, file_year,
-                                   path.name, row_num)
+                                   path.name, row_num,
+                                   filer_id=clean(pick(idx, "candidateFilerId",
+                                                       "candidateId")))
                     count += 1
 
                 _check_total_skip(log, path.name, "expenditures", count,
@@ -849,16 +1069,25 @@ def run():
                         pick(idx, "office", "officeName", "officeRun"))
                     election_year = clean(pick(idx, "electionYear", "year")) or file_year
 
+                    # This screen used to be the only source of state_filer_id,
+                    # via a `personId` the portal no longer sends — a 2019
+                    # reports file carries none of personId/candidateId/filerId/
+                    # seiId. That dead lookup is why state_filer_id validated at
+                    # 0% while the transaction screens were carrying a usable id
+                    # the whole time. The names are kept as tolerance in case the
+                    # field returns, but the id now comes from the transaction
+                    # screens (see register_filer).
+                    #
+                    # Routed through register_filer rather than assigned directly
+                    # so it obeys the same most-recent-wins rule; the old direct
+                    # assignment overwrote whatever the transaction screens had
+                    # found, regardless of year.
                     register_filer(name, office, district, election_year,
-                                   path.name, row_num)
-
-                    # personId is the portal's only person-level identifier and
-                    # only appears here — carry it for traceability even though
-                    # person_id is name-derived (see module docstring).
-                    filer_id = clean(pick(idx, "personId", "personID", "filerId"))
-                    if filer_id:
-                        candidates[name]["state_filer_id"] = filer_id
-                        committees[name]["state_filer_id"] = filer_id
+                                   path.name, row_num,
+                                   filer_id=clean(pick(idx, "candidateId",
+                                                       "candidateFilerId",
+                                                       "personId", "personID",
+                                                       "filerId")))
                     count += 1
 
                 reports_seen += count
