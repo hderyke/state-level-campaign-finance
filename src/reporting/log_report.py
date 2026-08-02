@@ -690,13 +690,18 @@ td.right { color: #e6edf3; }
 .aggregate-header .state-name { font-size: 16px; font-weight: 600; color: #e6edf3; flex: 1; }
 .aggregate-body { padding: 16px 20px; }
 
-/* == Tab navigation (per-state, when a run covers more than one) == */
+/* == Tab navigation (per-state, when a run covers more than one) ==
+   Progressive enhancement: the nav is hidden and all panels show by default,
+   so with no JavaScript (e.g. in an email client) the states render as a plain
+   stacked list of collapsible cards. TAB_SCRIPT adds `js-tabs` to <body> in a
+   browser, which flips the CSS below into a real one-panel-at-a-time switcher. */
 .tab-nav {
-    display: flex;
+    display: none;
     flex-wrap: wrap;
     gap: 6px;
     margin-bottom: 16px;
 }
+body.js-tabs .tab-nav { display: flex; }
 .tab-btn {
     appearance: none;
     border: 1px solid #30363d;
@@ -723,8 +728,9 @@ td.right { color: #e6edf3; }
 .tab-dot.err     { background: #f85149; }
 .tab-dot.warn    { background: #e3b341; }
 .tab-dot.neutral { background: #484f58; }
-.tab-panel { display: none; }
-.tab-panel.active { display: block; }
+.tab-panel { display: block; }                     /* no-JS: every panel visible, stacked */
+body.js-tabs .tab-panel { display: none; }         /* JS: show one panel at a time */
+body.js-tabs .tab-panel.active { display: block; }
 
 /* == Fixed section below tabs (aggregate / db push) == */
 .below-tabs { margin-top: 4px; }
@@ -1151,16 +1157,27 @@ function showTab(key) {
         p.classList.toggle('active', p.dataset.tab === key);
     });
 }
+// Only switch to the tab layout when JS actually runs. Without this the CSS
+// leaves every panel visible, so email clients (which don't run JS) show all
+// states stacked instead of hiding everything behind a dead tab bar.
+document.addEventListener('DOMContentLoaded', function() {
+    document.body.classList.add('js-tabs');
+});
 </script>'''
 
 
 def render_tabs(entries: list[tuple[str, str, str, str]]) -> str:
     """entries: list of (key, label, status, panel_html), one per state.
 
-    Renders a clickable tab bar (label + pass/fail dot) with one panel visible
-    at a time, first entry active by default. A single-entry run (e.g. one
-    state) skips the tab chrome entirely and just renders that panel — tabs
-    only earn their keep once there's more than one thing to switch between.
+    Renders a tab bar + one panel per entry, with **progressive enhancement**:
+
+    - No JavaScript (e.g. an email client): the tab bar is hidden by CSS and
+      every panel is shown, so the states read as a plain stacked list of
+      individually-collapsible cards. Nothing is hidden behind a dead button.
+    - JavaScript available (a browser): the TAB_SCRIPT adds `js-tabs` to
+      <body>, which flips the CSS into a real one-panel-at-a-time tab switcher.
+
+    A single-entry run skips the tab chrome entirely and just renders the panel.
     """
     if not entries:
         return ""

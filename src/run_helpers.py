@@ -72,7 +72,13 @@ def generate_report(run_id: str, no_report: bool = False) -> None:
         from src.reporting import log_report
         report   = log_report.build_report(log_report.load_events(log_path))
         html     = log_report.render_html(report, log_path, run_dir=run_dir)
-        out_path = run_dir / "report.html"
+        # Name the file by report type so a daemon run's push/pull step doesn't
+        # overwrite the pipeline (sync/reparse) report — they share one run dir
+        # and one log.jsonl but must stay separate reports. pipeline → report.html
+        # (unchanged); push → report_push.html; pull → report_pull.html.
+        rtype    = report.get("report_type", "pipeline")
+        fname    = "report.html" if rtype == "pipeline" else f"report_{rtype}.html"
+        out_path = run_dir / fname
         out_path.write_text(html, encoding="utf-8")
         print(f"  ✓ report → {out_path.relative_to(PROJECT_ROOT)}")
     except Exception as e:

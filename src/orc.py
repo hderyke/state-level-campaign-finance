@@ -41,6 +41,7 @@ SCRAPER_DIR = PROJECT_ROOT / "src" / "pipeline" / "scrapers"
 PARSER_DIR  = PROJECT_ROOT / "src" / "pipeline" / "parsers"
 TABULATE    = PROJECT_ROOT / "src" / "pipeline" / "tabulate.py"
 VALIDATE    = PROJECT_ROOT / "src" / "pipeline" / "validate.py"
+ENRICH      = PROJECT_ROOT / "src" / "pipeline" / "enrich.py"
 
 PYTHON = sys.executable
 
@@ -187,7 +188,7 @@ def _run_state(abbr: str, name: str, command: str,
                tabulate_on_pass: bool = True) -> bool:
     """
     Full pipeline for one state:
-      scraper [extra_flags] → parser → validate → tabulate (if pass)
+      scraper [extra_flags] → parser → enrich → validate → tabulate (if pass)
     Returns True if the whole chain succeeded.
     """
     extra_flags = extra_flags or []
@@ -222,6 +223,16 @@ def _run_state(abbr: str, name: str, command: str,
         log._emit("state_completed", state=name, status="failed", stage="parse")
         return False
 
+    # Enrich — hand-registry committee-candidate affiliation. Non-blocking:
+    # this writes optional metadata (affiliated_candidate_name/support_oppose),
+    # not core transaction data, so a failure here shouldn't stop the pipeline
+    # from validating/tabulating the data the parser already produced.
+    if ENRICH.exists():
+        ok = _subprocess([PYTHON, str(ENRICH), name], f"enrich.py {name}", log=log)
+        if not ok:
+            print(f"  [!] Enrich failed for {abbr} — continuing anyway (non-blocking)")
+            log._emit("enrich_subprocess_failed", state=name)
+
     # Validate
     ok = _subprocess([PYTHON, str(VALIDATE), name], f"validate.py {name}", log=log)
     if not ok:
@@ -250,7 +261,7 @@ def _run_state(abbr: str, name: str, command: str,
 def main(command: str, state_abbrs: list[str],
          extra_flags: list[str] | None = None,
          no_aggregate: bool = False):
-    """Run the full pipeline (scrape → parse → validate → tabulate → aggregate) for the given states.
+    """Run the full pipeline (scrape → parse → enrich → validate → tabulate → aggregate) for the given states.
 
     Args:
         no_aggregate: If True, skip the aggregate step entirely and return the
