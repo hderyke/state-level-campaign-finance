@@ -9,7 +9,8 @@
 | **State** | South Carolina (SC) |
 | **Source** | [SC State Ethics Commission Public Reporting](https://ethicsfiling.sc.gov/public/campaign-reports) — [contributions](https://ethicsfiling.sc.gov/public/campaign-reports/contributions), [expenditures](https://ethicsfiling.sc.gov/public/campaign-reports/expenditures), [reports](https://ethicsfiling.sc.gov/public/campaign-reports/reports) |
 | **Secondary source** | [SC Election Commission election history](https://electionhistory.scvotes.gov/search) (CSV export via `sc.elstats.civera.com`) — tier-2 backfill only |
-| **Access method** | Selenium (Chrome + CDP network logging). The scraper runs one UI search per screen to capture the app's own JSON search request, then replays that request per year with an in-page `fetch()` |
+| **Tertiary source** | [apps.sc.gov/PublicReporting](https://apps.sc.gov/PublicReporting/IndividualCommittee/Committee.aspx) — standalone PACs (opt-in, `--pacs`); see [Non-Candidate Committees](#non-candidate-committees-pacs) |
+| **Access method** | Selenium (Chrome + CDP network logging) for the candidate-side sources above. The scraper runs one UI search per screen to capture the app's own JSON search request, then replays that request per year with an in-page `fetch()`. `--pacs` is plain `requests` against a different, server-rendered site — no Chrome needed for that source |
 | **Coverage** | 2008 – present (the earliest option in every year dropdown on the portal) |
 | **person_id model** | `name_hash` — the portal's id is per candidacy, not per person; see [Parser](#parser) |
 | **has_filer_id** | `1` in `src/aliases/states.csv` — `state_filer_id` comes from `candidateId` / `candidateFilerId` |
@@ -230,6 +231,147 @@ SC publishes no loan or debt schedule through this portal. `loans_debts.csv.gz` 
 
 ---
 
+## Non-Candidate Committees (PACs)
+
+A second, unrelated source. Everything above covers `ethicsfiling.sc.gov`,
+which is candidates and public officials only. Standalone PACs, ballot
+measure committees, and political party committees file instead through
+`apps.sc.gov/PublicReporting` — the Ethics Commission's older, plain ASP.NET
+WebForms site, not the Angular SPA. This section covers Non-Candidate (PAC)
+committees, the highest-value of the six committee types that site
+publishes; Ballot Measure, Caucus, and State/County/City Party committees
+are not yet scraped (see "Not yet covered" below).
+
+**Access method:** plain `requests`, no Selenium/Playwright. This is a
+server-rendered WebForms app with no client-side rendering and no bot-wall
+encountered during reconnaissance — a real difference from every other part
+of this scraper.
+
+**Opt-in only:** `--pacs`. Deliberately excluded from the default (no-flag)
+run — a full sweep is an order of magnitude more requests than the rest of
+this scraper combined (see below).
+
+### The site
+
+Six committee-type lookups live under `Committee.aspx`: Ballot Measure,
+Caucus, Non-Candidate, and State/County/City Political Party. Four of the
+six (Caucus and the three Party levels) are plain dropdowns — 13 caucuses,
+11 state parties, 58 counties, 281 cities — trivial to enumerate. Ballot
+Measure and Non-Candidate are name-search only, and that's the one this
+scraper covers.
+
+**The search enforces "at least three characters" server-side**, not just in
+client-side JS — confirmed by POSTing a 1-character query directly and
+getting the same rejection a browser user would see. `NONCAND_COMBOS` in
+`scrapers/south_carolina.py` is therefore every 3-letter combination
+(26³ = 17,576) submitted as a "Name Contains" query: any committee name with
+3+ consecutive letters anywhere in it is a substring match for exactly one
+combo in that set, so the sweep is exhaustive. No result-count cap was found
+up to ~160 hits on a single query during testing.
+
+**Postback chain**, once a committee is found:
+
+```
+SearchNonCand.aspx  (search: "Name Contains"/"Name Begins With")
+  -> NonCandFilers.aspx     (results list -- click a committee name)
+  -> NonCandFilerResult.aspx (report index -- every filing this committee has made)
+  -> ViewReport.aspx        (per-filing summary -- category totals, committee address)
+  -> ViewContributions.aspx / ViewExpenditures.aspx / ViewLoans.aspx /
+     ViewRepayments.aspx / ViewAssets.aspx   (itemized rows for that one filing)
+```
+
+The first three hops are classic WebForms postbacks (`__VIEWSTATE`/
+`__EVENTVALIDATION` submitted back with the clicked control's field name and
+value). The tab views are plain `GET`s once positioned on a report — the
+server tracks "which report is being viewed" in session state, not in the
+URL, so switching tabs needs no viewstate at all, just the same session
+cookie.
+
+**Session tokens are reusable across many independent searches** — one
+`GET` of the search page's tokens was successfully reused for a run of
+sequential unrelated queries during testing, so the sweep does not
+re-fetch tokens per combo (tokens are refreshed periodically anyway, and on
+any request error, since a run spanning the full 17,576-combo space could
+plausibly outlast the site's own session lifetime in ways that don't
+necessarily raise an HTTP error).
+
+### Two-phase, both resumable
+
+**Phase 1 — discovery** (`sweep_noncand_registry()`): brute-force the
+17,576-combo space, collect every distinct committee name into
+`data/South Carolina/raw/noncand/committees.json`. Each combo swept is
+appended to `noncand_sweep_manifest.csv`; an interrupted run picks up where
+it left off. `--force` clears both and starts over.
+
+**Phase 2 — filing walk** (`run_noncand_pacs()` calls
+`walk_noncand_committee()` per discovered name): relocate the committee by
+exact-name search, walk its report index, and for each filing fetch the
+summary plus whichever itemized tabs the summary says are non-empty.
+Progress is tracked in `noncand_filings_manifest.csv`, one row per
+committee walked — resumable the same way.
+
+**The zero-fetch decision uses the wrong total on the summary page unless
+you're careful.** Each summary shows two totals per category:
+`_PERIOD` (this filing only) and `_CYCLE` (year-to-date across every filing
+in the cycle). A filing's itemized tabs cover its own period only, so
+`_PERIOD` is what answers "will this tab have anything" — `_CYCLE` can be
+nonzero from an *earlier* filing even when the current one reported
+nothing. Confirmed directly: a filing with `TOTAL_EXPENDITURE_CYCLE > $0`
+whose own Expenditures tab read "*** No Expenditures Reported. ***".
+`NONCAND_TABS` in the scraper uses `_PERIOD`. Loans and Loan Payments have
+no equivalent zero signal on the summary page, so those two tabs are always
+fetched regardless.
+
+### Output
+
+Raw: `data/South Carolina/raw/noncand/filings/{slug}.json`, one file per
+committee — `{"committee", "demographics": {address, city, state, zip,
+phone}, "filings": [{"period", "date_filed", "version", "contributions"?,
+"expenditures"?, "loans"?, "loan_payments"?}]}`. A category key is present
+only when that filing had itemized rows.
+
+Parsed (`parse_noncand_pacs()` in `parsers/south_carolina.py`): one
+`committees.csv.gz` row per committee (`committee_type` = raw
+`"Non-Candidate Committee"`, mapped to canonical `PAC` in
+`src/aliases/committee_types.csv`; `city`/`zip` from the demographics
+block), plus `contributions.csv.gz` / `expenditures.csv.gz` /
+`loans_debts.csv.gz` rows per itemized line. `candidate_name` and
+`person_id` are blank throughout — PACs aren't people and aren't linked to
+a candidate.
+
+**No per-transaction ID exists on this site at all** — not even the kind of
+opaque numeric id the candidate side has. `filing_id` is set to the
+filing's own `date_filed` (identifies the *report*, not the individual
+row) — the same tradeoff several other states make when the source has no
+finer-grained key.
+
+**Addresses are two lines** (`street\ncity, ST zip`), not the single
+unsplit line `ethicsfiling.sc.gov` uses — `_noncand_address()` is a
+separate, simpler parser from `split_address()` above, since the last line
+here is already just `City, ST ZIP` with nothing else mixed in.
+
+### Not yet covered
+
+- **Ballot Measure committees** — same name-search pattern and 3-char
+  minimum as Non-Candidate; not built yet.
+- **State/County/City Political Party and Caucus committees** — plain
+  dropdowns (11/58/281/13 options respectively), cheaper to add than the
+  brute-force sweep above, but not built yet. This is why party
+  contributions (e.g. "South Carolina Republican Party") still only show up
+  as a `contributor_name` string on a candidate's row, never as their own
+  filer.
+- **Assets tab** (`ViewAssets.aspx`) — deliberately skipped. There is no
+  assets table anywhere in `columns.py`, so scraping it would have nowhere
+  to go.
+- **Loans/Loan Payments column names are unconfirmed.** No real loan
+  activity turned up during development to check the itemized table's
+  headers against (PACs rarely carry loans) — `parse_noncand_pacs()` reads
+  them tolerantly through the same `pick()` field-name list the other tabs
+  use. Worth checking against a real filing if `loans_debts.csv.gz` ever
+  comes up empty for a PAC whose summary page shows a nonzero loan balance.
+
+---
+
 ## Data Notes
 
 - **No contributor type.** The only contributor classification published is a yes/no "Group?" flag. It is written as `Individual`/`Group` and mapped to `Individual`/`Organization` in `contributor_types.csv`. Rows where the flag is blank are backfilled at aggregate time from the committees table like every other state.
@@ -238,7 +380,7 @@ SC publishes no loan or debt schedule through this portal. `loans_debts.csv.gz` 
 - **Rows dropped at parse.** A contribution or expenditure missing filer, amount, or date is skipped rather than written — those three are tier-1 required and an untraceable row is worse than a missing one. Counts appear in the `file_parsed` events as `skipped`.
 - **`election_year` semantics differ by screen.** Contributions carry an explicit Election Date, so `election_year` is taken from it. Expenditures have no election date at all — `election_year` there is the year of expenditure, which is the closest available proxy and may differ from the actual cycle.
 - **Election-history coverage.** The SC Election Commission dataset starts at 2008 and only covers people who actually appeared on a ballot. Candidates who filed with the Ethics Commission but withdrew before the ballot, and non-candidate filers, will never match and keep empty party/district/incumbent.
-- **PACs are missing.** This is a candidate/public-official dataset only. Any cross-state analysis of PAC activity should treat SC as having no PAC coverage rather than zero PAC activity.
+- **PACs are covered, but opt-in and not yet complete.** The default (no-flag) scrape is a candidate/public-official dataset only, same as before. Standalone PACs are a separate source reachable only via `--pacs` (see "Non-Candidate Committees" above) — if that scrape hasn't been run for a given `data/South Carolina/`, treat PAC coverage as absent, not zero activity. Even with `--pacs` run to completion, Ballot Measure, Party, and Caucus committees still aren't covered — only standalone (Non-Candidate) PACs are.
 
 ---
 
@@ -246,6 +388,6 @@ SC publishes no loan or debt schedule through this portal. `loans_debts.csv.gz` 
 
 | Component | Date |
 |---|---|
-| Scraper | 2026-08-01 |
-| Parser | 2026-08-01 |
-| Docs | 2026-08-01 |
+| Scraper | 2026-08-02 (added `--pacs`) |
+| Parser | 2026-08-02 (added `parse_noncand_pacs()`) |
+| Docs | 2026-08-02 |

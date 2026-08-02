@@ -82,12 +82,16 @@ OTHER NOTES
     `personId` the portal has since stopped sending — a 2019 reports file
     carries no identifier at all. That dead lookup, not an absence of data, is
     why state_filer_id validated at 0%.
-  - Every filer in this dataset is a candidate or public official — the screens
-    sit under /candidates-public-officials — so committees are written with
-    committee_type "Candidate Committee". Standalone PACs file elsewhere and do
-    not appear here.
-  - SC publishes no loan or debt schedule through this portal; loans_debts.csv.gz
-    is written empty (header only) so tabulate has a consistent set of inputs.
+  - Every filer on ethicsfiling.sc.gov is a candidate or public official — the
+    screens sit under /candidates-public-officials — so committees sourced from
+    it are written with committee_type "Candidate Committee". ethicsfiling.sc.gov
+    itself publishes no loan or debt schedule, so loans_debts.csv.gz is header-only
+    from that source.
+  - Standalone PACs are a second source entirely: apps.sc.gov, scraped only when
+    --pacs is passed (see scrapers/south_carolina.py and "Non-Candidate
+    Committees" below). Optional, so raw/noncand/ may not exist — when it
+    doesn't, parse_noncand_pacs() is a no-op and loans_debts.csv.gz stays
+    header-only as above.
 """
 
 import csv
@@ -454,6 +458,213 @@ def load_envelope(path: Path) -> tuple[list[dict], str]:
         m = re.search(r"_(\d{4})\.json$", path.name)
         year = m.group(1) if m else ""
     return [r for r in rows if isinstance(r, dict)], year
+
+
+# ==================== Non-Candidate Committees (PACs) ====================
+# Raw input: data/South Carolina/raw/noncand/filings/*.json, written by
+# scrapers/south_carolina.py's opt-in --pacs sweep against apps.sc.gov -- a
+# completely different site from ethicsfiling.sc.gov above, covering
+# standalone PACs rather than candidates and public officials. See
+# docs/states/south_carolina.md "Non-Candidate Committees" for the full
+# reverse-engineering writeup. Each file is one committee's whole filing
+# history:
+#
+#   {"committee": "...", "demographics": {"address","city","state","zip","phone"},
+#    "filings": [{"period","date_filed","version",
+#                 "contributions"?, "expenditures"?, "loans"?, "loan_payments"?}]}
+#
+# A filing's category key is present only when that period had itemized rows
+# to report -- the scraper fetches a tab only when the summary page's
+# PERIOD total for it is nonzero (or, for loans/loan_payments, always, since
+# no reliable zero signal exists on the summary page for those two).
+
+NONCAND_GLOB = "noncand/filings/*.json"
+
+_NONCAND_ADDR_TAIL = re.compile(
+    r"^(?P<city>.*?),\s*(?P<st>[A-Za-z]{2})\s+(?P<zip>\d{5}(?:-\d{4})?)$")
+
+
+def _noncand_address(val: str) -> tuple[str, str, str]:
+    """(city, state, zip) from this site's two-line 'street\\ncity, ST zip'
+    address format -- distinct from split_address() above, which handles a
+    single unsplit line. The last line here is already just 'City, ST ZIP'
+    with nothing else mixed in, so no street-word boundary walk is needed."""
+    lines = [l.strip() for l in clean(val).split("\n") if l.strip()]
+    if not lines:
+        return "", "", ""
+    m = _NONCAND_ADDR_TAIL.match(re.sub(r"\s+", " ", lines[-1]))
+    if not m:
+        return "", "", ""
+    return (utils.clean_name(m.group("city")), m.group("st").upper(),
+            utils.clean_zip(m.group("zip")))
+
+
+def _noncand_election_year(filing: dict) -> str:
+    """'2012, January 10th' -> '2012'. Falls back to the last 4 digits of
+    date_filed (a real calendar date, so always usable) if period is ever
+    unparseable."""
+    m = re.match(r"^(\d{4})", clean(filing.get("period")))
+    if m:
+        return m.group(1)
+    date_filed = clean(filing.get("date_filed"))
+    return date_filed[-4:] if len(date_filed) >= 4 else ""
+
+
+def parse_noncand_pacs(log, cmte_w, cont_w, expn_w, loan_w,
+                       existing_committee_names: set) -> dict:
+    """Read every scraped Non-Candidate committee filing and write
+    committees/contributions/expenditures/loans_debts rows directly through
+    the run() writers already open. Returns counts for the caller's summary
+    line. A no-op (all zeros) when raw/noncand/ doesn't exist -- the scrape
+    step is opt-in, so most runs won't have it."""
+    paths = raw_files(NONCAND_GLOB)
+    if not paths:
+        return {"committees": 0, "contributions": 0, "expenditures": 0, "loans": 0}
+
+    n_committees = n_contrib = n_expn = n_loan = 0
+    for path in paths:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            log.file_parse_error(path.name, str(e))
+            continue
+
+        name = clean(record.get("committee"))
+        if not name:
+            continue
+
+        if name in existing_committee_names:
+            # Not observed in practice, but candidate and PAC names are drawn
+            # from unrelated sources with no shared ID -- a collision can only
+            # be caught by name. The candidate-side row wins; PAC transactions
+            # below are written under the shared name regardless, same as
+            # they'd join downstream either way.
+            log.warning(f"  [noncand] '{name}' matches an existing candidate "
+                        f"committee name -- keeping that row, not adding a "
+                        f"second committees.csv entry")
+        else:
+            demo = record.get("demographics") or {}
+            cmte_w.writerow({
+                "state":          STATE,
+                "person_id":      "",
+                "committee_name": name,
+                # Raw value, mapped to canonical "PAC" in
+                # src/aliases/committee_types.csv -- same passthrough
+                # convention as committee_type everywhere else in this parser.
+                "committee_type": "Non-Candidate Committee",
+                "election_year":  "",
+                "candidate_name": "",
+                "treasurer_name": "",
+                "city":           demo.get("city", ""),
+                "zip":            demo.get("zip", ""),
+                "active":         "",
+                "state_filer_id": "",
+                "raw_file":       path.name,
+                "row_num":        1,
+            })
+            existing_committee_names.add(name)
+            n_committees += 1
+
+        for row_num, filing in enumerate(record.get("filings", []), start=1):
+            date_filed    = clean(filing.get("date_filed"))
+            election_year = _noncand_election_year(filing)
+            # No per-transaction ID exists on this site at all -- filing_id
+            # identifies the REPORT (date_filed), not the individual row,
+            # same tradeoff several other states make when the source has no
+            # finer-grained key.
+            amended = "" if clean(filing.get("version")).lower() == "original" else "Yes"
+
+            for item in filing.get("contributions", []):
+                idx = index_row(item)
+                city, st, zipc = _noncand_address(pick(idx, "address"))
+                occupation = pick(idx, "occupation")
+                if _nk(occupation) == "unknown":
+                    occupation = ""
+                cont_w.writerow({
+                    "state":             STATE,
+                    "committee_name":    name,
+                    "amount":            parse_amount(pick(idx, "amount")),
+                    "date":              parse_date(pick(idx, "date")),
+                    "transaction_type":  "",
+                    "contributor_name":  clean(pick(idx, "contributor")),
+                    "contributor_type":  "",
+                    "contributor_city":  city,
+                    "contributor_state": st,
+                    "contributor_zip":   zipc,
+                    "employer":          "",
+                    "occupation":        occupation,
+                    "candidate_name":    "",
+                    "office":            "",
+                    "election_year":     election_year,
+                    "amended":           amended,
+                    "filing_id":         date_filed,
+                    "raw_file":          path.name,
+                    "row_num":           row_num,
+                })
+                n_contrib += 1
+
+            for item in filing.get("expenditures", []):
+                idx = index_row(item)
+                city, st, zipc = _noncand_address(pick(idx, "address"))
+                expn_w.writerow({
+                    "state":            STATE,
+                    "committee_name":   name,
+                    "amount":           parse_amount(pick(idx, "amount")),
+                    "date":             parse_date(pick(idx, "date")),
+                    "transaction_type": "",
+                    "payee_name":       clean(pick(idx, "vendor", "payee")),
+                    "purpose":          clean(pick(idx, "description", "purpose")),
+                    "category":         "",
+                    "payee_city":       city,
+                    "payee_state":      st,
+                    "payee_zip":        zipc,
+                    "candidate_name":   "",
+                    "office":           "",
+                    "election_year":    election_year,
+                    "amended":          amended,
+                    "filing_id":        date_filed,
+                    "raw_file":         path.name,
+                    "row_num":          row_num,
+                })
+                n_expn += 1
+
+            # Loans and Loan Payments share loans_debts.csv, distinguished by
+            # record_type. Column names on these two tabs are UNCONFIRMED --
+            # no real loan activity turned up during development to check
+            # against (PACs rarely carry loans), so this reads tolerantly
+            # through pick() with the same field names the other two tabs
+            # use. Worth re-checking against a real filing if loans_debts
+            # ever comes up empty for a PAC whose summary page shows a
+            # nonzero loan balance.
+            for label, items in (("Loan", filing.get("loans", [])),
+                                 ("Loan Payment", filing.get("loan_payments", []))):
+                for item in items:
+                    idx = index_row(item)
+                    city, st, zipc = _noncand_address(pick(idx, "address"))
+                    loan_w.writerow({
+                        "state":              STATE,
+                        "committee_name":     name,
+                        "original_amount":    parse_amount(pick(idx, "amount")),
+                        "date":               parse_date(pick(idx, "date")),
+                        "record_type":        label,
+                        "counterparty_name":  clean(pick(idx, "lender", "vendor",
+                                                         "contributor")),
+                        "counterparty_city":  city,
+                        "counterparty_state": st,
+                        "counterparty_zip":   zipc,
+                        "candidate_name":     "",
+                        "election_year":      election_year,
+                        "amended":            amended,
+                        "filing_id":          date_filed,
+                        "raw_file":           path.name,
+                        "row_num":            row_num,
+                    })
+                    n_loan += 1
+
+    if n_committees:
+        log.registry_loaded("noncand_committees", n_committees, relation="committees")
+    return {"committees": n_committees, "contributions": n_contrib,
+            "expenditures": n_expn, "loans": n_loan}
 
 
 # ============================== writers ===============================
@@ -841,7 +1052,9 @@ def run():
         expn_w = _writer("expenditures.csv.gz",  C.EXPENDITURES)
         cand_w = _writer("candidates.csv.gz",    C.CANDIDATES)
         cmte_w = _writer("committees.csv.gz",    C.COMMITTEES)
-        _writer("loans_debts.csv.gz",            C.LOANS_DEBTS)  # header only
+        # Empty unless the scraper's opt-in --pacs sweep has raw/noncand/
+        # files to read below -- see parse_noncand_pacs().
+        loan_w = _writer("loans_debts.csv.gz",   C.LOANS_DEBTS)
 
         # Contributions.
         for path in raw_files("contributions_*.json"):
@@ -1096,6 +1309,20 @@ def run():
                                 bytes=path.stat().st_size)
             except Exception as e:
                 log.file_parse_error(path.name, str(e))
+
+        # Non-Candidate committees (PACs) -- a separate source entirely (see
+        # module docstring and docs/states/south_carolina.md). Opt-in at scrape
+        # time (--pacs), so raw/noncand/ may simply not exist; the function
+        # glob-checks and returns zero counts rather than erroring.
+        noncand_counts = parse_noncand_pacs(log, cmte_w, cont_w, expn_w, loan_w,
+                                            existing_committee_names=set(committees))
+        if noncand_counts["committees"]:
+            log.info(f"  [noncand] {noncand_counts['committees']:,} PAC committees, "
+                     f"{noncand_counts['contributions']:,} contributions, "
+                     f"{noncand_counts['expenditures']:,} expenditures, "
+                     f"{noncand_counts['loans']:,} loan/repayment rows")
+            total_contributions += noncand_counts["contributions"]
+            total_expenditures  += noncand_counts["expenditures"]
 
         # Tier-2 backfill, then flush candidates and committees.
         history  = load_election_history(log)

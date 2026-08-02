@@ -129,14 +129,19 @@ CAVEATS
 import csv
 import glob
 import hashlib
+import itertools
 import json
 import os
 import re
+import string
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse
+from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse, urljoin
+
+import requests
+from bs4 import BeautifulSoup
 
 # Make project root and src/pipeline importable before importing local modules
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -195,6 +200,57 @@ PAGES = {
 # Portal coverage starts at 2008 (the earliest option in every year dropdown as
 # of 2026). Used only as a fallback when the live dropdown can't be read.
 FALLBACK_FIRST_YEAR = 2008
+
+# ==================== Non-Candidate Committees (PACs) ====================
+# A second, unrelated source. ethicsfiling.sc.gov (above) is candidates and
+# public officials only -- standalone PACs, ballot measure committees, and
+# political party committees file through apps.sc.gov/PublicReporting
+# instead: the SC Ethics Commission's older plain ASP.NET WebForms site, not
+# the Angular SPA. This section covers Non-Candidate (PAC) committees only,
+# the highest-value of the six committee types that site publishes -- see
+# docs/states/south_carolina.md "Non-Candidate Committees" for how each of
+# the other five (Ballot Measure, Caucus, State/County/City Party) differs
+# and why they aren't covered here yet.
+#
+# Plain requests, no Selenium -- this is a server-rendered WebForms app with
+# no client-side rendering and no bot-wall encountered during reconnaissance.
+NONCAND_SITE     = "https://apps.sc.gov/PublicReporting/IndividualCommittee"
+NONCAND_SEARCH_URL = f"{NONCAND_SITE}/NonCandidate/SearchNonCand.aspx"
+NONCAND_DIR      = RAW_DIR / "noncand"
+NONCAND_FILINGS_DIR = NONCAND_DIR / "filings"
+NONCAND_REGISTRY = NONCAND_DIR / "committees.json"
+NONCAND_SWEEP_MANIFEST = STATE_DIR / "noncand_sweep_manifest.csv"
+NONCAND_SWEEP_COLS = ["combo", "hit_count", "swept_at"]
+NONCAND_DONE_MANIFEST = STATE_DIR / "noncand_filings_manifest.csv"
+NONCAND_DONE_COLS = ["committee", "filings", "walked_at"]
+
+# The search form's "at least three characters" minimum is enforced
+# server-side, not just by client-side JS -- confirmed by POSTing a 1-char
+# query directly and getting the same rejection a real user would see.
+# "Name Contains" over every 3-letter combination is therefore the smallest
+# brute-force space that still guarantees no committee is missed: any name
+# with 3+ consecutive letters anywhere in it is a substring match for
+# exactly one combo in this set. 26**3 = 17,576 queries.
+NONCAND_COMBOS = ["".join(c) for c in itertools.product(string.ascii_lowercase, repeat=3)]
+
+# Tabs worth pulling per filing. "Assets" is deliberately excluded -- there
+# is no assets table anywhere in columns.py, so scraping it would have
+# nowhere to go; if that ever changes, ViewAssets.aspx follows the same
+# pattern as the other four.
+#
+# The summary page carries two totals per category -- "_PERIOD" (this
+# filing only) and "_CYCLE" (year-to-date across every filing). Each filing's
+# itemized tabs cover its own PERIOD only, so PERIOD is the one that answers
+# "does fetching this tab find anything" -- CYCLE can be nonzero from an
+# earlier filing even when this one reported nothing (confirmed directly: a
+# filing with TOTAL_EXPENDITURE_CYCLE > $0 whose own Expenditures tab reads
+# "*** No Expenditures Reported. ***").
+NONCAND_TABS = {
+    "contributions": ("ViewContributions.aspx", "TOTAL_CONTRIBUTION_PERIOD"),
+    "expenditures":  ("ViewExpenditures.aspx",  "TOTAL_EXPENDITURE_PERIOD"),
+    "loans":         ("ViewLoans.aspx",         None),   # no reliable $0 signal on the summary page -- always fetched
+    "loan_payments": ("ViewRepayments.aspx",    None),
+}
 
 # SC Election Commission election history (tier-2 backfill)
 ELECTION_HISTORY_URL  = "https://sc.elstats.civera.com/api/download_search.csv"
@@ -371,6 +427,384 @@ def strip_manifest(keep) -> None:
     if not MANIFEST.exists():
         return
     write_manifest([r for r in load_manifest() if keep(r)])
+
+
+# ==================== Non-Candidate Committees (PACs) ====================
+
+def _noncand_session() -> requests.Session:
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"),
+    })
+    return s
+
+
+def _aspnet_tokens(html: str) -> dict:
+    """Pull the three hidden WebForms postback fields off a rendered page."""
+    soup = BeautifulSoup(html, "html.parser")
+    out = {}
+    for name in ("__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION"):
+        tag = soup.find("input", {"name": name})
+        out[name] = tag["value"] if tag and tag.has_attr("value") else ""
+    return out
+
+
+def _form_action(html: str, base_url: str) -> str:
+    """Resolve the page's <form action> to an absolute URL. Falls back to
+    base_url for the tab views, which are plain GETs with no form of their
+    own -- session-cookie state, not viewstate, carries which report they
+    render."""
+    soup = BeautifulSoup(html, "html.parser")
+    form = soup.find("form")
+    action = form.get("action") if form else None
+    return urljoin(base_url, action) if action else base_url
+
+
+def _postback(session: requests.Session, url: str, tokens: dict, fields: dict):
+    """POST a WebForms page with its hidden state plus whichever fields
+    simulate the control being clicked (a text box, a radio button, or one
+    of the row buttons that stand in for <a> links on this site)."""
+    r = session.post(url, data={**tokens, **fields}, timeout=30)
+    r.raise_for_status()
+    return r
+
+
+def _noncand_result_names(html: str) -> list[str]:
+    """Committee names off a SearchNonCand.aspx results page. Names in this
+    system carry embedded newlines/whitespace as stored (observed directly
+    on a real committee), so every read normalizes it away."""
+    soup = BeautifulSoup(html, "html.parser")
+    names = []
+    for tag in soup.find_all("input", {"class": "link"}):
+        name = re.sub(r"\s+", " ", tag.get("value", "")).strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _noncand_slug(name: str) -> str:
+    """Filesystem-safe, collision-resistant filename for a committee name."""
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:60]
+    h = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    return f"{slug}_{h}"
+
+
+# -------------------------- registry (discovery) ---------------------------
+
+def _load_noncand_registry() -> dict:
+    if NONCAND_REGISTRY.exists():
+        return json.loads(NONCAND_REGISTRY.read_text())
+    return {}
+
+
+def _save_noncand_registry(registry: dict):
+    NONCAND_DIR.mkdir(parents=True, exist_ok=True)
+    NONCAND_REGISTRY.write_text(json.dumps(registry, indent=1, sort_keys=True))
+
+
+def _load_swept_combos() -> set:
+    if not NONCAND_SWEEP_MANIFEST.exists():
+        return set()
+    with open(NONCAND_SWEEP_MANIFEST, newline="", encoding="utf-8") as f:
+        return {r["combo"] for r in csv.DictReader(f)}
+
+
+def _append_swept_combo(combo: str, hit_count: int):
+    write_header = not NONCAND_SWEEP_MANIFEST.exists()
+    with open(NONCAND_SWEEP_MANIFEST, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=NONCAND_SWEEP_COLS)
+        if write_header:
+            w.writeheader()
+        w.writerow({"combo": combo, "hit_count": hit_count,
+                    "swept_at": datetime.today().strftime("%Y-%m-%d")})
+
+
+def sweep_noncand_registry(log, force: bool = False, limit: int | None = None) -> dict:
+    """Brute-force every 3-letter 'Name Contains' query against the
+    Non-Candidate committee search to discover every standalone PAC SC has
+    ever had a public record of. See docs/states/south_carolina.md.
+
+    Resumable: each combo swept is appended to noncand_sweep_manifest.csv, so
+    an interrupted run continues from where it left off on the next call.
+    --force clears both the manifest and the registry and starts over.
+    `limit` caps how many NEW combos this call sweeps -- used for testing on
+    a slice without committing to the full 17,576.
+    """
+    session = _noncand_session()
+    tokens  = _aspnet_tokens(session.get(NONCAND_SEARCH_URL, timeout=30).text)
+
+    if force:
+        NONCAND_SWEEP_MANIFEST.unlink(missing_ok=True)
+    swept    = set() if force else _load_swept_combos()
+    registry = {}    if force else _load_noncand_registry()
+
+    todo = [c for c in NONCAND_COMBOS if c not in swept]
+    if limit is not None:
+        todo = todo[:limit]
+    if not todo:
+        log.info(f"  [noncand] sweep already complete "
+                 f"({len(swept):,}/{len(NONCAND_COMBOS):,} combos)")
+        return registry
+
+    log.info(f"  [noncand] sweeping {len(todo):,} of {len(NONCAND_COMBOS):,} "
+             f"3-letter combos ({len(swept):,} already done)")
+
+    new_names = 0
+    for i, combo in enumerate(todo, 1):
+        try:
+            r = _postback(session, NONCAND_SEARCH_URL, tokens, {
+                "ctl00$ContentPlaceHolder1$txtName": combo,
+                "ctl00$ContentPlaceHolder1$rdList":  "2",   # Name Contains
+                "ctl00$ContentPlaceHolder1$btnNext": "Next",
+            })
+        except requests.RequestException as e:
+            log.warning(f"  [noncand] {combo}: {e} -- refreshing session and "
+                        f"continuing (this combo will retry on the next run)")
+            session = _noncand_session()
+            tokens  = _aspnet_tokens(session.get(NONCAND_SEARCH_URL, timeout=30).text)
+            continue
+
+        names = _noncand_result_names(r.text)
+        for name in names:
+            if name not in registry:
+                registry[name] = {"first_seen_combo": combo}
+                new_names += 1
+        _append_swept_combo(combo, len(names))
+        swept.add(combo)
+
+        # Refresh tokens periodically even without an error -- a long-running
+        # sweep (the full space is 17,576 queries) could outlast the site's
+        # own session lifetime in ways that don't necessarily raise.
+        if i % 500 == 0:
+            tokens = _aspnet_tokens(session.get(NONCAND_SEARCH_URL, timeout=30).text)
+        if i % 250 == 0 or i == len(todo):
+            _save_noncand_registry(registry)
+            log.info(f"  [noncand] {i:,}/{len(todo):,} combos swept -- "
+                     f"{len(registry):,} distinct committees found so far "
+                     f"(+{new_names:,} this run)")
+        time.sleep(0.15)
+
+    _save_noncand_registry(registry)
+    log.registry_loaded("noncand_committees", len(registry), relation="committees")
+    return registry
+
+
+# ------------------------ per-committee filing walk -------------------------
+
+def _find_noncand_committee(session, name: str):
+    """Land on `name`'s exact result row via 'Begins With'. Returns
+    (results_html, form_action_url, button_name, button_value) or
+    (None, None, None, None) if the exact name can't be relocated -- e.g. it
+    was truncated differently between registry-save and this run."""
+    tokens = _aspnet_tokens(session.get(NONCAND_SEARCH_URL, timeout=30).text)
+    r = _postback(session, NONCAND_SEARCH_URL, tokens, {
+        "ctl00$ContentPlaceHolder1$txtName": name[:80],
+        "ctl00$ContentPlaceHolder1$rdList":  "1",   # Name Begins With
+        "ctl00$ContentPlaceHolder1$btnNext": "Next",
+    })
+    soup = BeautifulSoup(r.text, "html.parser")
+    for tag in soup.find_all("input", {"class": "link"}):
+        val = re.sub(r"\s+", " ", tag.get("value", "")).strip()
+        if val == name:
+            return r.text, _form_action(r.text, NONCAND_SEARCH_URL), tag["name"], tag.get("value", "")
+    return None, None, None, None
+
+
+def _noncand_report_rows(html: str) -> list[dict]:
+    """[{btn_name, btn_value, period, date_filed, version}, ...] off a
+    committee's report index page (NonCandFilerResult.aspx)."""
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find("table")
+    if not table:
+        return []
+    out = []
+    for tr in table.find_all("tr")[1:]:      # skip the header row
+        tds = tr.find_all("td")
+        btn = tr.find("input", {"class": "link"})
+        if not btn or len(tds) < 4:
+            continue
+        out.append({
+            "btn_name":   btn["name"],
+            "btn_value":  btn.get("value", ""),
+            "period":     tds[1].get_text(strip=True),
+            "date_filed": tds[2].get_text(strip=True),
+            "version":    tds[3].get_text(strip=True),
+        })
+    return out
+
+
+def _noncand_demographics(html: str) -> dict:
+    """Committee address block off a summary page (ViewReport.aspx) --
+    address/city/state/zip/phone, whichever of them the span carries."""
+    soup = BeautifulSoup(html, "html.parser")
+    out = {}
+    for field, span_id in (("address", "lblAddress"), ("city", "lblCity"),
+                           ("state", "lblState"), ("zip", "lblZip"),
+                           ("phone", "lblPhone")):
+        tag = soup.find(id=re.compile(re.escape(span_id) + "$"))
+        out[field] = tag.get_text(strip=True) if tag else ""
+    return out
+
+
+def _noncand_summary_nonzero(html: str, span_id: str) -> bool:
+    """True if the summary page's total for `span_id` is missing or nonzero.
+    Missing is treated as nonzero (fetch it) rather than zero (skip it) --
+    an unrecognized page shape should never cause silent data loss."""
+    if span_id is None:
+        return True
+    soup = BeautifulSoup(html, "html.parser")
+    tag = soup.find(id=re.compile(re.escape(span_id) + "$"))
+    if tag is None:
+        return True
+    val = tag.get_text(strip=True).replace("$", "").replace(",", "")
+    try:
+        return float(val) != 0.0
+    except ValueError:
+        return True
+
+
+def _noncand_itemized_rows(html: str) -> list[dict]:
+    """Every itemized row off a ViewContributions/Expenditures/Loans/
+    Repayments.aspx tab, keyed by its own column headers -- the four tabs
+    don't share a column layout, so the parser reads whichever headers are
+    actually present rather than assuming Contributions' shape."""
+    soup  = BeautifulSoup(html, "html.parser")
+    table = soup.find("table", class_="tableTabs")
+    if not table:
+        return []
+    headers = [th.get_text(strip=True) for th in table.find_all("th")]
+    out = []
+    for tr in table.find_all("tr"):
+        tds = tr.find_all("td")
+        if not tds or len(tds) != len(headers):
+            continue   # header row itself, or the trailing Total row
+        row = {}
+        for h, td in zip(headers, tds):
+            # Address cells use <br> to separate street/city -- keep both
+            # lines, newline-joined, rather than collapsing them together.
+            row[h] = td.get_text("\n", strip=True)
+        out.append(row)
+    return out
+
+
+def _load_noncand_done() -> dict:
+    if not NONCAND_DONE_MANIFEST.exists():
+        return {}
+    with open(NONCAND_DONE_MANIFEST, newline="", encoding="utf-8") as f:
+        return {r["committee"]: r for r in csv.DictReader(f)}
+
+
+def _append_noncand_done(committee: str, n_filings: int):
+    write_header = not NONCAND_DONE_MANIFEST.exists()
+    with open(NONCAND_DONE_MANIFEST, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=NONCAND_DONE_COLS)
+        if write_header:
+            w.writeheader()
+        w.writerow({"committee": committee, "filings": n_filings,
+                    "walked_at": datetime.today().strftime("%Y-%m-%d")})
+
+
+def walk_noncand_committee(log, session, name: str) -> dict | None:
+    """Pull every filing for one Non-Candidate committee: report index, each
+    filing's summary, and the itemized tabs whose summary total isn't a
+    known zero. Returns the full record (written by the caller) or None if
+    the committee couldn't be relocated by exact name."""
+    results_html, action, btn_name, btn_val = _find_noncand_committee(session, name)
+    if action is None:
+        log.warning(f"  [noncand] could not relocate '{name}' by exact name -- skipping")
+        return None
+
+    tokens = _aspnet_tokens(results_html)
+    r_index = _postback(session, action, tokens, {btn_name: btn_val})
+    index_action = _form_action(r_index.text, action)
+    report_rows  = _noncand_report_rows(r_index.text)
+
+    filings = []
+    demographics = {}
+    for row in report_rows:
+        tokens_idx = _aspnet_tokens(r_index.text)
+        r_summary = _postback(session, index_action, tokens_idx,
+                              {row["btn_name"]: row["btn_value"]})
+        summary_url = _form_action(r_summary.text, index_action)
+
+        # Keep the first filing's address block that actually has one --
+        # reports don't arrive in a guaranteed chronological order, and the
+        # committee's registered address rarely changes filing to filing.
+        if not demographics.get("address"):
+            demo = _noncand_demographics(r_summary.text)
+            if demo.get("address"):
+                demographics = demo
+
+        tabs = {}
+        for label, (path, span_id) in NONCAND_TABS.items():
+            if not _noncand_summary_nonzero(r_summary.text, span_id):
+                continue
+            tab_url = urljoin(summary_url, path)
+            try:
+                r_tab = session.get(tab_url, timeout=30)
+                r_tab.raise_for_status()
+            except requests.RequestException as e:
+                log.warning(f"  [noncand] {name} / {row['date_filed']} / {label}: {e}")
+                continue
+            rows = _noncand_itemized_rows(r_tab.text)
+            if rows:
+                tabs[label] = rows
+
+        filings.append({
+            "period":     row["period"],
+            "date_filed": row["date_filed"],
+            "version":    row["version"],
+            **tabs,
+        })
+        time.sleep(0.15)
+
+    return {"committee": name, "demographics": demographics, "filings": filings}
+
+
+def run_noncand_pacs(log, force: bool = False, sweep_limit: int | None = None,
+                      walk_limit: int | None = None):
+    """Discover every SC Non-Candidate committee (PAC) and pull its filing
+    history. Two resumable phases: sweep_noncand_registry() builds the name
+    registry, then every registered name not already in
+    noncand_filings_manifest.csv gets walked. `sweep_limit`/`walk_limit` cap
+    how much NEW work each phase does this call -- used for testing.
+    """
+    registry = sweep_noncand_registry(log, force=force, limit=sweep_limit)
+
+    if force:
+        NONCAND_DONE_MANIFEST.unlink(missing_ok=True)
+    done = set() if force else set(_load_noncand_done())
+
+    todo = [n for n in registry if n not in done]
+    if walk_limit is not None:
+        todo = todo[:walk_limit]
+
+    if not todo:
+        log.info(f"  [noncand] filing walk already complete "
+                 f"({len(done):,}/{len(registry):,} committees)")
+        return
+
+    log.info(f"  [noncand] walking {len(todo):,} of {len(registry):,} "
+             f"committees ({len(done):,} already done)")
+
+    NONCAND_FILINGS_DIR.mkdir(parents=True, exist_ok=True)
+    session = _noncand_session()
+    walked = 0
+    for i, name in enumerate(todo, 1):
+        record = walk_noncand_committee(log, session, name)
+        if record is None:
+            continue
+        out_path = NONCAND_FILINGS_DIR / f"{_noncand_slug(name)}.json"
+        out_path.write_text(json.dumps(record, indent=1))
+        _append_noncand_done(name, len(record["filings"]))
+        walked += 1
+        if i % 25 == 0 or i == len(todo):
+            log.info(f"  [noncand] {i:,}/{len(todo):,} committees walked "
+                     f"({walked:,} succeeded)")
+
+    log.info(f"  [noncand] filing walk done -- {walked:,} committees written")
 
 
 # ============================== driver ================================
@@ -1450,21 +1884,65 @@ def run(
     rediscover: bool = False,
     headed: bool = False,
     headless: bool = False,
+    pacs: bool = False,
 ):
-    """Download SC contributions, expenditures, filed reports, and election history.
+    """Download SC contributions, expenditures, filed reports, election history,
+    and (opt-in) Non-Candidate committee (PAC) filings.
 
     Horizontal scope maps onto the portal's three screens: --transactions covers
     contributions + expenditures, --entities covers the reports screen (the only
     bulk source of candidate/office metadata) plus the election-history CSV.
     --candidates and --committees both resolve to entities — SC publishes no
     separate registry for either, so the split happens at parse time.
+
+    --pacs is a fourth, unrelated source (apps.sc.gov, not ethicsfiling.sc.gov —
+    see the Non-Candidate Committees section above) and is deliberately NOT part
+    of the "no flag = everything" default: a full run is a ~17,576-query brute
+    force sweep plus a filing walk over every committee it finds, an order of
+    magnitude more requests than the rest of this scraper combined. Ask for it
+    explicitly.
     """
     log = get_logger("south carolina", "scrape")
     t0  = time.perf_counter()
     log._emit("scrape_started", force=force, entities=entities,
               transactions=transactions, contributions=contributions,
               expenditures=expenditures, candidates=candidates,
-              committees=committees, start_year=start_year, end_year=end_year)
+              committees=committees, pacs=pacs,
+              start_year=start_year, end_year=end_year)
+
+    any_horizontal = (entities or transactions or contributions or
+                      expenditures or candidates or committees or pacs)
+    no_horizontal  = not any_horizontal
+
+    do_contributions = no_horizontal or transactions or contributions
+    do_expenditures  = no_horizontal or transactions or expenditures
+    do_entities      = no_horizontal or entities or candidates or committees
+    do_pacs          = pacs   # never part of the "no flag" default — see docstring
+
+    targets = []
+    if do_contributions: targets.append("contributions")
+    if do_expenditures:  targets.append("expenditures")
+    if do_entities:      targets.append("reports")
+
+    # --pacs is plain requests, not Selenium — a pure --pacs run should never
+    # need Chrome at all, so it's handled entirely before the Selenium-only
+    # block below, and Selenium is only required when targets is non-empty.
+    if do_pacs:
+        try:
+            run_noncand_pacs(log, force=force)
+        except Exception as e:
+            log.warning(f"  [noncand] PAC scrape failed: {e}")
+            if not targets:
+                log._emit("scrape_completed", status="error",
+                          duration_s=round(time.perf_counter() - t0, 1),
+                          files_ok=0, files_err=1, error=str(e))
+                raise
+    if not targets:
+        duration = round(time.perf_counter() - t0, 1)
+        log.info(f"Done in {duration}s (PACs only, no Selenium needed)")
+        log._emit("scrape_completed", status="completed", duration_s=duration,
+                  files_ok=int(do_pacs), files_err=0)
+        return
 
     try:
         from selenium.webdriver.support.ui import WebDriverWait
@@ -1476,18 +1954,6 @@ def run(
         # Re-raise rather than return: a bare return exits 0, which orc.py would
         # read as a successful scrape and happily parse stale raw files.
         raise
-
-    no_horizontal = not (entities or transactions or contributions or
-                         expenditures or candidates or committees)
-
-    do_contributions = no_horizontal or transactions or contributions
-    do_expenditures  = no_horizontal or transactions or expenditures
-    do_entities      = no_horizontal or entities or candidates or committees
-
-    targets = []
-    if do_contributions: targets.append("contributions")
-    if do_expenditures:  targets.append("expenditures")
-    if do_entities:      targets.append("reports")
 
     current_year      = datetime.today().year
     year_range_active = start_year is not None or end_year is not None
@@ -1746,7 +2212,15 @@ if __name__ == "__main__":
     ap.add_argument("--candidates",    action="store_true",
                     help="same as --entities — SC has no separate candidate registry")
     ap.add_argument("--committees",    action="store_true",
-                    help="same as --entities — SC has no committee registry at all")
+                    help="same as --entities — candidate committees only. For "
+                         "standalone PACs see --pacs, a different source entirely")
+    ap.add_argument("--pacs", action="store_true",
+                    help="Non-Candidate committees (PACs) from apps.sc.gov — a "
+                         "separate site from the rest of this scraper. NOT part "
+                         "of the default (no-flag) run: a full sweep is a "
+                         "~17,576-query brute-force name search plus a filing "
+                         "walk over every committee found. Plain requests, no "
+                         "Chrome needed. Ask for it explicitly")
 
     ap.add_argument("--rediscover", action="store_true",
                     help="ignore the cached API recipe and re-derive it from the UI")
@@ -1778,6 +2252,7 @@ if __name__ == "__main__":
             expenditures=args.expenditures,
             candidates=args.candidates,
             committees=args.committees,
+            pacs=args.pacs,
             rediscover=args.rediscover,
             headed=args.headed,
             headless=args.headless,
