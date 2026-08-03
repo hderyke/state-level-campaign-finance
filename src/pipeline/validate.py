@@ -435,14 +435,44 @@ def drift_check(table: str, current: int, previous: int | None) -> dict | None:
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
+def _state_key(name: str) -> str:
+    """Normalize a state name for lookups: lowercase, underscores → spaces.
+
+    Multi-word states get referred to both ways — "west virginia" from orc.py
+    (which reads states.csv) and "west_virginia" by anyone typing the module
+    name. STATE_ABBR is keyed on the spaced form, so the underscore form used
+    to miss and fall through to `state.upper()`, yielding "WEST_VIRGINIA" as
+    the expected value of the `state` column. Every row then failed the
+    tier-1 state check against the correct "WV" — a 100% failure that looked
+    like a data problem but was purely a key mismatch.
+    """
+    return re.sub(r"[\s_]+", " ", (name or "").strip().lower())
+
+
 def run(state: str):
     state_lower = state.lower()
-    state_upper = STATE_ABBR.get(state_lower, state.upper())  # "alabama" → "AL"
+    state_key   = _state_key(state)
+    state_upper = STATE_ABBR.get(state_key, state.upper())  # "alabama" → "AL"
     clean_dir   = PROJECT_ROOT / "data" / state_lower / "cleaned"
 
     # Try capitalized dir too (Alabama vs alabama)
     if not clean_dir.exists():
         clean_dir = PROJECT_ROOT / "data" / state.capitalize() / "cleaned"
+
+    # Last resort: scan data/ comparing normalized names, so "West Virginia",
+    # "west_virginia" and "West_Virginia" all resolve to the same directory.
+    # str.capitalize() only uppercases the FIRST word, so a multi-word state
+    # resolves to "West virginia" / "New hampshire" and misses the real
+    # directory on any case-sensitive filesystem — invisible on Windows and
+    # macOS, broken on Linux.
+    if not clean_dir.exists():
+        data_dir = PROJECT_ROOT / "data"
+        if data_dir.exists():
+            for d in data_dir.iterdir():
+                if d.is_dir() and _state_key(d.name) == state_key:
+                    clean_dir = d / "cleaned"
+                    break
+
     if not clean_dir.exists():
         print(f"ERROR: cleaned dir not found for state '{state}'")
         sys.exit(1)
