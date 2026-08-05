@@ -77,6 +77,7 @@ Exit codes:
 """
 
 import csv
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -85,7 +86,7 @@ csv.field_size_limit(10 * 1024 * 1024)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.reporting.logger import get_logger
-from utils import _open_csv, clean_name
+from utils import _open_csv, _normalize_name
 
 PROJECT_ROOT   = Path(__file__).resolve().parents[2]
 REGISTRY_DIR   = PROJECT_ROOT / "src" / "registries" / "committees"
@@ -93,13 +94,13 @@ REGISTRY_DIR   = PROJECT_ROOT / "src" / "registries" / "committees"
 # Reuse the same abbr <-> name registration everyone else reads from.
 _STATES_CSV = PROJECT_ROOT / "src" / "aliases" / "states.csv"
 with open(_STATES_CSV, encoding="utf-8") as _f:
-    _rows = list(csv.DictReader(_f))
-NAME_TO_ABBR = {row["name"].strip().lower(): row["abbr"].strip().upper() for row in _rows}
+    NAME_TO_ABBR = {row["name"].strip().lower(): row["abbr"].strip().upper()
+                    for row in csv.DictReader(_f)}
 
 
 def _norm(val: str) -> str:
     """Normalize for matching: same contract as utils._normalize_name."""
-    return clean_name(val)
+    return _normalize_name(val)
 
 
 def _clean_dir(state: str) -> Path:
@@ -218,6 +219,14 @@ def _run(abbr: str, clean_dir: Path, log) -> tuple[int, int]:
         if not cname:
             continue
 
+        if cname in by_committee:
+            print(f"  [!] enrich/{abbr}: duplicate registry entry for committee "
+                  f"{r.get('committee_name')!r} — keeping the first, ignoring the rest")
+            log._emit("enrich_warning", reason="duplicate_committee",
+                      committee_name=r.get("committee_name"))
+            n_warned += 1
+            continue
+
         reg_name   = _norm(r.get("candidate_name", ""))
         reg_office = _norm(r.get("office", ""))
         key = (reg_name, reg_office, (r.get("election_year", "") or "").strip())
@@ -238,14 +247,6 @@ def _run(abbr: str, clean_dir: Path, log) -> tuple[int, int]:
                       candidate_name=r.get("candidate_name"),
                       office=r.get("office"), election_year=r.get("election_year"))
             n_warned += 1
-
-        if cname in by_committee:
-            print(f"  [!] enrich/{abbr}: duplicate registry entry for committee "
-                  f"{r.get('committee_name')!r} — keeping the first, ignoring the rest")
-            log._emit("enrich_warning", reason="duplicate_committee",
-                      committee_name=r.get("committee_name"))
-            n_warned += 1
-            continue
 
         by_committee[cname] = r
 
@@ -354,7 +355,6 @@ def _run(abbr: str, clean_dir: Path, log) -> tuple[int, int]:
         w.writeheader()
         w.writerows(rows)
 
-    import shutil
     shutil.move(str(tmp), str(committees_path))
 
     print(f"  ✓ enrich/{abbr}: {n_matched} committee row(s) enriched from "
