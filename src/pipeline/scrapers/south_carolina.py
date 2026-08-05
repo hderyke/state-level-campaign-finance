@@ -136,7 +136,7 @@ import re
 import string
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse, urljoin
 
@@ -613,8 +613,22 @@ def _find_noncand_committee(session, name: str):
 
 
 def _noncand_report_rows(html: str) -> list[dict]:
-    """[{btn_name, btn_value, period, date_filed, version}, ...] off a
-    committee's report index page (NonCandFilerResult.aspx)."""
+    """[{btn_name, btn_value, report_type, period, date_filed, version}, ...]
+    off a committee's report index page (NonCandFilerResult.aspx and its
+    dropdown-driven siblings -- LookupCaucusResult.aspx,
+    LookupStatePartyResult.aspx, LookupCountyPartyResult.aspx,
+    LookupCityPartyResult.aspx all share this exact 4-column table).
+
+    report_type is the button's own display text, not a separate column --
+    for Non-Candidate committees it's uniform (effectively unused), but
+    Caucus and Party committees file two DIFFERENT report types under this
+    one table: "Campaign Disclosure" (same contributions/expenditures shape
+    as everything else) and "Operating Disclosure" (a legislative-caucus-
+    specific report format, different fields, not yet parsed anywhere in
+    this pipeline -- see docs/states/south_carolina.md). Callers that only
+    handle Campaign Disclosure must filter on this field themselves; this
+    function returns every row unfiltered so no data is silently dropped
+    here."""
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table")
     if not table:
@@ -626,11 +640,12 @@ def _noncand_report_rows(html: str) -> list[dict]:
         if not btn or len(tds) < 4:
             continue
         out.append({
-            "btn_name":   btn["name"],
-            "btn_value":  btn.get("value", ""),
-            "period":     tds[1].get_text(strip=True),
-            "date_filed": tds[2].get_text(strip=True),
-            "version":    tds[3].get_text(strip=True),
+            "btn_name":    btn["name"],
+            "btn_value":   btn.get("value", ""),
+            "report_type": btn.get("value", ""),
+            "period":      tds[1].get_text(strip=True),
+            "date_filed":  tds[2].get_text(strip=True),
+            "version":     tds[3].get_text(strip=True),
         })
     return out
 
@@ -646,6 +661,21 @@ def _noncand_demographics(html: str) -> dict:
         tag = soup.find(id=re.compile(re.escape(span_id) + "$"))
         out[field] = tag.get_text(strip=True) if tag else ""
     return out
+
+
+def _noncand_filer_name(html: str) -> str:
+    """The filer name off a Campaign Disclosure summary page (lblName) --
+    needed for the dropdown-driven Caucus/Party walkers, which don't know
+    the committee's exact filed name upfront the way a Non-Candidate name
+    search does. Confirmed this is the authoritative name, not just the
+    dropdown label re-displayed: County of Richland's Democratic Party
+    dropdown selection is county="Richland" + party="Democratic", but
+    lblName on the resulting page reads 'County of Richland Democratic
+    Party' -- a real difference in word order/phrasing that only the site
+    itself can give you."""
+    soup = BeautifulSoup(html, "html.parser")
+    tag = soup.find(id=re.compile(re.escape("lblName") + "$"))
+    return tag.get_text(strip=True) if tag else ""
 
 
 def _noncand_summary_nonzero(html: str, span_id: str) -> bool:
@@ -706,28 +736,60 @@ def _append_noncand_done(committee: str, n_filings: int):
                     "walked_at": datetime.today().strftime("%Y-%m-%d")})
 
 
-def walk_noncand_committee(log, session, name: str) -> dict | None:
-    """Pull every filing for one Non-Candidate committee: report index, each
-    filing's summary, and the itemized tabs whose summary total isn't a
-    known zero. Returns the full record (written by the caller) or None if
-    the committee couldn't be relocated by exact name."""
-    results_html, action, btn_name, btn_val = _find_noncand_committee(session, name)
-    if action is None:
-        log.warning(f"  [noncand] could not relocate '{name}' by exact name -- skipping")
-        return None
+def _walk_report_index(log, session, source_label: str, committee_name: str | None,
+                       index_html: str, index_action: str,
+                       report_types: set[str] | None = None) -> dict:
+    """Shared inner loop for walking a committee's report index once you're
+    already positioned on it -- every filing's summary, and the itemized
+    tabs whose summary total isn't a known zero. Used by both
+    walk_noncand_committee() (which gets here via a name search) and the
+    dropdown-driven Caucus/Party walkers (which get here via a direct
+    dropdown POST -- see _walk_dropdown_committee() below).
 
-    tokens = _aspnet_tokens(results_html)
-    r_index = _postback(session, action, tokens, {btn_name: btn_val})
-    index_action = _form_action(r_index.text, action)
-    report_rows  = _noncand_report_rows(r_index.text)
+    report_types, if given, restricts which rows get walked by their
+    report_type (see _noncand_report_rows -- "Campaign Disclosure" vs
+    "Operating Disclosure" for Caucus/Party committees). None walks every
+    row, which is correct for Non-Candidate committees (uniform report type)
+    and is the default so this never silently drops rows for a caller that
+    doesn't pass the argument.
+
+    source_label is just for warning messages ("noncand", "caucus", etc.)."""
+    report_rows = _noncand_report_rows(index_html)
+    if report_types is not None:
+        skipped = [r for r in report_rows if r["report_type"] not in report_types]
+        report_rows = [r for r in report_rows if r["report_type"] in report_types]
+        if skipped:
+            log.info(f"  [{source_label}] {committee_name or '(unnamed)'}: skipping "
+                     f"{len(skipped)} filing(s) of report type(s) "
+                     f"{sorted(set(r['report_type'] for r in skipped))} -- not yet parsed")
 
     filings = []
     demographics = {}
     for row in report_rows:
-        tokens_idx = _aspnet_tokens(r_index.text)
+        tokens_idx = _aspnet_tokens(index_html)
         r_summary = _postback(session, index_action, tokens_idx,
                               {row["btn_name"]: row["btn_value"]})
-        summary_url = _form_action(r_summary.text, index_action)
+        # r_summary.url (requests' own post-redirect URL), not
+        # _form_action(r_summary.text, ...) -- confirmed live (2026-08-03)
+        # that Caucus/Party summaries land under an extra NONCAND/ path
+        # segment via a server-side redirect that the landed page's own
+        # <form action> doesn't reflect (it renders a plain relative
+        # "ViewReport.aspx" that resolves to the WRONG folder against the
+        # pre-redirect POST target). r_summary.url is ground truth for
+        # wherever the server actually put the content, so tab URLs built
+        # from it are correct regardless of whether a redirect happened.
+        # Non-Candidate committees never cross a folder boundary this way,
+        # so this is a strict improvement there too, not just a fix for the
+        # new dropdown-driven sources.
+        summary_url = r_summary.url
+
+        # Dropdown-driven callers (Caucus/Party) don't know the committee's
+        # exact filed name upfront -- pull it off whichever filing's summary
+        # page loads first (same page carries lblName and the address block).
+        if committee_name is None:
+            fname = _noncand_filer_name(r_summary.text)
+            if fname:
+                committee_name = fname
 
         # Keep the first filing's address block that actually has one --
         # reports don't arrive in a guaranteed chronological order, and the
@@ -746,7 +808,8 @@ def walk_noncand_committee(log, session, name: str) -> dict | None:
                 r_tab = session.get(tab_url, timeout=30)
                 r_tab.raise_for_status()
             except requests.RequestException as e:
-                log.warning(f"  [noncand] {name} / {row['date_filed']} / {label}: {e}")
+                log.warning(f"  [{source_label}] {committee_name} / "
+                            f"{row['date_filed']} / {label}: {e}")
                 continue
             rows = _noncand_itemized_rows(r_tab.text)
             if rows:
@@ -760,7 +823,25 @@ def walk_noncand_committee(log, session, name: str) -> dict | None:
         })
         time.sleep(0.15)
 
-    return {"committee": name, "demographics": demographics, "filings": filings}
+    return {"committee": committee_name, "demographics": demographics, "filings": filings}
+
+
+def walk_noncand_committee(log, session, name: str) -> dict | None:
+    """Pull every filing for one Non-Candidate committee: report index, each
+    filing's summary, and the itemized tabs whose summary total isn't a
+    known zero. Returns the full record (written by the caller) or None if
+    the committee couldn't be relocated by exact name."""
+    results_html, action, btn_name, btn_val = _find_noncand_committee(session, name)
+    if action is None:
+        log.warning(f"  [noncand] could not relocate '{name}' by exact name -- skipping")
+        return None
+
+    tokens = _aspnet_tokens(results_html)
+    r_index = _postback(session, action, tokens, {btn_name: btn_val})
+    index_action = _form_action(r_index.text, action)
+
+    return _walk_report_index(log, session, "noncand", name,
+                              r_index.text, index_action)
 
 
 def run_noncand_pacs(log, force: bool = False, sweep_limit: int | None = None,
@@ -805,6 +886,523 @@ def run_noncand_pacs(log, force: bool = False, sweep_limit: int | None = None,
                      f"({walked:,} succeeded)")
 
     log.info(f"  [noncand] filing walk done -- {walked:,} committees written")
+
+
+# ==================== Caucus & Party Committees ========================
+# Four more of apps.sc.gov's six committee-type lookups (see "Non-Candidate
+# Committees" above for the other two -- Ballot Measure, not yet built, and
+# Non-Candidate, built above). These four are plain dropdowns rather than a
+# name search: Caucus (13 options) and State Party (11) resolve straight to
+# one committee each; County Party and City Party (46 counties x 11 parties,
+# 269 cities x 11 parties) need a two-dropdown combo, most of which don't
+# correspond to a real filed committee -- so those two get the same
+# sweep-then-walk resumable treatment as Non-Candidate's brute-force search,
+# just over a real, enumerable space instead of 17,576 blind letter combos.
+#
+# Confirmed directly against the live site (2026-08-03): every one of these
+# four reuses the exact same report-index table shape, tab URLs, and
+# itemized-row parsing as Non-Candidate (_noncand_report_rows,
+# _noncand_itemized_rows, _walk_report_index). Selecting a Caucus and
+# clicking Next lands on LookupCaucusResult.aspx with the identical
+# 4-column Report Type/Filing Period/Date Filed/Version table
+# NonCandFilerResult.aspx has, and its Campaign Disclosure tabs live under
+# .../NONCAND/View*.aspx -- literally the same "NONCAND" URL segment
+# Non-Candidate committees use, strongly suggesting this whole reporting
+# subsystem is shared code on the SC side.
+#
+# ONE GENUINE DIFFERENCE: Caucus and Party committees each file two
+# different report types under that one table -- "Campaign Disclosure"
+# (identical shape to everything else here) and "Operating Disclosure" (a
+# legislative-caucus-specific administrative-expense report with different
+# fields, landing on a differently-shaped ReviewSummary.aspx rather than
+# ViewReport.aspx -- confirmed by inspecting both directly). This build
+# covers Campaign Disclosure only, matching Non-Candidate's scope --
+# Operating Disclosure rows are detected and logged as skipped
+# (REPORT_TYPES_BUILT, consumed by _walk_report_index's report_types
+# filter), never silently dropped. Operating Disclosure support is a
+# separate, not-yet-started effort.
+
+DROPDOWN_BTN_NEXT = "ctl00$ContentPlaceHolder1$btnNext"
+REPORT_TYPES_BUILT = {"Campaign Disclosure"}
+
+PARTY_CAUCUS_DIR         = RAW_DIR / "party_caucus"
+PARTY_CAUCUS_FILINGS_DIR = PARTY_CAUCUS_DIR / "filings"
+
+# source -> (url, primary dropdown field, secondary dropdown field or None).
+# Caucus and State Party have no secondary field -- the primary dropdown's
+# options ARE the complete registry, no cross-product needed.
+PARTY_SOURCES = {
+    "caucus": (
+        f"{NONCAND_SITE}/LegCaucus/LookupCaucus.aspx",
+        "ctl00$ContentPlaceHolder1$drpCaucus", None,
+    ),
+    "state_party": (
+        f"{NONCAND_SITE}/StatePolParty/LookupStateParty.aspx",
+        "ctl00$ContentPlaceHolder1$drpPoliticalParty", None,
+    ),
+    "county_party": (
+        f"{NONCAND_SITE}/CountyPolParty/LookupCountyParty.aspx",
+        "ctl00$ContentPlaceHolder1$drpCounty",
+        "ctl00$ContentPlaceHolder1$drpPoliticalParty",
+    ),
+    "city_party": (
+        f"{NONCAND_SITE}/CityPolParty/LookupCityParty.aspx",
+        "ctl00$ContentPlaceHolder1$drpCity",
+        "ctl00$ContentPlaceHolder1$drpPoliticalParty",
+    ),
+}
+
+
+def _party_manifest(source: str) -> Path:
+    """One manifest per source (not one shared file) -- keeps --force able
+    to reset a single source without touching the other three, and keeps
+    the resumability logic identical to Non-Candidate's per-source files."""
+    return STATE_DIR / f"party_{source}_manifest.csv"
+
+
+_PARTY_MANIFEST_COLS = ["key", "primary_label", "secondary_label", "hit",
+                        "committee", "filings", "processed_at"]
+
+# SC's quarterly filing deadlines fall Jan/Apr/Jul/Oct 10 -- roughly every 91
+# days. A combo that was last checked more than this many days ago gets
+# rechecked on the next --party-caucus run rather than being treated as
+# "done forever", so a committee that files a new quarterly report (or a
+# combo that previously had no committee but gets a new one registered) is
+# eventually picked back up without needing --force. 60 days gives real
+# margin against the ~91-day cycle -- a run that's a few weeks late still
+# catches each new filing well before the following deadline.
+PARTY_REFRESH_DAYS = 60
+
+
+def _load_party_processed_at(source: str) -> dict[str, str]:
+    """key -> most recent processed_at (YYYY-MM-DD) seen for that key. The
+    manifest is append-only (one row per run, never rewritten -- see
+    _append_party_done), so a key can have multiple rows across runs; since
+    rows are always appended in chronological order, the last row read for
+    a given key is its most recent processed_at."""
+    path = _party_manifest(source)
+    if not path.exists():
+        return {}
+    out: dict[str, str] = {}
+    with open(path, newline="", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            out[r["key"]] = r["processed_at"]
+    return out
+
+
+def _append_party_done(source: str, key: str, primary_label: str,
+                       secondary_label: str, committee: str, n_filings: int):
+    path = _party_manifest(source)
+    write_header = not path.exists()
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=_PARTY_MANIFEST_COLS)
+        if write_header:
+            w.writeheader()
+        w.writerow({
+            "key": key, "primary_label": primary_label,
+            "secondary_label": secondary_label or "",
+            "hit": int(bool(committee)), "committee": committee or "",
+            "filings": n_filings,
+            "processed_at": datetime.today().strftime("%Y-%m-%d"),
+        })
+
+
+def _dropdown_options(html: str, select_name: str) -> list[tuple[str, str]]:
+    """[(value, label), ...] for a <select>'s real options -- skips the
+    blank placeholder ('0', '') every one of these four dropdowns starts
+    with."""
+    soup = BeautifulSoup(html, "html.parser")
+    sel = soup.find("select", {"name": select_name})
+    if not sel:
+        return []
+    out = []
+    for o in sel.find_all("option"):
+        val, label = o.get("value", ""), o.get_text(strip=True)
+        if val and val != "0" and label:
+            out.append((val, label))
+    return out
+
+
+def _walk_dropdown_committee(log, session, source: str, url: str, fields: dict,
+                             fallback_name: str) -> dict | None:
+    """POST a dropdown selection (Caucus, State/County/City Party) and walk
+    whatever report index it lands on. Unlike Non-Candidate there's no name
+    search to resolve first -- the dropdown selection itself IS the
+    committee -- so this goes straight to _walk_report_index. Returns None
+    if the combo has no filed committee at all (no results table -- the
+    normal case for most County/City x Party combos, since most localities
+    don't have an organized committee for every party)."""
+    r = session.get(url, timeout=30)
+    tokens = _aspnet_tokens(r.text)
+    r_index = _postback(session, url, tokens, {**fields, DROPDOWN_BTN_NEXT: "Next"})
+    if BeautifulSoup(r_index.text, "html.parser").find("table") is None:
+        return None
+
+    index_action = _form_action(r_index.text, url)
+    record = _walk_report_index(log, session, source, None, r_index.text,
+                                index_action, report_types=REPORT_TYPES_BUILT)
+    if record["committee"] is None:
+        # lblName was never seen -- either every filing on this combo was
+        # Operating Disclosure (filtered out above) or it genuinely has zero
+        # Campaign Disclosure filings. Nothing to write either way, but fall
+        # back to a constructed label so a caller with filings-but-no-name
+        # (shouldn't happen, but see _walk_report_index) doesn't lose data.
+        if not record["filings"]:
+            return None
+        record["committee"] = fallback_name
+    return record
+
+
+def run_party_source(log, source: str, force: bool = False,
+                     sweep_limit: int | None = None,
+                     refresh_days: int = PARTY_REFRESH_DAYS):
+    """Discover and pull filing history for every committee under one of
+    the four dropdown sources (see PARTY_SOURCES). Single-dropdown sources
+    (Caucus, State Party) just walk every option -- no cross-product, no
+    "does this exist" check needed. Two-dropdown sources (County/City
+    Party) walk the full cross-product, most of which will be a miss; each
+    combo checked (hit or miss) is recorded in the manifest, so an
+    interrupted run resumes without re-checking known-empty combos.
+
+    A combo is re-checked (not just skipped forever) once its last
+    processed_at is more than `refresh_days` old -- see PARTY_REFRESH_DAYS.
+    This is what lets --party-caucus be run periodically (e.g. from cron)
+    and actually catch new quarterly filings from known committees or newly
+    registered committees under a combo that was previously empty, rather
+    than being a one-shot sweep. `--force` still wipes the manifest outright
+    for a full manual reset regardless of age.
+
+    `sweep_limit` caps how many combos this call processes (new + stale
+    combined) -- used for testing on a slice.
+    """
+    url, primary_field, secondary_field = PARTY_SOURCES[source]
+    session = _noncand_session()
+    r = session.get(url, timeout=30)
+    primary = _dropdown_options(r.text, primary_field)
+    secondary = _dropdown_options(r.text, secondary_field) if secondary_field else [("", "")]
+    combos = [(pv, pl, sv, sl) for pv, pl in primary for sv, sl in secondary]
+
+    def combo_key(pv, sv):
+        return f"{pv}:{sv}" if secondary_field else pv
+
+    if force:
+        _party_manifest(source).unlink(missing_ok=True)
+    processed_at = _load_party_processed_at(source)
+    cutoff = datetime.today() - timedelta(days=refresh_days)
+
+    def _is_stale(key: str) -> bool:
+        ts = processed_at.get(key)
+        if ts is None:
+            return True  # never seen -- always due
+        try:
+            return datetime.strptime(ts, "%Y-%m-%d") < cutoff
+        except ValueError:
+            return True  # malformed row -- safest is to recheck
+
+    todo = [c for c in combos if _is_stale(combo_key(c[0], c[2]))]
+    if sweep_limit is not None:
+        todo = todo[:sweep_limit]
+
+    if not todo:
+        log.info(f"  [{source}] already complete and fresh "
+                 f"({len(combos):,}/{len(combos):,} combos, "
+                 f"<{refresh_days}d old)")
+        return
+
+    never_seen = sum(1 for c in combos if combo_key(c[0], c[2]) not in processed_at)
+    stale      = len(todo) - min(never_seen, len(todo))
+    log.info(f"  [{source}] checking {len(todo):,} of {len(combos):,} combos "
+             f"({never_seen:,} new, {stale:,} stale >{refresh_days}d, "
+             f"{len(combos) - len(todo):,} still fresh)")
+
+    PARTY_CAUCUS_FILINGS_DIR.mkdir(parents=True, exist_ok=True)
+    found = 0
+    for i, (pv, pl, sv, sl) in enumerate(todo, 1):
+        key = combo_key(pv, sv)
+        fields = {primary_field: pv}
+        if secondary_field:
+            fields[secondary_field] = sv
+        fallback_name = f"{sl} {pl}" if sl else pl
+
+        try:
+            record = _walk_dropdown_committee(log, session, source, url, fields, fallback_name)
+        except requests.RequestException as e:
+            log.warning(f"  [{source}] {fallback_name}: {e} -- refreshing session "
+                        f"and continuing (this combo will retry on the next run)")
+            session = _noncand_session()
+            continue
+
+        if record is not None and record.get("filings"):
+            record["source"] = source
+            out_path = PARTY_CAUCUS_FILINGS_DIR / f"{source}_{_noncand_slug(record['committee'])}.json"
+            out_path.write_text(json.dumps(record, indent=1))
+            _append_party_done(source, key, pl, sl, record["committee"], len(record["filings"]))
+            found += 1
+        else:
+            _append_party_done(source, key, pl, sl, "", 0)
+
+        if i % 50 == 0 or i == len(todo):
+            log.info(f"  [{source}] {i:,}/{len(todo):,} combos checked -- "
+                     f"{found:,} committee(s) found this run")
+        time.sleep(0.15)
+
+    log.info(f"  [{source}] done -- {found:,} committee(s) written this run")
+
+
+def run_party_caucus(log, force: bool = False, sweep_limit: int | None = None,
+                     refresh_days: int = PARTY_REFRESH_DAYS):
+    """Discover and pull filing history for all four dropdown-driven
+    committee types: Caucus, State/County/City Political Party. See
+    docs/states/south_carolina.md 'Caucus & Party Committees'. Campaign
+    Disclosure filings only -- see REPORT_TYPES_BUILT.
+
+    Combos older than `refresh_days` are rechecked automatically -- see
+    PARTY_REFRESH_DAYS and run_party_source's docstring. --force still
+    wipes the manifest outright for a full manual reset."""
+    for source in PARTY_SOURCES:
+        run_party_source(log, source, force=force, sweep_limit=sweep_limit,
+                         refresh_days=refresh_days)
+
+
+# ==================== Ballot Measure Committees ========================
+#
+# The sixth and last of apps.sc.gov's six committee-type lookups (see
+# "Non-Candidate Committees" and "Caucus & Party Committees" above). Ballot
+# Measure is name-search only, like Non-Candidate -- not a dropdown, like
+# Caucus/Party -- and confirmed live (2026-08-03) to be structurally
+# identical to Non-Candidate in every other respect: same search form shape
+# (txtName/rdList/btnNext against Ballot/SearchBallot.aspx), same "at least
+# three characters" server-side minimum on "Name Contains" (POSTing a
+# 1-char query returns the same rejection text Non-Candidate does), same
+# results-list -> report-index -> summary -> itemized-tabs postback chain
+# (BallotFilers.aspx -> BallotFilerResult.aspx -> ViewReport.aspx), same
+# span ids (lblName/lblAddress/lblPhone, TOTAL_CONTRIBUTION_PERIOD/
+# TOTAL_EXPENDITURE_PERIOD), same two-line <br>-separated address format,
+# same itemized-tab table shape. Every low-level helper built for
+# Non-Candidate (_noncand_session, _postback, _noncand_result_names,
+# _noncand_slug, _noncand_demographics, _noncand_report_rows,
+# _noncand_itemized_rows, _noncand_summary_nonzero, _walk_report_index) is
+# reused unchanged -- only the search URL, manifest files, and output
+# directory below are Ballot-specific. Unlike Caucus/Party, no cross-folder
+# redirect was observed on the summary page (it stayed under .../Ballot/
+# throughout in testing), but _walk_report_index already uses
+# response.url unconditionally, so this is safe either way.
+#
+# ONE DIFFERENCE FROM NON-CANDIDATE, SAME AS CAUCUS/PARTY: Ballot Measure
+# committees also file "Statement of Organization" filings alongside
+# "Campaign Disclosure" under the same report-index table -- confirmed live
+# by sampling several real filers found via a "com" search (NRA Ballot
+# Measure Committee among them). This build covers Campaign Disclosure
+# only, via the same REPORT_TYPES_BUILT whitelist Caucus/Party uses --
+# Statement of Organization rows are detected and logged as skipped, never
+# silently dropped. No "Operating Disclosure" was observed here (that
+# report type appears to be legislative-caucus-specific, not general to
+# every apps.sc.gov committee type).
+
+BALLOT_SEARCH_URL     = f"{NONCAND_SITE}/Ballot/SearchBallot.aspx"
+BALLOT_DIR            = RAW_DIR / "ballot_measure"
+BALLOT_FILINGS_DIR    = BALLOT_DIR / "filings"
+BALLOT_REGISTRY       = BALLOT_DIR / "committees.json"
+BALLOT_SWEEP_MANIFEST = STATE_DIR / "ballot_sweep_manifest.csv"
+BALLOT_DONE_MANIFEST  = STATE_DIR / "ballot_filings_manifest.csv"
+
+
+# -------------------------- registry (discovery) ---------------------------
+
+def _load_ballot_registry() -> dict:
+    if BALLOT_REGISTRY.exists():
+        return json.loads(BALLOT_REGISTRY.read_text())
+    return {}
+
+
+def _save_ballot_registry(registry: dict):
+    BALLOT_DIR.mkdir(parents=True, exist_ok=True)
+    BALLOT_REGISTRY.write_text(json.dumps(registry, indent=1, sort_keys=True))
+
+
+def _load_swept_ballot_combos() -> set:
+    if not BALLOT_SWEEP_MANIFEST.exists():
+        return set()
+    with open(BALLOT_SWEEP_MANIFEST, newline="", encoding="utf-8") as f:
+        return {r["combo"] for r in csv.DictReader(f)}
+
+
+def _append_swept_ballot_combo(combo: str, hit_count: int):
+    write_header = not BALLOT_SWEEP_MANIFEST.exists()
+    with open(BALLOT_SWEEP_MANIFEST, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=NONCAND_SWEEP_COLS)   # same shape, reused
+        if write_header:
+            w.writeheader()
+        w.writerow({"combo": combo, "hit_count": hit_count,
+                    "swept_at": datetime.today().strftime("%Y-%m-%d")})
+
+
+def sweep_ballot_registry(log, force: bool = False, limit: int | None = None) -> dict:
+    """Brute-force every 3-letter 'Name Contains' query against the Ballot
+    Measure committee search -- identical approach to
+    sweep_noncand_registry(), same 26**3 = 17,576-combo space, same
+    resumability (ballot_sweep_manifest.csv). --force clears both the
+    manifest and the registry and starts over. `limit` caps how many NEW
+    combos this call sweeps -- used for testing on a slice.
+    """
+    session = _noncand_session()
+    tokens  = _aspnet_tokens(session.get(BALLOT_SEARCH_URL, timeout=30).text)
+
+    if force:
+        BALLOT_SWEEP_MANIFEST.unlink(missing_ok=True)
+    swept    = set() if force else _load_swept_ballot_combos()
+    registry = {}    if force else _load_ballot_registry()
+
+    todo = [c for c in NONCAND_COMBOS if c not in swept]
+    if limit is not None:
+        todo = todo[:limit]
+    if not todo:
+        log.info(f"  [ballot] sweep already complete "
+                 f"({len(swept):,}/{len(NONCAND_COMBOS):,} combos)")
+        return registry
+
+    log.info(f"  [ballot] sweeping {len(todo):,} of {len(NONCAND_COMBOS):,} "
+             f"3-letter combos ({len(swept):,} already done)")
+
+    new_names = 0
+    for i, combo in enumerate(todo, 1):
+        try:
+            r = _postback(session, BALLOT_SEARCH_URL, tokens, {
+                "ctl00$ContentPlaceHolder1$txtName": combo,
+                "ctl00$ContentPlaceHolder1$rdList":  "2",   # Name Contains
+                "ctl00$ContentPlaceHolder1$btnNext": "Next",
+            })
+        except requests.RequestException as e:
+            log.warning(f"  [ballot] {combo}: {e} -- refreshing session and "
+                        f"continuing (this combo will retry on the next run)")
+            session = _noncand_session()
+            tokens  = _aspnet_tokens(session.get(BALLOT_SEARCH_URL, timeout=30).text)
+            continue
+
+        names = _noncand_result_names(r.text)
+        for name in names:
+            if name not in registry:
+                registry[name] = {"first_seen_combo": combo}
+                new_names += 1
+        _append_swept_ballot_combo(combo, len(names))
+        swept.add(combo)
+
+        if i % 500 == 0:
+            tokens = _aspnet_tokens(session.get(BALLOT_SEARCH_URL, timeout=30).text)
+        if i % 250 == 0 or i == len(todo):
+            _save_ballot_registry(registry)
+            log.info(f"  [ballot] {i:,}/{len(todo):,} combos swept -- "
+                     f"{len(registry):,} distinct committees found so far "
+                     f"(+{new_names:,} this run)")
+        time.sleep(0.15)
+
+    _save_ballot_registry(registry)
+    log.registry_loaded("ballot_committees", len(registry), relation="committees")
+    return registry
+
+
+# ------------------------ per-committee filing walk -------------------------
+
+def _find_ballot_committee(session, name: str):
+    """Land on `name`'s exact result row via 'Begins With' -- same approach
+    as _find_noncand_committee(). Returns (results_html, form_action_url,
+    button_name, button_value) or (None, None, None, None) if the exact
+    name can't be relocated."""
+    tokens = _aspnet_tokens(session.get(BALLOT_SEARCH_URL, timeout=30).text)
+    r = _postback(session, BALLOT_SEARCH_URL, tokens, {
+        "ctl00$ContentPlaceHolder1$txtName": name[:80],
+        "ctl00$ContentPlaceHolder1$rdList":  "1",   # Name Begins With
+        "ctl00$ContentPlaceHolder1$btnNext": "Next",
+    })
+    soup = BeautifulSoup(r.text, "html.parser")
+    for tag in soup.find_all("input", {"class": "link"}):
+        val = re.sub(r"\s+", " ", tag.get("value", "")).strip()
+        if val == name:
+            return r.text, _form_action(r.text, BALLOT_SEARCH_URL), tag["name"], tag.get("value", "")
+    return None, None, None, None
+
+
+def walk_ballot_committee(log, session, name: str) -> dict | None:
+    """Pull every Campaign Disclosure filing for one Ballot Measure
+    committee -- report index, each filing's summary, and the itemized tabs
+    whose summary total isn't a known zero. Statement of Organization
+    filings are skipped (REPORT_TYPES_BUILT), same as Caucus/Party. Returns
+    the full record (written by the caller) or None if the committee
+    couldn't be relocated by exact name."""
+    results_html, action, btn_name, btn_val = _find_ballot_committee(session, name)
+    if action is None:
+        log.warning(f"  [ballot] could not relocate '{name}' by exact name -- skipping")
+        return None
+
+    tokens = _aspnet_tokens(results_html)
+    r_index = _postback(session, action, tokens, {btn_name: btn_val})
+    index_action = _form_action(r_index.text, action)
+
+    return _walk_report_index(log, session, "ballot", name,
+                              r_index.text, index_action,
+                              report_types=REPORT_TYPES_BUILT)
+
+
+def _load_ballot_done() -> dict:
+    if not BALLOT_DONE_MANIFEST.exists():
+        return {}
+    with open(BALLOT_DONE_MANIFEST, newline="", encoding="utf-8") as f:
+        return {r["committee"]: r for r in csv.DictReader(f)}
+
+
+def _append_ballot_done(committee: str, n_filings: int):
+    write_header = not BALLOT_DONE_MANIFEST.exists()
+    with open(BALLOT_DONE_MANIFEST, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=NONCAND_DONE_COLS)   # same shape, reused
+        if write_header:
+            w.writeheader()
+        w.writerow({"committee": committee, "filings": n_filings,
+                    "walked_at": datetime.today().strftime("%Y-%m-%d")})
+
+
+def run_ballot_measure(log, force: bool = False, sweep_limit: int | None = None,
+                       walk_limit: int | None = None):
+    """Discover every SC Ballot Measure committee and pull its Campaign
+    Disclosure filing history. Two resumable phases, identical structure to
+    run_noncand_pacs(): sweep_ballot_registry() builds the name registry,
+    then every registered name not already in ballot_filings_manifest.csv
+    gets walked. `sweep_limit`/`walk_limit` cap how much NEW work each
+    phase does this call -- used for testing.
+    """
+    registry = sweep_ballot_registry(log, force=force, limit=sweep_limit)
+
+    if force:
+        BALLOT_DONE_MANIFEST.unlink(missing_ok=True)
+    done = set() if force else set(_load_ballot_done())
+
+    todo = [n for n in registry if n not in done]
+    if walk_limit is not None:
+        todo = todo[:walk_limit]
+
+    if not todo:
+        log.info(f"  [ballot] filing walk already complete "
+                 f"({len(done):,}/{len(registry):,} committees)")
+        return
+
+    log.info(f"  [ballot] walking {len(todo):,} of {len(registry):,} "
+             f"committees ({len(done):,} already done)")
+
+    BALLOT_FILINGS_DIR.mkdir(parents=True, exist_ok=True)
+    session = _noncand_session()
+    walked = 0
+    for i, name in enumerate(todo, 1):
+        record = walk_ballot_committee(log, session, name)
+        if record is None:
+            continue
+        out_path = BALLOT_FILINGS_DIR / f"{_noncand_slug(name)}.json"
+        out_path.write_text(json.dumps(record, indent=1))
+        _append_ballot_done(name, len(record["filings"]))
+        walked += 1
+        if i % 25 == 0 or i == len(todo):
+            log.info(f"  [ballot] {i:,}/{len(todo):,} committees walked "
+                     f"({walked:,} succeeded)")
+
+    log.info(f"  [ballot] filing walk done -- {walked:,} committees written")
 
 
 # ============================== driver ================================
@@ -1885,9 +2483,13 @@ def run(
     headed: bool = False,
     headless: bool = False,
     pacs: bool = False,
+    party_caucus: bool = False,
+    party_refresh_days: int = PARTY_REFRESH_DAYS,
+    ballot_measure: bool = False,
 ):
     """Download SC contributions, expenditures, filed reports, election history,
-    and (opt-in) Non-Candidate committee (PAC) filings.
+    and (opt-in) Non-Candidate committee (PAC), Caucus/Party, and Ballot
+    Measure committee filings.
 
     Horizontal scope maps onto the portal's three screens: --transactions covers
     contributions + expenditures, --entities covers the reports screen (the only
@@ -1895,53 +2497,85 @@ def run(
     --candidates and --committees both resolve to entities — SC publishes no
     separate registry for either, so the split happens at parse time.
 
-    --pacs is a fourth, unrelated source (apps.sc.gov, not ethicsfiling.sc.gov —
-    see the Non-Candidate Committees section above) and is deliberately NOT part
-    of the "no flag = everything" default: a full run is a ~17,576-query brute
-    force sweep plus a filing walk over every committee it finds, an order of
-    magnitude more requests than the rest of this scraper combined. Ask for it
-    explicitly.
+    --pacs, --party-caucus, and --ballot-measure are unrelated sources
+    (apps.sc.gov, not ethicsfiling.sc.gov — see the Non-Candidate Committees /
+    Caucus & Party Committees / Ballot Measure Committees sections above) and
+    are deliberately NOT part of the "no flag = everything" default: --pacs
+    and --ballot-measure are each a ~17,576-query brute force name-search
+    sweep plus a filing walk over every committee found; --party-caucus is a
+    smaller but still real ~3,500-combo dropdown sweep (46 counties + 269
+    cities, each x 11 parties, plus 13 caucuses + 11 state parties). All
+    three are an order of magnitude more requests than the rest of this
+    scraper combined. Ask for any of them explicitly.
+
+    --party-caucus is safe to run periodically (e.g. from cron): combos are
+    only skipped while their manifest entry is fresher than
+    `party_refresh_days` (default PARTY_REFRESH_DAYS), so known committees
+    get rechecked for new quarterly filings and previously-empty combos get
+    rechecked for newly-registered committees. --force still wipes the
+    manifest outright for a full reset regardless of age. --pacs and
+    --ballot-measure do NOT have this yet — both are still "done forever"
+    once a committee is walked once; see docs/states/south_carolina.md.
     """
     log = get_logger("south carolina", "scrape")
     t0  = time.perf_counter()
     log._emit("scrape_started", force=force, entities=entities,
               transactions=transactions, contributions=contributions,
               expenditures=expenditures, candidates=candidates,
-              committees=committees, pacs=pacs,
+              committees=committees, pacs=pacs, party_caucus=party_caucus,
+              ballot_measure=ballot_measure,
               start_year=start_year, end_year=end_year)
 
     any_horizontal = (entities or transactions or contributions or
-                      expenditures or candidates or committees or pacs)
+                      expenditures or candidates or committees or pacs or
+                      party_caucus or ballot_measure)
     no_horizontal  = not any_horizontal
 
     do_contributions = no_horizontal or transactions or contributions
     do_expenditures  = no_horizontal or transactions or expenditures
     do_entities      = no_horizontal or entities or candidates or committees
-    do_pacs          = pacs   # never part of the "no flag" default — see docstring
+    do_pacs          = pacs           # never part of the "no flag" default — see docstring
+    do_party_caucus  = party_caucus   # never part of the "no flag" default — see docstring
+    do_ballot        = ballot_measure # never part of the "no flag" default — see docstring
 
     targets = []
     if do_contributions: targets.append("contributions")
     if do_expenditures:  targets.append("expenditures")
     if do_entities:      targets.append("reports")
 
-    # --pacs is plain requests, not Selenium — a pure --pacs run should never
-    # need Chrome at all, so it's handled entirely before the Selenium-only
-    # block below, and Selenium is only required when targets is non-empty.
+    # --pacs, --party-caucus, and --ballot-measure are plain requests, not
+    # Selenium — a run that only asks for these should never need Chrome at
+    # all, so all three are handled entirely before the Selenium-only block
+    # below, and Selenium is only required when targets is non-empty.
+    apps_sc_gov_error = False
     if do_pacs:
         try:
             run_noncand_pacs(log, force=force)
         except Exception as e:
             log.warning(f"  [noncand] PAC scrape failed: {e}")
-            if not targets:
-                log._emit("scrape_completed", status="error",
-                          duration_s=round(time.perf_counter() - t0, 1),
-                          files_ok=0, files_err=1, error=str(e))
-                raise
+            apps_sc_gov_error = True
+    if do_party_caucus:
+        try:
+            run_party_caucus(log, force=force, refresh_days=party_refresh_days)
+        except Exception as e:
+            log.warning(f"  [party_caucus] Caucus/Party scrape failed: {e}")
+            apps_sc_gov_error = True
+    if do_ballot:
+        try:
+            run_ballot_measure(log, force=force)
+        except Exception as e:
+            log.warning(f"  [ballot] Ballot Measure scrape failed: {e}")
+            apps_sc_gov_error = True
+    if apps_sc_gov_error and not targets:
+        log._emit("scrape_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  files_ok=0, files_err=1)
+        raise RuntimeError("apps.sc.gov scrape(s) failed — see warnings above")
     if not targets:
         duration = round(time.perf_counter() - t0, 1)
-        log.info(f"Done in {duration}s (PACs only, no Selenium needed)")
+        log.info(f"Done in {duration}s (apps.sc.gov sources only, no Selenium needed)")
         log._emit("scrape_completed", status="completed", duration_s=duration,
-                  files_ok=int(do_pacs), files_err=0)
+                  files_ok=int(do_pacs or do_party_caucus or do_ballot), files_err=0)
         return
 
     try:
@@ -2221,6 +2855,33 @@ if __name__ == "__main__":
                          "~17,576-query brute-force name search plus a filing "
                          "walk over every committee found. Plain requests, no "
                          "Chrome needed. Ask for it explicitly")
+    ap.add_argument("--party-caucus", action="store_true",
+                    help="Caucus + State/County/City Political Party committees "
+                         "from apps.sc.gov — same site as --pacs, dropdown-driven "
+                         "instead of name search. NOT part of the default "
+                         "(no-flag) run: County/City Party is a ~3,200-combo "
+                         "sweep (46 counties + 269 cities, each x 11 parties). "
+                         "Campaign Disclosure filings only — Operating Disclosure "
+                         "is a different report format, not yet parsed anywhere "
+                         "in this pipeline. Plain requests, no Chrome needed. "
+                         "Ask for it explicitly")
+    ap.add_argument("--party-refresh-days", type=int, metavar="N",
+                    default=PARTY_REFRESH_DAYS,
+                    help=f"--party-caucus: recheck a combo once its manifest "
+                         f"entry is older than this many days, instead of "
+                         f"skipping it forever (default {PARTY_REFRESH_DAYS}, "
+                         f"tied to SC's ~91-day quarterly filing cycle). "
+                         f"Use --force for an unconditional full reset instead")
+    ap.add_argument("--ballot-measure", action="store_true",
+                    help="Ballot Measure committees from apps.sc.gov — same "
+                         "site as --pacs, same name-search pattern (not "
+                         "dropdown-driven). NOT part of the default (no-flag) "
+                         "run: a full sweep is a ~17,576-query brute-force "
+                         "name search plus a filing walk over every committee "
+                         "found. Campaign Disclosure filings only — Statement "
+                         "of Organization filings are detected and skipped, "
+                         "not parsed. Plain requests, no Chrome needed. Ask "
+                         "for it explicitly")
 
     ap.add_argument("--rediscover", action="store_true",
                     help="ignore the cached API recipe and re-derive it from the UI")
@@ -2253,6 +2914,9 @@ if __name__ == "__main__":
             candidates=args.candidates,
             committees=args.committees,
             pacs=args.pacs,
+            party_caucus=args.party_caucus,
+            party_refresh_days=args.party_refresh_days,
+            ballot_measure=args.ballot_measure,
             rediscover=args.rediscover,
             headed=args.headed,
             headless=args.headless,

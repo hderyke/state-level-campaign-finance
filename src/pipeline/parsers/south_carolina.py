@@ -87,11 +87,14 @@ OTHER NOTES
     it are written with committee_type "Candidate Committee". ethicsfiling.sc.gov
     itself publishes no loan or debt schedule, so loans_debts.csv.gz is header-only
     from that source.
-  - Standalone PACs are a second source entirely: apps.sc.gov, scraped only when
-    --pacs is passed (see scrapers/south_carolina.py and "Non-Candidate
-    Committees" below). Optional, so raw/noncand/ may not exist — when it
-    doesn't, parse_noncand_pacs() is a no-op and loans_debts.csv.gz stays
-    header-only as above.
+  - Standalone PACs, Caucus/State/County/City Political Party committees, and
+    Ballot Measure committees are all the same second source: apps.sc.gov,
+    scraped only when --pacs / --party-caucus / --ballot-measure is passed
+    respectively (see scrapers/south_carolina.py and the "Non-Candidate
+    Committees" / "Caucus & Party Committees" / "Ballot Measure Committees"
+    sections below). Each is optional, so its raw/ directory may not exist —
+    when it doesn't, the matching parse_*() function is a no-op and
+    loans_debts.csv.gz stays header-only as above.
 """
 
 import csv
@@ -499,6 +502,106 @@ def _noncand_address(val: str) -> tuple[str, str, str]:
             utils.clean_zip(m.group("zip")))
 
 
+_NONCAND_ITEM_CATEGORIES = ("contributions", "expenditures", "loans", "loan_payments")
+
+
+def _noncand_date_filed_key(date_filed: str):
+    """Sortable key for a filing's date_filed ('10/14/2010') -- returns
+    datetime.min for anything unparseable so it never wins a tiebreak."""
+    try:
+        return datetime.strptime(clean(date_filed), "%m/%d/%Y")
+    except ValueError:
+        return datetime.min
+
+
+def _noncand_dedupe_filings(filings: list[dict]) -> list[dict]:
+    """Collapse duplicate itemized rows that apps.sc.gov re-lists across
+    multiple filings for the same committee -- confirmed directly against
+    the live site (2026-08-03), not inferred from the output alone:
+
+      1. Same-period amendments are full restatements, not incremental.
+         Amendment N for a period re-lists every item Amendment N-1 (or the
+         Original) reported for that SAME period, plus whatever changed.
+         Verified live: Sumter Committee for Excellence's 'July 10th'
+         period grew 2 expenditure items (Original) -> 3 (Amendment 1) ->
+         4 (Amendment 2), each version a strict superset of the last.
+      2. Some report-index rows don't carry independent content at all.
+         Observed cause: rows with a blank period land on ReviewSummary.aspx
+         instead of the normal ViewReport.aspx, and the itemized tabs read
+         from server-side session state that page apparently doesn't set --
+         so the tab silently re-serves whatever filing was last properly
+         loaded. Proven by walking filings in a different order and watching
+         the blank-period row's "content" change to match whatever was
+         walked immediately before it. Also directly provable from the data
+         alone: RGA South Carolina 2010 PAC's blank-period filing (filed
+         10/07/2010) showed expenditures dated 10/27-10/28/2010 -- a filing
+         cannot report a transaction that hadn't happened yet.
+
+    Net effect measured across the full 332-committee dataset before this
+    fix existed: 21,338 duplicate contribution rows (14.9% of all noncand
+    contributions) and 11,087 duplicate expenditure rows (17.3%), spread
+    across 162 committees -- real transactions double/triple/quadruple
+    counted, not fabricated ones.
+
+    Fix: collapse to one row per distinct item -- identified by its full set
+    of source fields (date, name, amount, description/occupation, exactly as
+    the site presents them, so this needs no assumption about which of
+    those fields matter) -- across a committee's ENTIRE filing history,
+    keeping the copy from whichever filing is the most trustworthy source:
+    prefer a filing with a non-blank period (mechanism 2 above never
+    produces real content) and, among those, the latest date_filed
+    (mechanism 1's most-current restatement). A real transaction recurring
+    with byte-identical date/name/amount/description elsewhere in the same
+    committee's history by pure coincidence is not a realistic concern, so
+    this is safe as a general rule even for edge cases neither mechanism
+    above explains."""
+    # content key -> (filings[] index, has_period, date_filed_key) of the
+    # best candidate seen so far for that key
+    best: dict[tuple, tuple[int, bool, object]] = {}
+    for i, f in enumerate(filings):
+        has_period = bool(clean(f.get("period", "")))
+        dt_key = _noncand_date_filed_key(f.get("date_filed", ""))
+        for category in _NONCAND_ITEM_CATEGORIES:
+            for item in f.get(category, []):
+                key = (category, tuple(sorted(item.items())))
+                cur = best.get(key)
+                if cur is None:
+                    best[key] = (i, has_period, dt_key)
+                    continue
+                _, cur_has_period, cur_dt = cur
+                # A non-blank-period source always beats a blank-period one
+                # (mechanism 2 -- blank-period content is never trustworthy);
+                # among equally-eligible sources, the latest date_filed wins
+                # (mechanism 1 -- later restatements supersede earlier ones).
+                if (has_period, dt_key) > (cur_has_period, cur_dt):
+                    best[key] = (i, has_period, dt_key)
+
+    deduped = []
+    for i, f in enumerate(filings):
+        new_f = {k: v for k, v in f.items() if k not in _NONCAND_ITEM_CATEGORIES}
+        for category in _NONCAND_ITEM_CATEGORIES:
+            items = f.get(category)
+            if not items:
+                continue
+            kept, emitted = [], set()
+            for item in items:
+                key = (category, tuple(sorted(item.items())))
+                if best[key][0] != i or key in emitted:
+                    # either this filing lost the cross-filing tiebreak, or
+                    # this exact item is listed more than once on this one
+                    # filing's own page (observed directly, e.g. Justice PAC
+                    # Nine's 10/09/2015 filing lists one $1,000 contribution
+                    # to Margie Bright Matthews twice in its own table) --
+                    # either way, one row per distinct item is correct.
+                    continue
+                emitted.add(key)
+                kept.append(item)
+            if kept:
+                new_f[category] = kept
+        deduped.append(new_f)
+    return deduped
+
+
 def _noncand_election_year(filing: dict) -> str:
     """'2012, January 10th' -> '2012'. Falls back to the last 4 digits of
     date_filed (a real calendar date, so always usable) if period is ever
@@ -565,7 +668,8 @@ def parse_noncand_pacs(log, cmte_w, cont_w, expn_w, loan_w,
             existing_committee_names.add(name)
             n_committees += 1
 
-        for row_num, filing in enumerate(record.get("filings", []), start=1):
+        filings = _noncand_dedupe_filings(record.get("filings", []))
+        for row_num, filing in enumerate(filings, start=1):
             date_filed    = clean(filing.get("date_filed"))
             election_year = _noncand_election_year(filing)
             # No per-transaction ID exists on this site at all -- filing_id
@@ -663,6 +767,365 @@ def parse_noncand_pacs(log, cmte_w, cont_w, expn_w, loan_w,
 
     if n_committees:
         log.registry_loaded("noncand_committees", n_committees, relation="committees")
+    return {"committees": n_committees, "contributions": n_contrib,
+            "expenditures": n_expn, "loans": n_loan}
+
+
+# ==================== Caucus & Party Committees ========================
+# Raw input: data/South Carolina/raw/party_caucus/filings/*.json, written by
+# scrapers/south_carolina.py's opt-in --party-caucus sweep -- Caucus and
+# State/County/City Political Party committees, apps.sc.gov's four
+# dropdown-driven committee lookups (as opposed to Non-Candidate's name
+# search, above). Same site, same report-index/summary/itemized-tab
+# structure, same JSON shape as Non-Candidate's raw files (this function
+# reuses _noncand_dedupe_filings/_noncand_address/_noncand_election_year
+# unchanged) -- the only real difference is one extra "source" key
+# identifying which of the four dropdown lookups a given file came from,
+# used here only to pick the right canonical committee_type.
+#
+# Campaign Disclosure filings only, matching the scraper's scope -- Caucus
+# and Party committees also file a second, differently-shaped "Operating
+# Disclosure" report the scraper doesn't walk yet (see
+# docs/states/south_carolina.md), so there's nothing to filter out here;
+# raw/party_caucus/filings/*.json simply never contains those rows.
+
+PARTY_CAUCUS_GLOB = "party_caucus/filings/*.json"
+
+_PARTY_CAUCUS_COMMITTEE_TYPE = {
+    "caucus":       "Caucus Committee",
+    "state_party":  "State Political Party",
+    "county_party": "County Political Party",
+    "city_party":   "City Political Party",
+}
+
+
+def parse_party_caucus(log, cmte_w, cont_w, expn_w, loan_w,
+                       existing_committee_names: set) -> dict:
+    """Read every scraped Caucus/State/County/City Political Party filing
+    and write committees/contributions/expenditures/loans_debts rows
+    directly through the run() writers already open. Returns counts for the
+    caller's summary line. A no-op (all zeros) when raw/party_caucus/
+    doesn't exist -- the scrape step is opt-in (--party-caucus), so most
+    runs won't have it. Structurally near-identical to parse_noncand_pacs()
+    above (same source site, same dedup needs, same collision handling for
+    a committee_name that happens to match an existing row) -- see that
+    function's docstring for the reasoning this one shares."""
+    paths = raw_files(PARTY_CAUCUS_GLOB)
+    if not paths:
+        return {"committees": 0, "contributions": 0, "expenditures": 0, "loans": 0}
+
+    n_committees = n_contrib = n_expn = n_loan = 0
+    for path in paths:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            log.file_parse_error(path.name, str(e))
+            continue
+
+        name = clean(record.get("committee"))
+        if not name:
+            continue
+
+        source = record.get("source", "")
+        committee_type = _PARTY_CAUCUS_COMMITTEE_TYPE.get(source, source or "Political Party")
+
+        if name in existing_committee_names:
+            # Not observed in practice, but candidate committees, PACs, and
+            # Caucus/Party committees are drawn from unrelated sources with
+            # no shared ID -- a collision can only be caught by name. The
+            # existing row wins; transactions below are written under the
+            # shared name regardless, same as they'd join downstream either
+            # way.
+            log.warning(f"  [party_caucus] '{name}' matches an existing "
+                        f"committee name -- keeping that row, not adding a "
+                        f"second committees.csv entry")
+        else:
+            demo = record.get("demographics") or {}
+            cmte_w.writerow({
+                "state":          STATE,
+                "person_id":      "",
+                "committee_name": name,
+                # Raw value, mapped to canonical values in
+                # src/aliases/committee_types.csv -- same passthrough
+                # convention as committee_type everywhere else in this parser.
+                "committee_type": committee_type,
+                "election_year":  "",
+                "candidate_name": "",
+                "treasurer_name": "",
+                "city":           demo.get("city", ""),
+                "zip":            demo.get("zip", ""),
+                "active":         "",
+                "state_filer_id": "",
+                "raw_file":       path.name,
+                "row_num":        1,
+            })
+            existing_committee_names.add(name)
+            n_committees += 1
+
+        filings = _noncand_dedupe_filings(record.get("filings", []))
+        for row_num, filing in enumerate(filings, start=1):
+            date_filed    = clean(filing.get("date_filed"))
+            election_year = _noncand_election_year(filing)
+            amended = "" if clean(filing.get("version")).lower() == "original" else "Yes"
+
+            for item in filing.get("contributions", []):
+                idx = index_row(item)
+                city, st, zipc = _noncand_address(pick(idx, "address"))
+                occupation = pick(idx, "occupation")
+                if _nk(occupation) == "unknown":
+                    occupation = ""
+                cont_w.writerow({
+                    "state":             STATE,
+                    "committee_name":    name,
+                    "amount":            parse_amount(pick(idx, "amount")),
+                    "date":              parse_date(pick(idx, "date")),
+                    "transaction_type":  "",
+                    "contributor_name":  clean(pick(idx, "contributor")),
+                    "contributor_type":  "",
+                    "contributor_city":  city,
+                    "contributor_state": st,
+                    "contributor_zip":   zipc,
+                    "employer":          "",
+                    "occupation":        occupation,
+                    "candidate_name":    "",
+                    "office":            "",
+                    "election_year":     election_year,
+                    "amended":           amended,
+                    "filing_id":         date_filed,
+                    "raw_file":          path.name,
+                    "row_num":           row_num,
+                })
+                n_contrib += 1
+
+            for item in filing.get("expenditures", []):
+                idx = index_row(item)
+                city, st, zipc = _noncand_address(pick(idx, "address"))
+                expn_w.writerow({
+                    "state":            STATE,
+                    "committee_name":   name,
+                    "amount":           parse_amount(pick(idx, "amount")),
+                    "date":             parse_date(pick(idx, "date")),
+                    "transaction_type": "",
+                    "payee_name":       clean(pick(idx, "vendor", "payee")),
+                    "purpose":          clean(pick(idx, "description", "purpose")),
+                    "category":         "",
+                    "payee_city":       city,
+                    "payee_state":      st,
+                    "payee_zip":        zipc,
+                    "candidate_name":   "",
+                    "office":           "",
+                    "election_year":    election_year,
+                    "amended":          amended,
+                    "filing_id":        date_filed,
+                    "raw_file":         path.name,
+                    "row_num":          row_num,
+                })
+                n_expn += 1
+
+            # See parse_noncand_pacs() -- same UNCONFIRMED loans/loan_payments
+            # header caveat applies here (no real loan activity turned up
+            # during development to check against).
+            for label, items in (("Loan", filing.get("loans", [])),
+                                 ("Loan Payment", filing.get("loan_payments", []))):
+                for item in items:
+                    idx = index_row(item)
+                    city, st, zipc = _noncand_address(pick(idx, "address"))
+                    loan_w.writerow({
+                        "state":              STATE,
+                        "committee_name":     name,
+                        "original_amount":    parse_amount(pick(idx, "amount")),
+                        "date":               parse_date(pick(idx, "date")),
+                        "record_type":        label,
+                        "counterparty_name":  clean(pick(idx, "lender", "vendor",
+                                                         "contributor")),
+                        "counterparty_city":  city,
+                        "counterparty_state": st,
+                        "counterparty_zip":   zipc,
+                        "candidate_name":     "",
+                        "election_year":      election_year,
+                        "amended":            amended,
+                        "filing_id":          date_filed,
+                        "raw_file":           path.name,
+                        "row_num":            row_num,
+                    })
+                    n_loan += 1
+
+    if n_committees:
+        log.registry_loaded("party_caucus_committees", n_committees, relation="committees")
+    return {"committees": n_committees, "contributions": n_contrib,
+            "expenditures": n_expn, "loans": n_loan}
+
+
+# ==================== Ballot Measure Committees ========================
+# Raw input: data/South Carolina/raw/ballot_measure/filings/*.json, written
+# by scrapers/south_carolina.py's opt-in --ballot-measure sweep -- the sixth
+# and last of apps.sc.gov's committee-type lookups (see "Non-Candidate
+# Committees" and "Caucus & Party Committees" above). Name-search like
+# Non-Candidate, not dropdown-driven like Caucus/Party -- same JSON shape as
+# both (this function reuses _noncand_dedupe_filings/_noncand_address/
+# _noncand_election_year unchanged).
+#
+# Campaign Disclosure filings only, matching the scraper's scope -- Ballot
+# Measure committees also file a second, differently-shaped "Statement of
+# Organization" report the scraper doesn't walk (see
+# docs/states/south_carolina.md), so there's nothing to filter out here;
+# raw/ballot_measure/filings/*.json simply never contains those rows.
+
+BALLOT_MEASURE_GLOB = "ballot_measure/filings/*.json"
+
+
+def parse_ballot_measure(log, cmte_w, cont_w, expn_w, loan_w,
+                         existing_committee_names: set) -> dict:
+    """Read every scraped Ballot Measure committee filing and write
+    committees/contributions/expenditures/loans_debts rows directly through
+    the run() writers already open. Returns counts for the caller's summary
+    line. A no-op (all zeros) when raw/ballot_measure/ doesn't exist -- the
+    scrape step is opt-in (--ballot-measure), so most runs won't have it.
+    Structurally identical to parse_noncand_pacs() above (same source site,
+    same name-search discovery, same dedup needs, same collision handling
+    for a committee_name that happens to match an existing row) -- see that
+    function's docstring for the reasoning this one shares. Only real
+    difference: a single fixed committee_type rather than a per-source
+    dropdown lookup table, since Ballot Measure has no sub-types."""
+    paths = raw_files(BALLOT_MEASURE_GLOB)
+    if not paths:
+        return {"committees": 0, "contributions": 0, "expenditures": 0, "loans": 0}
+
+    n_committees = n_contrib = n_expn = n_loan = 0
+    for path in paths:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            log.file_parse_error(path.name, str(e))
+            continue
+
+        name = clean(record.get("committee"))
+        if not name:
+            continue
+
+        if name in existing_committee_names:
+            # Not observed in practice, but candidate committees, PACs,
+            # Caucus/Party committees, and Ballot Measure committees are
+            # drawn from unrelated sources with no shared ID -- a collision
+            # can only be caught by name. The existing row wins;
+            # transactions below are written under the shared name
+            # regardless, same as they'd join downstream either way.
+            log.warning(f"  [ballot] '{name}' matches an existing committee "
+                        f"name -- keeping that row, not adding a second "
+                        f"committees.csv entry")
+        else:
+            demo = record.get("demographics") or {}
+            cmte_w.writerow({
+                "state":          STATE,
+                "person_id":      "",
+                "committee_name": name,
+                # Raw value, mapped to canonical value in
+                # src/aliases/committee_types.csv -- same passthrough
+                # convention as committee_type everywhere else in this parser.
+                "committee_type": "Ballot Measure Committee",
+                "election_year":  "",
+                "candidate_name": "",
+                "treasurer_name": "",
+                "city":           demo.get("city", ""),
+                "zip":            demo.get("zip", ""),
+                "active":         "",
+                "state_filer_id": "",
+                "raw_file":       path.name,
+                "row_num":        1,
+            })
+            existing_committee_names.add(name)
+            n_committees += 1
+
+        filings = _noncand_dedupe_filings(record.get("filings", []))
+        for row_num, filing in enumerate(filings, start=1):
+            date_filed    = clean(filing.get("date_filed"))
+            election_year = _noncand_election_year(filing)
+            amended = "" if clean(filing.get("version")).lower() == "original" else "Yes"
+
+            for item in filing.get("contributions", []):
+                idx = index_row(item)
+                city, st, zipc = _noncand_address(pick(idx, "address"))
+                occupation = pick(idx, "occupation")
+                if _nk(occupation) == "unknown":
+                    occupation = ""
+                cont_w.writerow({
+                    "state":             STATE,
+                    "committee_name":    name,
+                    "amount":            parse_amount(pick(idx, "amount")),
+                    "date":              parse_date(pick(idx, "date")),
+                    "transaction_type":  "",
+                    "contributor_name":  clean(pick(idx, "contributor")),
+                    "contributor_type":  "",
+                    "contributor_city":  city,
+                    "contributor_state": st,
+                    "contributor_zip":   zipc,
+                    "employer":          "",
+                    "occupation":        occupation,
+                    "candidate_name":    "",
+                    "office":            "",
+                    "election_year":     election_year,
+                    "amended":           amended,
+                    "filing_id":         date_filed,
+                    "raw_file":          path.name,
+                    "row_num":           row_num,
+                })
+                n_contrib += 1
+
+            for item in filing.get("expenditures", []):
+                idx = index_row(item)
+                city, st, zipc = _noncand_address(pick(idx, "address"))
+                expn_w.writerow({
+                    "state":            STATE,
+                    "committee_name":   name,
+                    "amount":           parse_amount(pick(idx, "amount")),
+                    "date":             parse_date(pick(idx, "date")),
+                    "transaction_type": "",
+                    "payee_name":       clean(pick(idx, "vendor", "payee")),
+                    "purpose":          clean(pick(idx, "description", "purpose")),
+                    "category":         "",
+                    "payee_city":       city,
+                    "payee_state":      st,
+                    "payee_zip":        zipc,
+                    "candidate_name":   "",
+                    "office":           "",
+                    "election_year":    election_year,
+                    "amended":          amended,
+                    "filing_id":        date_filed,
+                    "raw_file":         path.name,
+                    "row_num":          row_num,
+                })
+                n_expn += 1
+
+            # See parse_noncand_pacs() -- same UNCONFIRMED loans/loan_payments
+            # header caveat applies here (no real loan activity turned up
+            # during development to check against).
+            for label, items in (("Loan", filing.get("loans", [])),
+                                 ("Loan Payment", filing.get("loan_payments", []))):
+                for item in items:
+                    idx = index_row(item)
+                    city, st, zipc = _noncand_address(pick(idx, "address"))
+                    loan_w.writerow({
+                        "state":              STATE,
+                        "committee_name":     name,
+                        "original_amount":    parse_amount(pick(idx, "amount")),
+                        "date":               parse_date(pick(idx, "date")),
+                        "record_type":        label,
+                        "counterparty_name":  clean(pick(idx, "lender", "vendor",
+                                                         "contributor")),
+                        "counterparty_city":  city,
+                        "counterparty_state": st,
+                        "counterparty_zip":   zipc,
+                        "candidate_name":     "",
+                        "election_year":      election_year,
+                        "amended":            amended,
+                        "filing_id":          date_filed,
+                        "raw_file":           path.name,
+                        "row_num":            row_num,
+                    })
+                    n_loan += 1
+
+    if n_committees:
+        log.registry_loaded("ballot_measure_committees", n_committees, relation="committees")
     return {"committees": n_committees, "contributions": n_contrib,
             "expenditures": n_expn, "loans": n_loan}
 
@@ -1323,6 +1786,34 @@ def run():
                      f"{noncand_counts['loans']:,} loan/repayment rows")
             total_contributions += noncand_counts["contributions"]
             total_expenditures  += noncand_counts["expenditures"]
+
+        # Caucus + State/County/City Political Party committees -- a fourth
+        # source (same apps.sc.gov site as Non-Candidate, opt-in at scrape
+        # time via --party-caucus). See parse_party_caucus() and
+        # docs/states/south_carolina.md "Caucus & Party Committees".
+        party_counts = parse_party_caucus(log, cmte_w, cont_w, expn_w, loan_w,
+                                          existing_committee_names=set(committees))
+        if party_counts["committees"]:
+            log.info(f"  [party_caucus] {party_counts['committees']:,} Caucus/Party "
+                     f"committees, {party_counts['contributions']:,} contributions, "
+                     f"{party_counts['expenditures']:,} expenditures, "
+                     f"{party_counts['loans']:,} loan/repayment rows")
+            total_contributions += party_counts["contributions"]
+            total_expenditures  += party_counts["expenditures"]
+
+        # Ballot Measure committees -- the sixth and last apps.sc.gov source
+        # (opt-in at scrape time via --ballot-measure). See
+        # parse_ballot_measure() and docs/states/south_carolina.md "Ballot
+        # Measure Committees".
+        ballot_counts = parse_ballot_measure(log, cmte_w, cont_w, expn_w, loan_w,
+                                             existing_committee_names=set(committees))
+        if ballot_counts["committees"]:
+            log.info(f"  [ballot] {ballot_counts['committees']:,} Ballot Measure "
+                     f"committees, {ballot_counts['contributions']:,} contributions, "
+                     f"{ballot_counts['expenditures']:,} expenditures, "
+                     f"{ballot_counts['loans']:,} loan/repayment rows")
+            total_contributions += ballot_counts["contributions"]
+            total_expenditures  += ballot_counts["expenditures"]
 
         # Tier-2 backfill, then flush candidates and committees.
         history  = load_election_history(log)

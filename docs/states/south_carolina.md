@@ -10,7 +10,9 @@
 | **Source** | [SC State Ethics Commission Public Reporting](https://ethicsfiling.sc.gov/public/campaign-reports) — [contributions](https://ethicsfiling.sc.gov/public/campaign-reports/contributions), [expenditures](https://ethicsfiling.sc.gov/public/campaign-reports/expenditures), [reports](https://ethicsfiling.sc.gov/public/campaign-reports/reports) |
 | **Secondary source** | [SC Election Commission election history](https://electionhistory.scvotes.gov/search) (CSV export via `sc.elstats.civera.com`) — tier-2 backfill only |
 | **Tertiary source** | [apps.sc.gov/PublicReporting](https://apps.sc.gov/PublicReporting/IndividualCommittee/Committee.aspx) — standalone PACs (opt-in, `--pacs`); see [Non-Candidate Committees](#non-candidate-committees-pacs) |
-| **Access method** | Selenium (Chrome + CDP network logging) for the candidate-side sources above. The scraper runs one UI search per screen to capture the app's own JSON search request, then replays that request per year with an in-page `fetch()`. `--pacs` is plain `requests` against a different, server-rendered site — no Chrome needed for that source |
+| **Quaternary source** | Same `apps.sc.gov` site — Caucus + State/County/City Political Party committees (opt-in, `--party-caucus`); see [Caucus & Party Committees](#caucus--party-committees) |
+| **Quinary source** | Same `apps.sc.gov` site — Ballot Measure committees (opt-in, `--ballot-measure`); see [Ballot Measure Committees](#ballot-measure-committees) |
+| **Access method** | Selenium (Chrome + CDP network logging) for the candidate-side sources above. The scraper runs one UI search per screen to capture the app's own JSON search request, then replays that request per year with an in-page `fetch()`. `--pacs`, `--party-caucus`, and `--ballot-measure` are plain `requests` against a different, server-rendered site — no Chrome needed for any of them |
 | **Coverage** | 2008 – present (the earliest option in every year dropdown on the portal) |
 | **person_id model** | `name_hash` — the portal's id is per candidacy, not per person; see [Parser](#parser) |
 | **has_filer_id** | `1` in `src/aliases/states.csv` — `state_filer_id` comes from `candidateId` / `candidateFilerId` |
@@ -239,8 +241,10 @@ measure committees, and political party committees file instead through
 `apps.sc.gov/PublicReporting` — the Ethics Commission's older, plain ASP.NET
 WebForms site, not the Angular SPA. This section covers Non-Candidate (PAC)
 committees, the highest-value of the six committee types that site
-publishes; Ballot Measure, Caucus, and State/County/City Party committees
-are not yet scraped (see "Not yet covered" below).
+publishes. Caucus/State/County/City Party committees and Ballot Measure
+committees are the other five — see [Caucus & Party
+Committees](#caucus--party-committees) and [Ballot Measure
+Committees](#ballot-measure-committees) below; all six are now covered.
 
 **Access method:** plain `requests`, no Selenium/Playwright. This is a
 server-rendered WebForms app with no client-side rendering and no bot-wall
@@ -257,8 +261,9 @@ Six committee-type lookups live under `Committee.aspx`: Ballot Measure,
 Caucus, Non-Candidate, and State/County/City Political Party. Four of the
 six (Caucus and the three Party levels) are plain dropdowns — 13 caucuses,
 11 state parties, 58 counties, 281 cities — trivial to enumerate. Ballot
-Measure and Non-Candidate are name-search only, and that's the one this
-scraper covers.
+Measure and Non-Candidate are name-search only, structurally identical to
+each other (see [Ballot Measure Committees](#ballot-measure-committees)
+below for the confirmation of that).
 
 **The search enforces "at least three characters" server-side**, not just in
 client-side JS — confirmed by POSTing a 1-character query directly and
@@ -352,14 +357,6 @@ here is already just `City, ST ZIP` with nothing else mixed in.
 
 ### Not yet covered
 
-- **Ballot Measure committees** — same name-search pattern and 3-char
-  minimum as Non-Candidate; not built yet.
-- **State/County/City Political Party and Caucus committees** — plain
-  dropdowns (11/58/281/13 options respectively), cheaper to add than the
-  brute-force sweep above, but not built yet. This is why party
-  contributions (e.g. "South Carolina Republican Party") still only show up
-  as a `contributor_name` string on a candidate's row, never as their own
-  filer.
 - **Assets tab** (`ViewAssets.aspx`) — deliberately skipped. There is no
   assets table anywhere in `columns.py`, so scraping it would have nowhere
   to go.
@@ -372,6 +369,202 @@ here is already just `City, ST ZIP` with nothing else mixed in.
 
 ---
 
+## Caucus & Party Committees
+
+A fourth source, same `apps.sc.gov` site as Non-Candidate committees above,
+covering four more of the site's six committee-type lookups: Caucus, State
+Political Party, County Political Party, and City Political Party. (The
+sixth, Ballot Measure, is a fifth source covered separately below — see
+[Ballot Measure Committees](#ballot-measure-committees).) This is why party
+contributions (e.g. "South Carolina Republican Party") used to only show up
+as a `contributor_name` string on a candidate's row, never as their own
+filer — with `--party-caucus` run, they now have their own `committees.csv`
+row and their own contributions/expenditures.
+
+**Opt-in only:** `--party-caucus`. Same reasoning as `--pacs` — County/City
+Party is a real sweep (see below), an order of magnitude more requests than
+the rest of this scraper combined.
+
+### The site
+
+Unlike Non-Candidate (name search), these four lookups are plain dropdowns:
+
+| Lookup | Dropdown(s) | Options |
+|---|---|---|
+| Caucus | 1 (`drpCaucus`) | 13 |
+| State Political Party | 1 (`drpPoliticalParty`) | 11 |
+| County Political Party | 2 (`drpCounty` × `drpPoliticalParty`) | 46 × 11 = 506 combos |
+| City Political Party | 2 (`drpCity` × `drpPoliticalParty`) | 269 × 11 = 2,959 combos |
+
+Caucus and State Party need no discovery step at all — every dropdown
+option is a real committee, so the scraper just walks all 13 / 11 directly.
+County and City Party need the same sweep-then-walk treatment as
+Non-Candidate's brute-force search, just over a real, enumerable space
+(3,465 combos total) instead of 17,576 blind letter combos — most combos
+have no filed committee (confirmed: selecting an empty combo lands on the
+same results page with no results table at all, a cheap, reliable "no
+committee" signal), and every combo checked (hit or miss) is recorded in
+`party_{source}_manifest.csv` so an interrupted run resumes without
+re-checking known-empty combos.
+
+**Postback chain**, once a dropdown selection is made:
+
+```
+Lookup{Caucus,StateParty,CountyParty,CityParty}.aspx  (select dropdown(s), click Next)
+  -> Lookup{...}Result.aspx  (report index -- every filing this committee has made,
+                               or no results table if the combo has no committee)
+  -> {...}/NONCAND/ViewReport.aspx  (per-filing summary -- Campaign Disclosure only)
+  -> ViewContributions.aspx / ViewExpenditures.aspx / ViewLoans.aspx /
+     ViewRepayments.aspx  (itemized rows for that one filing)
+```
+
+This is the exact same shape as Non-Candidate's chain, and confirmed to be
+literally the same underlying report subsystem: Campaign Disclosure
+summaries land under a `.../NONCAND/` URL segment regardless of which of
+the five committee types you started from. All of the itemized-row parsing
+(`_noncand_itemized_rows`), report-index parsing (`_noncand_report_rows`),
+and the filing-history walker (`_walk_report_index`, factored out of
+`walk_noncand_committee` when this was built) are shared unchanged.
+
+**One genuine difference: three report types.** Caucus and Party committees
+file up to three different report types under one report index —
+"Campaign Disclosure" (identical shape to everything else in this document),
+"Operating Disclosure" (a legislative-caucus-specific administrative-
+expense report, landing on a differently-shaped `ReviewSummary.aspx`
+instead of `ViewReport.aspx`, with its own distinct fields), and
+"Statement of Organization" (a registration/organizational filing, not
+transactional — confirmed to exist during the first live `--party-caucus`
+run on 2026-08-03, not seen during earlier development). This build
+covers **Campaign Disclosure only** — the other two are detected and
+logged as skipped via `REPORT_TYPES_BUILT`'s whitelist, never silently
+dropped, but nothing about their content is parsed anywhere in this
+pipeline yet. The whitelist approach means a future fourth type would be
+handled the same way (skipped + logged) without any code change required.
+
+**A real bug found and fixed while building this**: `_form_action()` (used
+to compute the URL to fetch a filing's itemized tabs from) parses the
+landed page's own `<form action="...">` attribute — which works for
+Non-Candidate, but Caucus/Party summaries are reached via a server-side
+redirect into that `.../NONCAND/` subfolder that the form's own `action`
+attribute doesn't reflect (it renders a plain relative `"ViewReport.aspx"`
+that resolves to the wrong folder against the pre-redirect POST target).
+Fixed by using `requests`' own post-redirect `response.url` instead, which
+is ground truth regardless of any redirect — a strict improvement for
+Non-Candidate too, not just a fix for this build. Confirmed live
+(2026-08-03): South Carolina American Party's Campaign Disclosure tabs
+404'd on every fetch before this fix, resolved cleanly after.
+
+### Output
+
+Raw: `data/South Carolina/raw/party_caucus/filings/{source}_{slug}.json`,
+one file per committee — same shape as Non-Candidate's raw files
+(`{"committee", "demographics", "filings": [...]}`) plus one extra
+`"source"` key (`caucus` / `state_party` / `county_party` / `city_party`),
+used by the parser to pick the right `committee_type`.
+
+Parsed (`parse_party_caucus()` in `parsers/south_carolina.py`): reuses
+`_noncand_dedupe_filings()` (see "Non-Candidate Committees" above for why
+this matters — apps.sc.gov's itemized tabs are not incremental per filing,
+same site, same failure modes, same fix), `_noncand_address()`, and
+`_noncand_election_year()` unchanged. `committee_type` is mapped to
+`"Caucus Committee"` / `"State Political Party"` / `"County Political
+Party"` / `"City Political Party"`, canonicalized to `Party Committee` in
+`src/aliases/committee_types.csv` (Caucus mapped to Party Committee, not
+PAC — every SC caucus discovered so far is a legislative party caucus,
+e.g. House/Senate Democratic/Republican Caucus).
+
+**The authoritative committee name comes from the site, not the dropdown
+label.** A County/City Party committee's actual filed name doesn't
+necessarily match a naive `"{city or county} {party}"` construction —
+confirmed directly: the Richland county + Democratic party dropdown
+selection resolves to a committee filed as *"County of Richland Democratic
+Party"*, not "Richland County Democratic Party". The scraper pulls the real
+name off `lblName` on the first filing's summary page rather than
+constructing one.
+
+### Not yet covered
+
+- **Operating Disclosure filings** — a different report format with
+  different fields (see above); detected and skipped, not parsed.
+- **Statement of Organization filings** — a registration/organizational
+  filing, not transactional (see above); detected and skipped, not parsed.
+
+---
+
+## Ballot Measure Committees
+
+A fifth source, same `apps.sc.gov` site as the four above, covering the
+sixth and last of the site's committee-type lookups. Name-search, like
+Non-Candidate — not dropdown-driven, like Caucus/Party.
+
+**Opt-in only:** `--ballot-measure`. Same reasoning as `--pacs` — a full
+sweep is an order of magnitude more requests than the rest of this scraper
+combined.
+
+### The site
+
+Confirmed directly against the live site (2026-08-03) to be structurally
+identical to Non-Candidate in every respect:
+
+- Same search form shape (`txtName`/`rdList`/`btnNext`), at
+  `Ballot/SearchBallot.aspx` instead of `NonCandidate/SearchNonCand.aspx`.
+- Same "at least three characters" server-side minimum on "Name Contains"
+  — POSTing a 1-char query returns the identical rejection text
+  ("Committee Name must contain at least 3 characters"). The same
+  `NONCAND_COMBOS` 3-letter sweep (26³ = 17,576 combos) is reused unchanged.
+- Same postback chain: `SearchBallot.aspx` → `BallotFilers.aspx` (results
+  list) → `BallotFilerResult.aspx` (report index) → `ViewReport.aspx`
+  (per-filing summary) → `ViewContributions.aspx` / `ViewExpenditures.aspx`
+  / `ViewLoans.aspx` / `ViewRepayments.aspx` / `ViewAssets.aspx` (itemized
+  rows). Unlike Caucus/Party, no cross-folder redirect was observed here —
+  the summary page stayed under `.../Ballot/` throughout in testing — but
+  `_walk_report_index` already uses `response.url` unconditionally (see the
+  `_form_action` bug writeup above), so this is safe either way.
+- Same span ids (`lblName`/`lblAddress`/`lblPhone`,
+  `TOTAL_CONTRIBUTION_PERIOD`/`TOTAL_EXPENDITURE_PERIOD`), same two-line
+  `<br>`-separated address format, same itemized-tab table shape
+  (Date/Name/Address/Occupation/Amount).
+
+Every low-level helper built for Non-Candidate (`_noncand_session`,
+`_postback`, `_noncand_result_names`, `_noncand_slug`,
+`_noncand_demographics`, `_noncand_report_rows`, `_noncand_itemized_rows`,
+`_noncand_summary_nonzero`, `_walk_report_index`) is reused unchanged — only
+the search URL, manifest files, and output directory are Ballot-specific.
+The two-phase sweep-then-walk structure (`sweep_ballot_registry()` /
+`run_ballot_measure()`) mirrors `sweep_noncand_registry()` /
+`run_noncand_pacs()` line for line.
+
+**One difference from Non-Candidate, same as Caucus/Party:** Ballot Measure
+committees also file "Statement of Organization" filings alongside
+"Campaign Disclosure" under the same report-index table — confirmed live by
+sampling several real filers found via a "com" search (e.g. "Committee for
+the Penny"). This build covers Campaign Disclosure only, via the same
+`REPORT_TYPES_BUILT` whitelist Caucus/Party uses. No "Operating Disclosure"
+was observed here — that report type appears to be legislative-caucus-
+specific, not general to every apps.sc.gov committee type.
+
+### Output
+
+Raw: `data/South Carolina/raw/ballot_measure/filings/{slug}.json`, one file
+per committee — identical shape to Non-Candidate's raw files
+(`{"committee", "demographics", "filings": [...]}`), no extra `"source"`
+key needed since Ballot Measure has no sub-types.
+
+Parsed (`parse_ballot_measure()` in `parsers/south_carolina.py`): one
+`committees.csv.gz` row per committee (`committee_type` = raw
+`"Ballot Measure Committee"`, mapped to canonical `Ballot Measure` in
+`src/aliases/committee_types.csv` — the same canonical value every other
+state's ballot-committee raw values map to), plus
+`contributions.csv.gz` / `expenditures.csv.gz` / `loans_debts.csv.gz` rows
+per itemized line. Reuses `_noncand_dedupe_filings()`, `_noncand_address()`,
+and `_noncand_election_year()` unchanged.
+
+**Not yet covered:** Statement of Organization filings (different report
+format, detected and skipped) and the Assets tab (same reasoning as
+Non-Candidate above — no assets table anywhere in `columns.py`).
+
+---
+
 ## Data Notes
 
 - **No contributor type.** The only contributor classification published is a yes/no "Group?" flag. It is written as `Individual`/`Group` and mapped to `Individual`/`Organization` in `contributor_types.csv`. Rows where the flag is blank are backfilled at aggregate time from the committees table like every other state.
@@ -380,7 +573,7 @@ here is already just `City, ST ZIP` with nothing else mixed in.
 - **Rows dropped at parse.** A contribution or expenditure missing filer, amount, or date is skipped rather than written — those three are tier-1 required and an untraceable row is worse than a missing one. Counts appear in the `file_parsed` events as `skipped`.
 - **`election_year` semantics differ by screen.** Contributions carry an explicit Election Date, so `election_year` is taken from it. Expenditures have no election date at all — `election_year` there is the year of expenditure, which is the closest available proxy and may differ from the actual cycle.
 - **Election-history coverage.** The SC Election Commission dataset starts at 2008 and only covers people who actually appeared on a ballot. Candidates who filed with the Ethics Commission but withdrew before the ballot, and non-candidate filers, will never match and keep empty party/district/incumbent.
-- **PACs are covered, but opt-in and not yet complete.** The default (no-flag) scrape is a candidate/public-official dataset only, same as before. Standalone PACs are a separate source reachable only via `--pacs` (see "Non-Candidate Committees" above) — if that scrape hasn't been run for a given `data/South Carolina/`, treat PAC coverage as absent, not zero activity. Even with `--pacs` run to completion, Ballot Measure, Party, and Caucus committees still aren't covered — only standalone (Non-Candidate) PACs are.
+- **PACs, Caucus/Party, and Ballot Measure committees are covered, but opt-in and not yet complete.** The default (no-flag) scrape is a candidate/public-official dataset only, same as before. Standalone PACs (`--pacs`), Caucus/State/County/City Party committees (`--party-caucus`), and Ballot Measure committees (`--ballot-measure`) are separate sources — if a scrape hasn't been run for a given `data/South Carolina/`, treat that coverage as absent, not zero activity. Even with all three run to completion, Operating Disclosure and Statement of Organization filings still aren't covered for any of them.
 
 ---
 
@@ -388,6 +581,6 @@ here is already just `City, ST ZIP` with nothing else mixed in.
 
 | Component | Date |
 |---|---|
-| Scraper | 2026-08-02 (added `--pacs`) |
-| Parser | 2026-08-02 (added `parse_noncand_pacs()`) |
-| Docs | 2026-08-02 |
+| Scraper | 2026-08-03 (added `--party-caucus` and `--ballot-measure`; added time-based staleness re-check for `--party-caucus`'s manifest; fixed a `_form_action` redirect bug affecting itemized-tab URLs) |
+| Parser | 2026-08-03 (added `parse_party_caucus()` and `parse_ballot_measure()`; fixed `_noncand_dedupe_filings()` cross-filing duplication affecting `--pacs`, `--party-caucus`, and `--ballot-measure`) |
+| Docs | 2026-08-03 (corrected "two report types" to three; added Ballot Measure Committees section — all six apps.sc.gov committee types now covered) |

@@ -31,6 +31,7 @@ Manifest (data/Kansas/manifest.csv):
 
 import csv
 import hashlib
+import os
 import re
 import sys
 import time
@@ -157,13 +158,26 @@ def _cache_path(url: str) -> Path:
 
 def fetch_index_html(session: requests.Session, url: str,
                      use_cache: bool = False) -> str:
-    """Return HTML for an index page. Optionally serve from disk cache."""
+    """Return HTML for an index page. Optionally serve from disk cache.
+
+    Cache writes go through a temp file + atomic rename rather than writing
+    the final path directly. use_cache trusts an existing cache file forever
+    once written (no revalidation) -- a process killed mid-write to the
+    direct path would leave a truncated file that every future run reads as
+    valid, silently returning zero/partial PDF links for that cycle with
+    nothing surfaced anywhere in the pipeline (parse_index just logs "no PDF
+    links found" and moves on). The atomic rename means a kill can only ever
+    leave the OLD complete cache in place (or nothing), never a corrupt one --
+    this run just refetches from the network next time, same as if the cache
+    had never existed."""
     cache = _cache_path(url)
     if use_cache and cache.exists():
         return cache.read_text(encoding="utf-8", errors="replace")
     r = _get(session, url)
     html = r.text
-    cache.write_text(html, encoding="utf-8", errors="replace")
+    tmp = cache.with_suffix(cache.suffix + f".tmp{os.getpid()}")
+    tmp.write_text(html, encoding="utf-8", errors="replace")
+    tmp.replace(cache)
     return html
 
 
