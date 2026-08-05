@@ -35,6 +35,18 @@ COMMITTEES = [
     "zip",
     "active",           # sparse — only written by states with official status; omit if unavailable
     "state_filer_id",   # source-system ID — kept for per-state traceability
+    # affiliation enrichment -- populated by enrich.py from either a state's own
+    # disclosure data (e.g. FL's Statement of Organization Section 7) when the
+    # parser can extract it, or src/registries/committees/{state}.csv as a
+    # hand-reviewed fallback when it can't. Identifies which candidate a PAC/
+    # CCE/ECO is tied to but legally separate from -- distinct from
+    # candidate_name above, which is only populated for a candidate's OWN
+    # committee. Deliberately name-based rather than person_id-based: see the
+    # AGGREGATE note below on why person_id was retired as a cross-cycle
+    # identity -- this field would inherit the same unreliability if it
+    # resolved to person_id instead of storing the name directly.
+    "affiliated_candidate_name",
+    "support_oppose",   # "S" or "O" -- blank if not (yet) known
     "raw_file",
     "row_num",
 ]
@@ -104,6 +116,16 @@ EXPENDITURES = [
     "candidate_name",
     "office",
     "election_year",
+    # independent expenditure enrichment -- which candidate this specific
+    # expenditure supports or opposes, and the stance ("S"/"O", blank if
+    # unknown). Distinct from candidate_name above, which is only populated
+    # when the FILING committee is itself that candidate's own committee --
+    # an IE committee spending against a candidate never IS that candidate.
+    # Sparse: most states' transaction feeds carry no such signal at all
+    # (confirmed absent from Oregon's, for example -- see parsers/oregon.py);
+    # populated only where a per-state parser has a real source for it.
+    "affiliated_candidate_name",
+    "support_oppose",
     # identifiers
     "amended",
     "filing_id",
@@ -152,6 +174,9 @@ COLUMN_TYPES = {
     "city":                 "VARCHAR",
     "zip":                  "VARCHAR",
     "active":               "BIGINT",
+    # independent expenditure enrichment (committees + expenditures)
+    "affiliated_candidate_name": "VARCHAR",
+    "support_oppose":            "VARCHAR",
     # candidate fields
     "candidate_name":       "VARCHAR",
     "canonical_office":     "VARCHAR",
