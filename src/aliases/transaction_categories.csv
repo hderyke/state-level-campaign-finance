@@ -318,3 +318,16 @@ WI,Transfer,Transfer
 "# An independent expenditure is spending, not a donation to the filer — Other",,
 # keeps it out of donor rankings on the contributions side.,,
 WI,Independent Expenditure,Other
+# == North Dakota ==============================================================,,
+# transaction_type is CFRS's TransactionCategory (its TransactionType column is,,
+# the constant 'Contributions' and carries no information). The 'Total - $N or,,
+# less' values are unitemized aggregate lines -- still monetary receipts. Same,,
+# treatment as AL 'Cash (Non-Itemized)' and NH 'Unitemized Monetary' above.,,
+ND,Monetary,Monetary
+ND,Total - $200 or less,Monetary
+ND,Total - $100 or less,Monetary
+ND,In-Kind,In-Kind
+# Money flowing back to the committee for an expenditure it made -- a receipt,,
+# rather than a donation. Same call as CT 'Reimbursements and Distribution of,,
+# Surplus' and DE 'Expense Reimbursement'.,,
+ND,Reimbursement of Expenditure,Refund

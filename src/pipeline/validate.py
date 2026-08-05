@@ -435,14 +435,52 @@ def drift_check(table: str, current: int, previous: int | None) -> dict | None:
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
+def _norm_state(s: str) -> str:
+    """Normalize a state argument to the states.csv form: lowercase, spaces.
+
+    Multi-word states are referred to two ways in this repo and they're trivially
+    confusable:
+
+        "north dakota"   the states.csv name — what orc.py passes
+        "north_dakota"   the module slug — matches scrapers/north_dakota.py,
+                         and the more natural thing to type by hand
+
+    Only the first is a key in STATE_ABBR. Without normalizing, the slug form
+    falls through to state.upper() and state_upper becomes "NORTH_DAKOTA", so
+    check_state_col compares every row's real "ND" against that and reports the
+    whole table as wrong — one tier-1 failure per table, four in total, while
+    every fill-rate check still shows 100%. Confusing, and it affects every
+    multi-word state (new_hampshire → "NEW_HAMPSHIRE" likewise).
+    """
+    return re.sub(r"\s+", " ", s.strip().lower().replace("_", " "))
+
+
 def run(state: str):
-    state_lower = state.lower()
+    state_lower = _norm_state(state)
     state_upper = STATE_ABBR.get(state_lower, state.upper())  # "alabama" → "AL"
     clean_dir   = PROJECT_ROOT / "data" / state_lower / "cleaned"
 
     # Try capitalized dir too (Alabama vs alabama)
     if not clean_dir.exists():
         clean_dir = PROJECT_ROOT / "data" / state.capitalize() / "cleaned"
+
+    # Fall back to a scan of data/, matching on the normalized name — same
+    # approach tabulate.py already uses. Needed for multi-word states: orc.py
+    # passes the name from states.csv lowercased ("north dakota"), and
+    # str.capitalize() lowercases everything after the first character ("North
+    # dakota"), so neither branch above matches the real "North Dakota"
+    # directory. On Windows and macOS the case-insensitive filesystem hid that;
+    # on Linux it aborts the run. Normalizing both sides also means a directory
+    # named either "North Dakota" or "north_dakota" resolves from either
+    # argument form.
+    if not clean_dir.exists():
+        data_dir = PROJECT_ROOT / "data"
+        if data_dir.exists():
+            matches = [d for d in data_dir.iterdir()
+                       if d.is_dir() and _norm_state(d.name) == state_lower]
+            if matches:
+                clean_dir = matches[0] / "cleaned"
+
     if not clean_dir.exists():
         print(f"ERROR: cleaned dir not found for state '{state}'")
         sys.exit(1)
