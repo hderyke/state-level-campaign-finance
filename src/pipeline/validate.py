@@ -436,13 +436,31 @@ def drift_check(table: str, current: int, previous: int | None) -> dict | None:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def run(state: str):
-    state_lower = state.lower()
-    state_upper = STATE_ABBR.get(state_lower, state.upper())  # "alabama" → "AL"
+    # Accept either separator for multi-word states. orc.py passes the spaced
+    # name from states.csv ("new mexico"), but the scraper/parser modules are
+    # named with underscores (new_mexico.py), so that's what a human runs this
+    # with — and an unresolved STATE_ABBR lookup is not a harmless miss. It
+    # leaves state_upper as "NEW_MEXICO", which check_state_col then compares
+    # against every row's "NM" and fails all four tables on tier 1.
+    state_lower = state.lower().replace("_", " ")
+    state_upper = STATE_ABBR.get(state_lower, state_lower.upper())  # "alabama" → "AL"
     clean_dir   = PROJECT_ROOT / "data" / state_lower / "cleaned"
 
     # Try capitalized dir too (Alabama vs alabama)
     if not clean_dir.exists():
         clean_dir = PROJECT_ROOT / "data" / state.capitalize() / "cleaned"
+    # Both attempts above rely on the filesystem being case-insensitive (macOS,
+    # Windows), and .capitalize() can't produce a two-word directory name like
+    # "New Mexico" on any filesystem. Fall back to the same case-insensitive
+    # directory scan tabulate.py uses so multi-word states work off macOS.
+    if not clean_dir.exists():
+        data_dir = PROJECT_ROOT / "data"
+        if data_dir.is_dir():
+            match = next((d for d in data_dir.iterdir()
+                          if d.is_dir()
+                          and d.name.lower().replace("_", " ") == state_lower), None)
+            if match:
+                clean_dir = match / "cleaned"
     if not clean_dir.exists():
         print(f"ERROR: cleaned dir not found for state '{state}'")
         sys.exit(1)
