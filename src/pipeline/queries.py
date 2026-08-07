@@ -32,12 +32,19 @@ def find_db(state: str) -> Path:
             print("[!] state-level-cf.db not found. Run aggregate.py first.")
             sys.exit(1)
         return db_path
+    # Underscores and spaces are equivalent here, so a multi-word state resolves
+    # whether it's given as orc.py passes it ("new mexico") or as the module is
+    # named ("new_mexico") — see the same normalization in tabulate.py.
+    want    = state.lower().replace("_", " ")
     matches = [d for d in (PROJECT_ROOT / "data").iterdir()
-               if d.is_dir() and d.name.lower() == state.lower()]
+               if d.is_dir() and d.name.lower().replace("_", " ") == want]
     if not matches:
         print(f"[!] No data directory found for '{state}'")
         sys.exit(1)
-    db_path = matches[0] / "cleaned" / f"{state.lower()}.db"
+    # Name the db off the matched directory, not the argument — tabulate.py
+    # builds it as f"{state_dir.name.lower()}.db", so "new_mexico" would
+    # otherwise look for new_mexico.db next to the "new mexico.db" that exists.
+    db_path = matches[0] / "cleaned" / f"{matches[0].name.lower()}.db"
     if not db_path.exists():
         print(f"[!] No .db file at {db_path}. Run tabulate.py first.")
         sys.exit(1)
