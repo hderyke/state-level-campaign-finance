@@ -65,6 +65,8 @@ internal report id, not by year — the same situation as California's single
 bulk file. Horizontal flags do work, and scope which members get extracted.
 
 Raw files (data/Texas/raw/):
+  TEC_CF_CSV.zip    the downloaded archive itself, kept after extraction so
+                    members can be re-extracted without re-downloading
   contribs_##.csv   102 shards — Schedules A/C contributions
   expend_##.csv     13 shards  — Schedules F/G/H/I expenditures
   filers.csv        filer index (candidates + committees)
@@ -120,7 +122,7 @@ CODES_URL   = "https://www.ethics.state.tx.us/data/search/cf/CFS-Codes.txt"
 LEGACY_ARCHIVE_URL = "https://www.ethics.state.tx.us/data/search/cf/TEC_CF_CSV.zip"
 
 ARCHIVE_NAME = "TEC_CF_CSV.zip"
-ARCHIVE_PATH = PROJECT_ROOT / "data" / "Texas" / ARCHIVE_NAME
+ARCHIVE_PATH = RAW_DIR / ARCHIVE_NAME
 
 CHUNK = 1024 * 1024   # 1 MiB streaming chunks
 

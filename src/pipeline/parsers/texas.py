@@ -73,6 +73,7 @@ import gzip
 import re
 import sys
 import time
+from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 
@@ -500,7 +501,25 @@ def run():
         # registration with no end date is the current one; among ended ones the
         # latest start wins; ties fall back to file order, which is all the
         # information left.
+        #
+        # That still fails when TWO registrations are both open (no stop date)
+        # and disagree on filerTypeCd, and one of them has no start date either
+        # — blank sorts before any dated string, so the truly-current
+        # registration loses to a decades-old one whenever the old one happens
+        # to carry a start date and the current one doesn't. Confirmed case:
+        # filerIdent 00018964 is Bill White's account — an SCC/STATE_CHAIR
+        # registration from a 1996-2000 county-chair role (dated) beats the
+        # blank-start COH/GOVERNOR registration for his 2010 run, even though
+        # the governor run is what every one of its 50,000+ transactions
+        # belongs to. Its own cover.csv history is split the same way (12 SCC
+        # reports 1996-2000, 11 COH reports 2010-2012), so even a majority
+        # vote over cover.csv picks the stale identity by one report — it's
+        # the *most recent* filed report that reflects what the account
+        # currently is (see section 1b). 87 filerIdents hit this exact
+        # registration-level pattern. `all_regs` keeps every registration per
+        # fid so section 1b can re-resolve them against cover.csv.
         best_rank: dict[str, tuple] = {}
+        all_regs: dict[str, list[dict]] = defaultdict(list)
 
         with open(filers_path, newline="", encoding="utf-8", errors="replace") as f:
             for row_num, row in enumerate(csv.DictReader(f), start=2):
@@ -508,6 +527,13 @@ def run():
                 if not fid:
                     continue
                 n_rows += 1
+                all_regs[fid].append({
+                    "row_num": row_num,
+                    "ftyp":    clean(row.get("filerTypeCd")),
+                    "start":   clean(row.get("filerEffStartDt")),
+                    "stop":    clean(row.get("filerEffStopDt")),
+                    "row":     row,
+                })
 
                 rank = (0 if clean(row.get("filerEffStopDt")) else 1,
                         clean(row.get("filerEffStartDt")),
@@ -598,6 +624,22 @@ def run():
                  f"{len(committees):,} accounts, of which {len(candidates):,} are "
                  f"candidates ({time.perf_counter() - ft:.1f}s)")
 
+        # Flag the ambiguous-duplicate-registration cases described above, so
+        # section 1b can try to resolve them against cover.csv evidence.
+        suspect_fids = {
+            fid for fid, regs in all_regs.items()
+            if len(regs) >= 2
+            and not any(r["stop"] for r in regs)
+            and len({r["ftyp"] for r in regs}) >= 2
+            and any(not r["start"] for r in regs)
+            and any(r["start"] for r in regs)
+        }
+        if suspect_fids:
+            log.info(f"  {len(suspect_fids):,} filerIdent(s) carry ambiguous "
+                     f"duplicate registrations (open, conflicting filerTypeCd, "
+                     f"one undated) — will attempt resolution against "
+                     f"cover.csv below")
+
         # =================== 1b. Cover sheets ===================
         # cover.csv is one row per filed report, and it is the ONLY place in the
         # whole TEC archive that carries a party (`politicalPartyCd`), an actual
@@ -625,6 +667,15 @@ def run():
         cover_year: dict[str, str] = {}          # filerIdent -> election year
         latest_cover: dict[str, tuple] = {}      # filerIdent -> (rank, ey, office, district, holds_office)
         latest_party: dict[str, tuple] = {}      # filerIdent -> (rank, party)
+        # filerIdent -> (rank, filerTypeCd) of its most recent filed report,
+        # used below to resolve `suspect_fids` (section 1's ambiguous
+        # duplicates). A raw majority count across reports is the wrong
+        # signal here — Bill White's account (00018964) has 12 SCC cover
+        # sheets from a 1996-2000 county-chair role and only 11 COH ones from
+        # his 2010 governor run, so a vote count picks the stale identity by
+        # one report. What was filed *most recently* is what the account
+        # currently is, so this uses the same recency rank as latest_cover.
+        cover_latest_type: dict[str, tuple] = {}
         cover_rows = 0
 
         if cover_path.exists() and cover_path.stat().st_size > 0:
@@ -640,6 +691,11 @@ def run():
 
                     elect = parse_date(row.get("electionDt"))
                     rank  = (elect, parse_date(row.get("receivedDt")), row_num)
+
+                    if fid in suspect_fids:
+                        prev = cover_latest_type.get(fid)
+                        if prev is None or rank > prev[0]:
+                            cover_latest_type[fid] = (rank, clean(row.get("filerTypeCd")))
 
                     party = clean(row.get("politicalPartyCd"))
                     if party.upper() == "OTHER":
@@ -657,6 +713,76 @@ def run():
                         latest_cover[fid] = (rank, year_of(elect), office,
                                              district_of(row, pfx),
                                              bool(clean(row.get("filerHoldOfficeCd"))))
+
+            # ---- resolve ambiguous duplicate registrations (see section 1) ----
+            # For each flagged fid, trust whatever filerTypeCd its most
+            # recently filed report carries over the registration metadata's
+            # date tiebreak, and rebuild its candidates/committees row from
+            # the matching filers.csv registration. Runs before the
+            # party/office/district fill below so that fill applies to the
+            # corrected record, not the discarded one.
+            reg_corrected = 0
+            for fid in suspect_fids:
+                latest = cover_latest_type.get(fid)
+                if not latest:
+                    continue   # no cover.csv evidence for this fid — leave as is
+                winning_ftyp = latest[1]
+                if not winning_ftyp or winning_ftyp == filer_kind.get(fid):
+                    continue   # section 1's pick already agrees with the reports
+                match = next((r for r in all_regs[fid] if r["ftyp"] == winning_ftyp), None)
+                if match is None:
+                    continue   # cover.csv names a type filers.csv never registered
+                row, row_num = match["row"], match["row_num"]
+
+                name               = tec_name(row, "filer", row.get("filerName", ""))
+                office, dist, juri = office_of(row)
+                status             = clean(row.get("filerFilerpersStatusCd")).upper()
+                cmte_status        = clean(row.get("committeeStatusCd")).upper()
+
+                if winning_ftyp in CANDIDATE_FILER_TYPES:
+                    first, last = split_person(row, "filer", row.get("filerName", ""))
+                    candidates[fid] = {
+                        "state":           STATE,
+                        "candidate_name":  name,
+                        "candidate_first": first,
+                        "candidate_last":  last,
+                        "office":          office,
+                        "district":        dist,
+                        "jurisdiction":    juri,
+                        "party":           "",
+                        "election_year":   "",
+                        "incumbent":       "1" if status == "CURRENT_OFFICEHOLDER"
+                                           else ("0" if status == "NOT_OFFICEHOLDER" else ""),
+                        "state_filer_id":  fid,
+                        "raw_file":        filers_path.name,
+                        "row_num":         row_num,
+                    }
+                else:
+                    candidates.pop(fid, None)
+
+                committees[fid] = {
+                    "state":           STATE,
+                    "committee_name":  name,
+                    "committee_type":  FILER_TYPES.get(winning_ftyp, winning_ftyp),
+                    "election_year":   "",
+                    "candidate_name":  name if winning_ftyp in CANDIDATE_FILER_TYPES else "",
+                    "treasurer_name":  tec_name(row, "treas"),
+                    "city":            utils.clean_name(row.get("filerStreetCity")),
+                    "zip":             utils.clean_zip(clean(row.get("filerStreetPostalCode"))),
+                    "active":          ("1" if cmte_status == "ACTIVE" else
+                                        "0" if cmte_status in ("TERMINATED", "INACTIVE") else
+                                        "0" if clean(row.get("filerEffStopDt")) else "1"),
+                    "state_filer_id":  fid,
+                    "raw_file":        filers_path.name,
+                    "row_num":         row_num,
+                }
+                filer_kind[fid] = winning_ftyp
+                reg_corrected += 1
+
+            if reg_corrected:
+                log.info(f"  Resolved {reg_corrected:,} of {len(suspect_fids):,} "
+                         f"flagged filerIdent(s) to a different registration "
+                         f"using cover.csv report evidence")
 
             # ---- apply ----
             party_applied = 0
