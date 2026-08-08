@@ -292,18 +292,13 @@ def jurisdiction_of(row: dict) -> str:
             or clean(row.get("filer_type_desc")))
 
 
-def candidate_from_committee_name(name: str) -> str:
-    """Extract the candidate's name from a committee name, or '' if the name
-    doesn't follow one of the conventional patterns.
-
-    Handles the three shapes that dominate NY committee names:
-        "Friends Of Sheila Marcotte"   -> "SHEILA MARCOTTE"
-        "Elect Jennifer Stevenson"     -> "JENNIFER STEVENSON"
-        "Joe Lhota For Mayor Inc"      -> "JOE LHOTA"
-
-    The result is only a *candidate* for matching — run() accepts it solely if
-    it exactly matches a registered candidate name, so a bad extraction turns
-    into a blank link, never a wrong one."""
+def _strip_committee_wrapper(name: str) -> str:
+    """Shared stripping pass behind candidate_from_committee_name() and
+    candidate_surname_from_committee_name(): strip the conventional prefix/
+    suffix/"for <office>"/year wrapper off a committee name, with no
+    token-count constraint applied. Returns whatever's left, however many
+    tokens that is — callers decide what token counts they're willing to
+    trust."""
     n = utils.clean_name(name)
     if not n:
         return ""
@@ -335,7 +330,22 @@ def candidate_from_committee_name(name: str) -> str:
                 changed = True
                 break
 
-    n = utils.clean_name(n)
+    return utils.clean_name(n)
+
+
+def candidate_from_committee_name(name: str) -> str:
+    """Extract the candidate's name from a committee name, or '' if the name
+    doesn't follow one of the conventional patterns.
+
+    Handles the three shapes that dominate NY committee names:
+        "Friends Of Sheila Marcotte"   -> "SHEILA MARCOTTE"
+        "Elect Jennifer Stevenson"     -> "JENNIFER STEVENSON"
+        "Joe Lhota For Mayor Inc"      -> "JOE LHOTA"
+
+    The result is only a *candidate* for matching — run() accepts it solely if
+    it exactly matches a registered candidate name, so a bad extraction turns
+    into a blank link, never a wrong one."""
+    n = _strip_committee_wrapper(name)
     # A person's name is two or three tokens. One token is almost always a
     # party/organization fragment ("Democrats"), four or more is almost always
     # an org name that survived stripping.
@@ -343,6 +353,54 @@ def candidate_from_committee_name(name: str) -> str:
     if not (2 <= len(tokens) <= 3):
         return ""
     return n
+
+
+def candidate_surname_from_committee_name(name: str) -> str:
+    """Like candidate_from_committee_name(), but for the narrower case where
+    the wrapper-stripped name collapses to a single bare surname — "Bloomberg
+    For Mayor 2009 Inc." -> "Bloomberg", "Friends Of Pataki" -> "Pataki".
+    candidate_from_committee_name() deliberately refuses these (a bare
+    surname alone is too risky to treat as a full candidate name); this
+    returns the surname anyway, on the understanding that the caller only
+    accepts it via link_committees()'s surname_to_cand index, which is
+    itself only populated for surnames unique across the whole registry."""
+    n = _strip_committee_wrapper(name)
+    tokens = n.split()
+    return n if len(tokens) == 1 else ""
+
+
+def _middle_token(name: str) -> str:
+    """Return the normalized middle token ('M' for 'M'/'M.', 'WILLIAM' for
+    'William') if `name` is exactly 'FIRST X LAST', else ''. Covers both a
+    bare initial and a full middle name — the registry mixes both for the
+    same person across different registrations ("ANDREW M CUOMO" vs "ANDREW
+    M. CUOMO", or a candidate's full "ALEX WILLIAM BORES" vs a committee
+    name that only ever spells out "Alex Bores")."""
+    tokens = name.split()
+    if len(tokens) == 3:
+        return tokens[1].rstrip(".").upper()
+    return ""
+
+
+def _strip_middle_token(name: str) -> str:
+    """'FIRST X LAST' -> 'FIRST LAST' for any single middle token — initial
+    or full name; no-op otherwise.
+
+    NYSBOE's own registry is inconsistent about whether a filer's middle
+    name/initial is present at all, so a committee-name extraction like
+    "ANDREW CUOMO" (from "Andrew Cuomo For New York Inc.") or "ALEX BORES"
+    (from "Alex Bores For New York") can miss an exact match against the
+    registered "ANDREW M CUOMO" / "ALEX WILLIAM BORES" purely over a token
+    neither name is wrong to include or omit. Used only for a fallback
+    lookup in link_committees() below, never for the primary exact match —
+    and only accepted there when every registry variant sharing this
+    FIRST/LAST pair agrees on the same middle token (see name_loose_to_full
+    in run()), so two different people who happen to share a first+last
+    name (different middle names) are never conflated."""
+    tokens = name.split()
+    if len(tokens) == 3 and _middle_token(name):
+        return f"{tokens[0]} {tokens[2]}"
+    return name
 
 
 def contribution_subtype(row: dict) -> str:
@@ -529,6 +587,56 @@ def run():
         for fid, cand in candidates.items():
             name_to_cand.setdefault(cand["candidate_name"], []).append(fid)
 
+        # Secondary index for the same linkage pass: registry names collapsed
+        # by dropping a single middle token — initial or full middle name —
+        # so "ANDREW M CUOMO" / "ANDREW M. CUOMO" both resolve a committee
+        # guess of "ANDREW CUOMO", and "ALEX WILLIAM BORES" resolves a guess
+        # of "ALEX BORES" (committees never spell out a candidate's middle
+        # name). Grouped conservatively — a loose key only resolves if every
+        # full name collapsing to it agrees on the same middle token (i.e.
+        # they differ only by punctuation, like "M" vs "M.", or don't differ
+        # at all there). Two genuinely different people who happen to share a
+        # first+last name with a DIFFERENT middle token (e.g. three different
+        # "Michael ? Brown"s in the registry) land on the same loose key with
+        # disagreeing tokens and are left out — same "never guess wrong"
+        # guarantee as the exact-match index.
+        loose_groups: dict[str, list[str]] = {}
+        for full_name in name_to_cand:
+            loose = _strip_middle_token(full_name)
+            if loose != full_name:
+                loose_groups.setdefault(loose, []).append(full_name)
+        name_loose_to_full: dict[str, str] = {
+            loose: variants[0]
+            for loose, variants in loose_groups.items()
+            if len({_middle_token(v) for v in variants}) == 1
+        }
+
+        # Tertiary index for the same linkage pass: last name -> full
+        # candidate_name, for committees like "Bloomberg For Mayor 2009 Inc."
+        # / "Friends Of Pataki" that strip down to a single bare surname (see
+        # candidate_surname_from_committee_name()). Only kept when the
+        # surname is unique across the *entire* registry — the registry has
+        # six different Cuomos and five different Patersons, and guessing
+        # which one a bare surname means would risk exactly the wrong link
+        # this whole module is built to avoid. A unique surname carries no
+        # such risk regardless of how many filer_ids share it (repeat
+        # candidacies, not different people).
+        surname_to_cand: dict[str, str] = {}
+        surname_blocked: set[str] = set()
+        for full_name in name_to_cand:
+            tokens = full_name.split()
+            if not tokens:
+                continue
+            surname = tokens[-1].rstrip(".")
+            if surname in surname_blocked:
+                continue
+            prev = surname_to_cand.get(surname)
+            if prev is None:
+                surname_to_cand[surname] = full_name
+            elif prev != full_name:
+                del surname_to_cand[surname]
+                surname_blocked.add(surname)
+
         # =================== 2. Committee -> candidate linkage ===================
         # Only accept an extracted name that resolves to a registered candidate.
         def link_committees() -> tuple[int, int]:
@@ -539,10 +647,19 @@ def run():
             called again after the transaction pass picks up any committee
             that was missing from the registry.
 
-            Two acceptance tests, tried in that order:
+            Three acceptance tests, tried in that order:
 
               1. the extracted name is a registered NY candidate filer — the
-                 original rule, and the only one that can produce a person_id;
+                 original rule, and (along with 1b) the only one that can
+                 produce a person_id. Checked both as extracted and with its
+                 middle token stripped, against both the exact-name index
+                 and the token-collapsed index above, so a mismatch purely
+                 over a middle initial or middle name (on either side)
+                 doesn't lose the link;
+              1b. failing that, the committee name strips down to a single
+                 bare surname ("Bloomberg For Mayor 2009 Inc." -> "Bloomberg")
+                 and that surname is unique across the whole registry — see
+                 surname_to_cand above;
               2. failing that, the extracted name is someone NYSBOE's election
                  results database has on a ballot.
 
@@ -559,13 +676,27 @@ def run():
             for cmte in committees.values():
                 if cmte.get("candidate_name"):
                     continue
+
                 guess = candidate_from_committee_name(cmte["committee_name"])
-                if not guess:
-                    continue
-                if guess in name_to_cand:
-                    cmte["candidate_name"] = guess
+                resolved = ""
+                if guess:
+                    loose_guess = _strip_middle_token(guess)
+                    resolved = (
+                        guess if guess in name_to_cand else
+                        loose_guess if loose_guess in name_to_cand else
+                        (name_loose_to_full.get(guess)
+                         or name_loose_to_full.get(loose_guess) or "")
+                    )
+
+                if not resolved:
+                    surname = candidate_surname_from_committee_name(cmte["committee_name"])
+                    if surname:
+                        resolved = surname_to_cand.get(surname, "")
+
+                if resolved:
+                    cmte["candidate_name"] = resolved
                     n_registry += 1
-                elif enrich.available and name_keys(guess)[0] in enrich.known_names:
+                elif guess and enrich.available and name_keys(guess)[0] in enrich.known_names:
                     cmte["candidate_name"] = guess
                     n_results += 1
             return n_registry, n_results
