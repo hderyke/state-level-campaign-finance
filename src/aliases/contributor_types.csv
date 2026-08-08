@@ -385,3 +385,26 @@ NY,Other,,
 TX,INDIVIDUAL,Individual,
 TX,ENTITY,Organization,
 TX,OUT_OF_STATE_PAC,PAC,
+# == Wyoming ====================================================================,,,
+# contributor_type is authoritative for most rows: the scraper downloads a
+# supplementary export per "Source of Contribution" filter category from the
+# site's search form (12 values, matched back to contributions_all.csv rows by
+# full row tuple — see parsers/wyoming.py). These 12 rows map those raw labels.,,,
+WY,CANDIDATE COMMITTEE,Candidate Committee,
+WY,CORPORATION,Organization,
+WY,FEDERAL/OUT-OF-STATE PAC,PAC,
+WY,IMMEDIATE FAMILY / PERSONAL,Individual,
+WY,INDIVIDUAL,Individual,
+WY,NATIONAL PARTY,Party,
+WY,ORGANIZATION,Organization,
+WY,OUT OF STATE PARTY,Party,
+WY,WYOMING COUNTY PAC,PAC,
+WY,WYOMING COUNTY PARTY,Party,
+WY,WYOMING PAC,PAC,
+WY,WYOMING STATE PARTY,Party,
+# Rows the site itself never assigns a Source of Contribution category to
+# (ANONYMOUS / UN-ITEMIZED — no contributor name at all, ~5,300 of ~445,000
+# rows) fall back to a parser-side name-string heuristic. These two rows are
+# a pass-through for that fallback, not a source-provided taxonomy.,,,
+WY,Individual,Individual,
+WY,Organization,Organization,

@@ -350,3 +350,13 @@ TX,Direct Campaign Expenditure Filer,Independent Expenditure,,,,
 "# A legislative caucus is a caucus of sitting members, not a candidate, party",,,,,,
 "# or ballot committee — none of the canonical buckets fit, so Other.",,,,,,
 TX,Legislative Caucus,Other,,,,
+# == Wyoming ===================================================================,,,,,,
+# committee_type comes from the transaction export's Recipient Type/Filer Type
+# column (there is no separate registered-type field). Almost all of it is
+# CANDIDATE COMMITTEE/POLITICAL ACTION COMMITTEE/PARTY COMMITTEE — the single
+# ORGANIZATION row in the whole export suggests that "tab" is barely used on
+# the live site too.,,,,,,
+WY,CANDIDATE COMMITTEE,Candidate Committee,,,,
+WY,POLITICAL ACTION COMMITTEE,PAC,,,,
+WY,PARTY COMMITTEE,Party Committee,,,,
+WY,ORGANIZATION,Other,,,,

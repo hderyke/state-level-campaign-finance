@@ -390,3 +390,9 @@ TX,Unexpended Contributions Disbursement (Speaker),Monetary,,
 # and I is explicitly non-political spending out of political funds.,,,,
 TX,Purchase of Investments from Political Contributions,Other,,
 TX,Non-Political Expenditure from Political Contributions,Other,,
+# == Wyoming ====================================================================,,,,
+# The expenditure export has no type field distinct from the free-text Purpose
+# column (2,700+ distinct values, including "LOAN PAYMENT" and "CANDIDATE/
+# COMMITTEE CONTRIBUTION") — the parser writes a single uniform transaction_type
+# of "EXPENDITURE" for every row, so there's only one value to map here.,,,,
+WY,EXPENDITURE,Monetary,,

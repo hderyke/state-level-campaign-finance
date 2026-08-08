@@ -337,3 +337,12 @@ TX,In-Kind Contribution (Speaker),In-Kind
 "# what lets a donor ranking exclude it; without the filter, banks paying",,
 # interest outrank every actual donor in Texas. See docs/states/texas.md.,,
 TX,"Interest, Credit, Gain or Returned Contribution",Other
+# == Wyoming ====================================================================,,
+# transaction_type is the export's own "Contribution Type" column — one of five
+# controlled values. LOAN rows never reach contributions.csv (routed to
+# loans_debts.csv.gz by the parser), so LOAN doesn't need a row here.
+# ANONYMOUS contributions could be cash or in-kind — the source doesn't say
+# which, so left unmapped rather than guessed.,,
+WY,MONETARY,Monetary
+WY,UN-ITEMIZED,Monetary
+WY,IN-KIND,In-Kind
