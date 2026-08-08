@@ -123,17 +123,23 @@ matches this shape and would silently produce `incumbent = "0"` for every
 candidate with a General value instead of the real result — an earlier
 version of this parser did exactly that.
 
-No filer identifier on expenditure rows
-------------------------------------------
-Every expenditure export sampled has "Recipient Name" blank in 100% of rows
-— TNCAMP's expenditure schedule has no per-row field naming the committee
-that made the expenditure (only "Vendor Name", the payee). This is a genuine
-gap in the source, the same category as the missing filer IDs and loan
-schedules above: there is nothing here to resolve `committee_name` from, so
-it is written blank for every TN expenditure row rather than guessed at.
-`validate.py`'s `TIER1_OPTIONAL_FOR_NAME_HASH` downgrades this from a hard
-failure to a tier-2 warning for states (TN included) that already lack a
-filer ID.
+The filer name moves columns between transaction types
+----------------------------------------------------------
+TNCAMP's C&E export always includes both a "Recipient Name" and a
+"Candidate/PAC Name" column in the header, but only one of the two is ever
+populated on a given row, and which one depends on the transaction type:
+"Recipient Name" carries the filer for every contribution row (100% filled
+across the full raw corpus) and is 100% blank on every expenditure row;
+"Candidate/PAC Name" is the exact mirror — blank for contributions, 100%
+filled for expenditures. An earlier version of this parser resolved both
+spellings into one shared `recipient_name` alias and always preferred
+"Recipient Name" (first in the list), which happened to be right for
+contributions and silently picked the always-blank column for every
+expenditure row — writing `committee_name` blank on 100% of TN expenditures
+even though the real filer name was sitting in the next column over the
+whole time. `get_recipient()` reads both resolved columns and falls back
+rather than depending on alias order, so it works for either transaction
+type regardless of which column TNCAMP actually populated.
 
 Output (data/Tennessee/cleaned/):
   contributions.csv.gz, expenditures.csv.gz, loans_debts.csv.gz,
@@ -142,6 +148,7 @@ Output (data/Tennessee/cleaned/):
 
 import csv
 import gzip
+import io
 import re
 import sys
 import time
@@ -185,8 +192,19 @@ COLUMN_ALIASES: dict[str, list[str]] = {
     "date":            ["date", "transaction_date", "contribution_date", "expenditure_date"],
     "election_year":   ["election_year", "electionyear", "year"],
     "report_name":     ["report_name", "report", "reportname"],
-    "recipient_name":  ["recipient_name", "recipient", "candidate_pac_name",
-                        "candidate_or_pac", "candidate_pac"],
+    # TNCAMP's C&E export carries the filer's name under TWO different headers
+    # depending on transaction type, and both columns are always present in
+    # the header row regardless of which one a given file actually populates
+    # (confirmed against the full raw corpus: "Recipient Name" is 100% filled
+    # / "Candidate/PAC Name" 0% filled for every contribution row, and the
+    # exact reverse for every expenditure row). A single shared alias list
+    # resolved these to one canonical field and always preferred whichever
+    # spelling came first ("recipient_name"), which happened to be correct for
+    # contributions but silently picked the always-blank column for
+    # expenditures — see get_recipient() below, which reads both and falls
+    # back rather than relying on alias order.
+    "recipient_name":     ["recipient_name", "recipient"],
+    "candidate_pac_name": ["candidate_pac_name", "candidate_or_pac", "candidate_pac"],
     "description":     ["description", "desc", "explanation"],
     # contributions
     "contributor_name":       ["contributor_name", "contributor", "from_name", "name"],
@@ -290,6 +308,18 @@ def get(row: list, hmap: dict, field: str) -> str:
     if idx is None or idx >= len(row):
         return ""
     return clean(row[idx])
+
+
+def get_recipient(row: list, hmap: dict) -> str:
+    """The filer name a transaction row is attributed to.
+
+    TNCAMP populates this under 'Recipient Name' for contributions and under
+    'Candidate/PAC Name' for expenditures — never both on the same row (see
+    the COLUMN_ALIASES note above). Reading both and taking whichever is
+    non-blank handles either transaction type without guessing from the
+    filename."""
+    return (get(row, hmap, "recipient_name")
+            or get(row, hmap, "candidate_pac_name"))
 
 
 @lru_cache(maxsize=None)
@@ -542,6 +572,28 @@ def resolve_recipient(raw: str, candidates: dict) -> tuple[str, str, bool]:
     return "", utils.clean_name(raw), False
 
 
+def open_raw_csv(path: Path) -> csv.reader:
+    """csv.reader over a raw TNCAMP export, with stray embedded NUL bytes
+    stripped first.
+
+    A handful of raw files (2 found across the full TN corpus, both in
+    expenditures) carry a single embedded NUL byte in the middle of the
+    Amount field where a decimal point would be expected — e.g.
+    '"$1,693\\x0038"' where '"$1,693.38"' would be a normal-looking value.
+    Almost certainly a byte-level glitch from the scrape rather than
+    anything TNCAMP served intentionally. Python's `csv` module refuses to
+    parse *any* line containing a NUL byte, so left unhandled this crashes
+    the whole parse on the first such file, not just the one bad row.
+    Stripping the NUL (rather than guessing it was meant to be '.') leaves
+    the Amount field as unparseable digits mashed together, which
+    parse_amount() then correctly rejects — the one affected row is dropped
+    the same way any other row with an unparseable amount already is,
+    instead of the parser force-fitting a guess over corrupted input."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        content = f.read().replace("\x00", "")
+    return csv.reader(io.StringIO(content))
+
+
 def raw_files(*patterns: str) -> list[Path]:
     """Non-empty raw files matching any of these globs, sorted by name (so page
     order and year order are both preserved: contributions_2010_p001, _p002,
@@ -651,10 +703,26 @@ def run():
         """Register/enrich a candidate keyed by their normalized forward name.
 
         Returns the normalized name (the join key used everywhere else), or ''
-        for a blank input. Enrichment is first-non-blank-wins: the roster files
-        are processed before the transaction files, so roster values (office,
-        district, party) are already in place and transaction rows only ever
-        fill gaps."""
+        for a blank input.
+
+        Enrichment tracks the most recent cycle seen, not the first. TN's
+        roster re-registers the same person under a fresh row every time they
+        run for anything, and people run for different offices across a
+        career far more often than they change their name — e.g. Jerri Green
+        filed for TN House District 83 in 2020 (lost) and for Governor in
+        2026. If office/district/party were first-non-blank-wins the way an
+        earlier version of this function had them, a 2020 State House run
+        would permanently pin office="House of Representatives" on a name
+        that's since become a sitting statewide candidate, no matter how
+        recent the transactions attributed to that name are. So: when an
+        incoming registration's election_year is the same as or newer than
+        what's on file, its office/district/party/incumbent replace the
+        stored ones outright (blank incoming values still fall back to
+        what's already there, rather than clearing a good value). When it's
+        for an *older* cycle than what's already on file, the old
+        first-non-blank-wins fill behavior applies instead, so an older
+        record can still patch a gap the newest one left blank without ever
+        overwriting it."""
         cname = display_name(name)
         if not cname:
             return ""
@@ -678,15 +746,20 @@ def run():
             }
             candidates[cname] = cand
         else:
-            _fill(cand, "office",    clean(office))
-            _fill(cand, "district",  clean(district))
-            _fill(cand, "party",     clean(party))
-            _fill(cand, "incumbent", clean(incumbent))
-            # election_year tracks the latest cycle seen, not the first.
             new_y = parse_year(election_year)
             cur_y = cand.get("election_year", "")
-            if new_y and (not cur_y or int(new_y) > int(cur_y)):
+            is_current_or_newer = bool(new_y) and (not cur_y or int(new_y) >= int(cur_y))
+            if is_current_or_newer:
+                cand["office"]     = clean(office)     or cand.get("office", "")
+                cand["district"]   = clean(district)   or cand.get("district", "")
+                cand["party"]      = clean(party)      or cand.get("party", "")
+                cand["incumbent"]  = clean(incumbent)  or cand.get("incumbent", "")
                 cand["election_year"] = new_y
+            else:
+                _fill(cand, "office",    clean(office))
+                _fill(cand, "district",  clean(district))
+                _fill(cand, "party",     clean(party))
+                _fill(cand, "incumbent", clean(incumbent))
         return cname
 
     def register_committee(name: str, committee_type: str = "",
@@ -806,17 +879,16 @@ def run():
         # turned out to be.
         for path in raw_files(*CANDIDATE_GLOBS):
             ft, count = time.perf_counter(), 0
-            with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.reader(f)
-                header = next(reader, None)
-                hmap   = build_header_map(header)
-                if "candidates" not in logged_headers:
-                    log.info(f"  candidate roster headers resolved: "
-                             f"{sorted(hmap)} (from {header})")
-                    logged_headers.add("candidates")
-                for row_num, row in enumerate(reader, start=2):
-                    if process_roster_row(row, hmap, path, row_num):
-                        count += 1
+            reader = open_raw_csv(path)
+            header = next(reader, None)
+            hmap   = build_header_map(header)
+            if "candidates" not in logged_headers:
+                log.info(f"  candidate roster headers resolved: "
+                         f"{sorted(hmap)} (from {header})")
+                logged_headers.add("candidates")
+            for row_num, row in enumerate(reader, start=2):
+                if process_roster_row(row, hmap, path, row_num):
+                    count += 1
             log.file_parsed(path.name, "candidates", count,
                             duration_s=time.perf_counter() - ft,
                             bytes=path.stat().st_size)
@@ -824,17 +896,16 @@ def run():
         # =================== 2. PAC roster ===================
         for path in raw_files("pacs_p*.csv"):
             ft, count = time.perf_counter(), 0
-            with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.reader(f)
-                header = next(reader, None)
-                hmap   = build_header_map(header)
-                if "pacs" not in logged_headers:
-                    log.info(f"  PAC roster headers resolved: "
-                             f"{sorted(hmap)} (from {header})")
-                    logged_headers.add("pacs")
-                for row_num, row in enumerate(reader, start=2):
-                    if process_roster_row(row, hmap, path, row_num):
-                        count += 1
+            reader = open_raw_csv(path)
+            header = next(reader, None)
+            hmap   = build_header_map(header)
+            if "pacs" not in logged_headers:
+                log.info(f"  PAC roster headers resolved: "
+                         f"{sorted(hmap)} (from {header})")
+                logged_headers.add("pacs")
+            for row_num, row in enumerate(reader, start=2):
+                if process_roster_row(row, hmap, path, row_num):
+                    count += 1
             log.file_parsed(path.name, "committees", count,
                             duration_s=time.perf_counter() - ft,
                             bytes=path.stat().st_size)
@@ -860,77 +931,76 @@ def run():
         for path in raw_files("contributions_*_p*.csv"):
             ft, count = time.perf_counter(), 0
             file_year = year_from_filename(path)
-            with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.reader(f)
-                header = next(reader, None)
-                hmap   = build_header_map(header)
-                if "contributions" not in logged_headers:
-                    log.info(f"  contribution headers resolved: "
-                             f"{sorted(hmap)} (from {header})")
-                    logged_headers.add("contributions")
+            reader = open_raw_csv(path)
+            header = next(reader, None)
+            hmap   = build_header_map(header)
+            if "contributions" not in logged_headers:
+                log.info(f"  contribution headers resolved: "
+                         f"{sorted(hmap)} (from {header})")
+                logged_headers.add("contributions")
 
-                for row_num, row in enumerate(reader, start=2):
-                    amount = parse_amount(get(row, hmap, "amount"))
-                    if not amount:
-                        continue
+            for row_num, row in enumerate(reader, start=2):
+                amount = parse_amount(get(row, hmap, "amount"))
+                if not amount:
+                    continue
 
-                    recipient = get(row, hmap, "recipient_name")
-                    # The election year column is the authoritative one; the
-                    # filename year is the search criterion and is used only
-                    # when the column is missing or blank.
-                    ey = parse_year(get(row, hmap, "election_year")) or file_year
+                recipient = get_recipient(row, hmap)
+                # The election year column is the authoritative one; the
+                # filename year is the search criterion and is used only
+                # when the column is missing or blank.
+                ey = parse_year(get(row, hmap, "election_year")) or file_year
 
-                    _street, city, st, zipc = split_address(
-                        get(row, hmap, "contributor_address"))
+                _street, city, st, zipc = split_address(
+                    get(row, hmap, "contributor_address"))
 
-                    # The recipient of a TN contribution is a candidate or a
-                    # PAC and the export doesn't say which. Resolve against the
-                    # rosters loaded above: a name already known as a candidate
-                    # is one, anything else is treated as a committee.
-                    rec_name, cmte_name, is_candidate = resolve_recipient(
-                        recipient, candidates)
-                    if not is_candidate and cmte_name not in committees:
-                        # Recipient appears in the transactions but not in
-                        # either roster — register it as a committee so the
-                        # money is still attributable to a named entity.
-                        register_committee(recipient, election_year=ey,
-                                           raw_file=path.name, row_num=row_num)
+                # The recipient of a TN contribution is a candidate or a
+                # PAC and the export doesn't say which. Resolve against the
+                # rosters loaded above: a name already known as a candidate
+                # is one, anything else is treated as a committee.
+                rec_name, cmte_name, is_candidate = resolve_recipient(
+                    recipient, candidates)
+                if not is_candidate and cmte_name not in committees:
+                    # Recipient appears in the transactions but not in
+                    # either roster — register it as a committee so the
+                    # money is still attributable to a named entity.
+                    register_committee(recipient, election_year=ey,
+                                       raw_file=path.name, row_num=row_num)
 
-                    # A committee recipient inherits the candidate it was
-                    # linked to via the roster's Committee Affiliation column,
-                    # so office resolves the same way whether the money went to
-                    # the candidate directly or to their committee.
-                    cand_name = (rec_name if is_candidate else
-                                 committees.get(cmte_name, {}).get("candidate_name", ""))
-                    office    = candidates.get(cand_name, {}).get("office", "")
+                # A committee recipient inherits the candidate it was
+                # linked to via the roster's Committee Affiliation column,
+                # so office resolves the same way whether the money went to
+                # the candidate directly or to their committee.
+                cand_name = (rec_name if is_candidate else
+                             committees.get(cmte_name, {}).get("candidate_name", ""))
+                office    = candidates.get(cand_name, {}).get("office", "")
 
-                    cont_w.writerow({
-                        "state":             STATE,
-                        "committee_name":    cmte_name,
-                        "amount":            amount,
-                        "date":              parse_date(get(row, hmap, "date")),
-                        # "Type" is TN's contribution type (monetary / in-kind /
-                        # etc.); "Adjustment" marks corrections and amendments
-                        # and is appended so it isn't lost — see
-                        # src/aliases/transaction_categories.csv for the mapping.
-                        "transaction_type":  _txn_type(get(row, hmap, "type"),
-                                                       get(row, hmap, "adjustment")),
-                        "contributor_name":  display_name(get(row, hmap, "contributor_name")),
-                        "contributor_type":  "",   # not published by TNCAMP
-                        "contributor_city":  utils.clean_name(city),
-                        "contributor_state": st,
-                        "contributor_zip":   utils.clean_zip(zipc),
-                        "employer":          utils.clean_name(get(row, hmap, "contributor_employer")),
-                        "occupation":        utils.clean_name(get(row, hmap, "contributor_occupation")),
-                        "candidate_name":    cand_name,
-                        "office":            office,
-                        "election_year":     ey,
-                        "amended":           _amended(get(row, hmap, "adjustment")),
-                        "filing_id":         get(row, hmap, "report_name"),
-                        "raw_file":          path.name,
-                        "row_num":           row_num,
-                    })
-                    count += 1
+                cont_w.writerow({
+                    "state":             STATE,
+                    "committee_name":    cmte_name,
+                    "amount":            amount,
+                    "date":              parse_date(get(row, hmap, "date")),
+                    # "Type" is TN's contribution type (monetary / in-kind /
+                    # etc.); "Adjustment" marks corrections and amendments
+                    # and is appended so it isn't lost — see
+                    # src/aliases/transaction_categories.csv for the mapping.
+                    "transaction_type":  _txn_type(get(row, hmap, "type"),
+                                                   get(row, hmap, "adjustment")),
+                    "contributor_name":  display_name(get(row, hmap, "contributor_name")),
+                    "contributor_type":  "",   # not published by TNCAMP
+                    "contributor_city":  utils.clean_name(city),
+                    "contributor_state": st,
+                    "contributor_zip":   utils.clean_zip(zipc),
+                    "employer":          utils.clean_name(get(row, hmap, "contributor_employer")),
+                    "occupation":        utils.clean_name(get(row, hmap, "contributor_occupation")),
+                    "candidate_name":    cand_name,
+                    "office":            office,
+                    "election_year":     ey,
+                    "amended":           _amended(get(row, hmap, "adjustment")),
+                    "filing_id":         get(row, hmap, "report_name"),
+                    "raw_file":          path.name,
+                    "row_num":           row_num,
+                })
+                count += 1
             log.file_parsed(path.name, "contributions", count,
                             duration_s=time.perf_counter() - ft,
                             bytes=path.stat().st_size)
@@ -940,57 +1010,56 @@ def run():
         for path in raw_files("expenditures_*_p*.csv"):
             ft, count = time.perf_counter(), 0
             file_year = year_from_filename(path)
-            with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.reader(f)
-                header = next(reader, None)
-                hmap   = build_header_map(header)
-                if "expenditures" not in logged_headers:
-                    log.info(f"  expenditure headers resolved: "
-                             f"{sorted(hmap)} (from {header})")
-                    logged_headers.add("expenditures")
+            reader = open_raw_csv(path)
+            header = next(reader, None)
+            hmap   = build_header_map(header)
+            if "expenditures" not in logged_headers:
+                log.info(f"  expenditure headers resolved: "
+                         f"{sorted(hmap)} (from {header})")
+                logged_headers.add("expenditures")
 
-                for row_num, row in enumerate(reader, start=2):
-                    amount = parse_amount(get(row, hmap, "amount"))
-                    if not amount:
-                        continue
+            for row_num, row in enumerate(reader, start=2):
+                amount = parse_amount(get(row, hmap, "amount"))
+                if not amount:
+                    continue
 
-                    recipient = get(row, hmap, "recipient_name")
-                    ey = parse_year(get(row, hmap, "election_year")) or file_year
-                    _street, city, st, zipc = split_address(
-                        get(row, hmap, "vendor_address"))
+                recipient = get_recipient(row, hmap)
+                ey = parse_year(get(row, hmap, "election_year")) or file_year
+                _street, city, st, zipc = split_address(
+                    get(row, hmap, "vendor_address"))
 
-                    rec_name, cmte_name, is_candidate = resolve_recipient(
-                        recipient, candidates)
-                    if not is_candidate and cmte_name not in committees:
-                        register_committee(recipient, election_year=ey,
-                                           raw_file=path.name, row_num=row_num)
+                rec_name, cmte_name, is_candidate = resolve_recipient(
+                    recipient, candidates)
+                if not is_candidate and cmte_name not in committees:
+                    register_committee(recipient, election_year=ey,
+                                       raw_file=path.name, row_num=row_num)
 
-                    cand_name = (rec_name if is_candidate else
-                                 committees.get(cmte_name, {}).get("candidate_name", ""))
-                    office    = candidates.get(cand_name, {}).get("office", "")
+                cand_name = (rec_name if is_candidate else
+                             committees.get(cmte_name, {}).get("candidate_name", ""))
+                office    = candidates.get(cand_name, {}).get("office", "")
 
-                    expn_w.writerow({
-                        "state":            STATE,
-                        "committee_name":   cmte_name,
-                        "amount":           amount,
-                        "date":             parse_date(get(row, hmap, "date")),
-                        "transaction_type": _txn_type(get(row, hmap, "type"),
-                                                      get(row, hmap, "adjustment")),
-                        "payee_name":       display_name(get(row, hmap, "vendor_name")),
-                        "purpose":          get(row, hmap, "purpose") or get(row, hmap, "description"),
-                        "category":         "",   # TN has no expenditure category code
-                        "payee_city":       utils.clean_name(city),
-                        "payee_state":      st,
-                        "payee_zip":        utils.clean_zip(zipc),
-                        "candidate_name":   cand_name,
-                        "office":           office,
-                        "election_year":    ey,
-                        "amended":          _amended(get(row, hmap, "adjustment")),
-                        "filing_id":        get(row, hmap, "report_name"),
-                        "raw_file":         path.name,
-                        "row_num":          row_num,
-                    })
-                    count += 1
+                expn_w.writerow({
+                    "state":            STATE,
+                    "committee_name":   cmte_name,
+                    "amount":           amount,
+                    "date":             parse_date(get(row, hmap, "date")),
+                    "transaction_type": _txn_type(get(row, hmap, "type"),
+                                                  get(row, hmap, "adjustment")),
+                    "payee_name":       display_name(get(row, hmap, "vendor_name")),
+                    "purpose":          get(row, hmap, "purpose") or get(row, hmap, "description"),
+                    "category":         "",   # TN has no expenditure category code
+                    "payee_city":       utils.clean_name(city),
+                    "payee_state":      st,
+                    "payee_zip":        utils.clean_zip(zipc),
+                    "candidate_name":   cand_name,
+                    "office":           office,
+                    "election_year":    ey,
+                    "amended":          _amended(get(row, hmap, "adjustment")),
+                    "filing_id":        get(row, hmap, "report_name"),
+                    "raw_file":         path.name,
+                    "row_num":          row_num,
+                })
+                count += 1
             log.file_parsed(path.name, "expenditures", count,
                             duration_s=time.perf_counter() - ft,
                             bytes=path.stat().st_size)

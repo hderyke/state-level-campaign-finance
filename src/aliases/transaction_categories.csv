@@ -288,12 +288,14 @@ WA,In-kind,In-Kind
 # == Tennessee ===================================================================,,
 "# TN's contributions.transaction_type is TNCAMP's Type column, with the",,
 # Adjustment column appended when it's set (see parsers/tennessee.py _txn_type).,,
-# The original R port this state was inherited from asserted Type has exactly 2,,
-"# distinct values, but the export's actual vocabulary could not be confirmed",,
-"# from a live pull while this was written, so no rows are guessed here —",,
-"# an unmapped value yields a NULL category, which the contributing guide",,
-# prefers over a wrong one. Fill this in from the first real scrape:,,
-#   zcat data/Tennessee/cleaned/contributions.csv.gz | csvcut -c transaction_type | sort -u,,
+"# Confirmed against the full 2026-08-08 scrape (3.17M rows) -- exactly the 2",,
+"# distinct Type values the original R port asserted, plus each one's",,
+"# amended-row variant (Adjustment != N/blank appended as — Y).",,
+# No other values observed; an unmapped value still yields a NULL category,,
+# rather than a guess if TNCAMP's Type vocabulary ever expands.,,
+TN,Monetary,Monetary
+TN,Monetary — Y,Monetary
+TN,InKind,In-Kind
 # == New York ====================================================================,,
 # NY's contributions.transaction_type is the schedule label from,,
 "# parsers/new_york.py's SCHEDULES map, with a bounded sub-type appended for",,

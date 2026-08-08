@@ -94,16 +94,37 @@ REQUIRED_COLS = {
 # for states in STATES_WITHOUT_FILER_ID — these are columns where REQUIRED_COLS
 # demands a fill rate that the source data structurally can't provide for those
 # states (no numeric filer ID anywhere in the source, period).
+#
+# NOTE: this used to also carry "expenditures": {"committee_name"} for TN,
+# on the theory that TN's expenditure export had no per-row filer identifier
+# at all. That turned out to be a parsers/tennessee.py bug, not a source gap:
+# the filer name is 100% populated under a *different* header
+# ("Candidate/PAC Name") than the one the parser was reading
+# ("Recipient Name", 0% filled for expenditures) — see get_recipient() in
+# that parser. Fixed 2026-08-08; committee_name is now 100% filled for TN
+# expenditures, and AK/KS/KY (the other name_hash states) were already 100%
+# filled, so this entry is gone rather than left as dead code.
 TIER1_OPTIONAL_FOR_NAME_HASH = {
     "candidates": {"state_filer_id"},
     "committees": {"state_filer_id"},
-    # TN's public expenditure export carries no per-row filer/spender
-    # identifier at all — only the payee ("Vendor Name") side is populated,
-    # "Recipient Name" (what committee_name is normally read from) is blank
-    # in 100% of observed rows. There's nothing in the source to fill
-    # committee_name from, so this state fails REQUIRED_COLS's tier-1 check
-    # on every run unless downgraded the same way state_filer_id is above.
-    "expenditures": {"committee_name"},
+}
+
+# Per-state, per-table columns downgraded from a tier-1 failure to a tier-2
+# warning for a gap specific to *that* state's source data — as opposed to
+# TIER1_OPTIONAL_FOR_NAME_HASH above, which applies to every state lacking a
+# filer ID. Checked independently of `lacks_filer_id` so it never loosens the
+# check for other states in that class.
+TIER1_OPTIONAL_BY_STATE = {
+    "tennessee": {
+        # TNCAMP's expenditure export has no Date value at all for 2000-2002
+        # (100% blank) and 2003 (98.9% blank), tapering from ~21% blank in
+        # 2004 down to under 3% by 2007 and near-zero after. Confirmed against
+        # the raw CSVs directly — the Date column itself is empty for these
+        # rows, not a parser/header-alias miss. Contributions from the same
+        # years are dated fine (0.1% blank overall), so this is specific to
+        # TN's expenditure schedule. See docs/states/tennessee.md.
+        "expenditures": {"date"},
+    },
 }
 
 # Tables that have amount fields
@@ -618,6 +639,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
             if col == "state":
                 continue
             fill_errors = check_required_filled(table, rows, col)
+            state_optional_cols = TIER1_OPTIONAL_BY_STATE.get(state_lower, {})
             if (fill_errors and lacks_filer_id
                     and col in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set())):
                 # Documented structural gap — this state's source data has no
@@ -627,6 +649,16 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
                         "table":   table,
                         "warning": f"{e} — expected, this state's source data has "
                                    f"no filer ID (see docs/states/{_state_slug(state_lower)}.md)",
+                    })
+            elif fill_errors and col in state_optional_cols.get(table, set()):
+                # Documented structural gap specific to this state alone (see
+                # TIER1_OPTIONAL_BY_STATE) — downgrade to a tier-2 warning
+                # without affecting any other state.
+                for e in fill_errors:
+                    tier2_warnings.append({
+                        "table":   table,
+                        "warning": f"{e} — expected, documented source gap for "
+                                   f"this state (see docs/states/{_state_slug(state_lower)}.md)",
                     })
             else:
                 checks.append((f"fill:{col}", fill_errors))
@@ -725,18 +757,27 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
         else:
             print(f"  {table.capitalize()} ({len(rows):,} rows)")
         any_downgraded = False
+        any_state_downgraded = False
+        state_optional_cols = TIER1_OPTIONAL_BY_STATE.get(state_lower, {})
         for field in required:
-            rate       = rates[field]
-            downgraded = (lacks_filer_id and rate < TIER1_PASS_RATE * 100
-                          and field in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set()))
+            rate            = rates[field]
+            downgraded      = (lacks_filer_id and rate < TIER1_PASS_RATE * 100
+                                and field in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set()))
+            state_downgraded = (rate < TIER1_PASS_RATE * 100
+                                 and field in state_optional_cols.get(table, set()))
             if downgraded:
                 ok = "↓"
                 any_downgraded = True
+            elif state_downgraded:
+                ok = "◇"
+                any_state_downgraded = True
             else:
                 ok = "✓" if rate >= TIER1_PASS_RATE * 100 else "✗"
             print(f"    {field:<25} {_bar(rate)}  {rate:5.1f}%  {ok}")
         if any_downgraded:
             print(f"    ↓ = tier-2 (no filer ID in source data; see docs/states/{_state_slug(state_lower)}.md)")
+        if any_state_downgraded:
+            print(f"    ◇ = tier-2 (documented source gap for this state; see docs/states/{_state_slug(state_lower)}.md)")
         print()
 
 
