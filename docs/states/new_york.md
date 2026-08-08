@@ -128,7 +128,7 @@ Anything ambiguous, or extracting to something no candidate is registered under,
 
 ## Party enrichment overlay
 
-`src/pipeline/scrapers/new_york_party.py` → `src/pipeline/parsers/new_york_enrich.py`
+`src/pipeline/scrapers/new_york.py --party` → the enrichment section of `src/pipeline/parsers/new_york.py`
 
 NYSBOE's campaign-finance datasets carry no party column, so `candidates.party` can only be filled by joining something else in. This overlay does that. It is **entirely optional**: if its raw files are absent the parser logs a warning and writes the same blanks it always did.
 
@@ -217,10 +217,10 @@ So party fill on the 36,486-row candidates table is capped structurally well bel
 ### Running it
 
 ```bash
-python src/pipeline/scrapers/new_york_party.py                 # both sources
-python src/pipeline/scrapers/new_york_party.py --openstates    # just Open States (fast)
-python src/pipeline/scrapers/new_york_party.py --force-walk --start-id 4000 --end-id 6000
-python src/pipeline/parsers/new_york.py                        # picks the overlay up automatically
+python src/pipeline/scrapers/new_york.py --party                 # both sources
+python src/pipeline/scrapers/new_york.py --party --openstates    # just Open States (fast)
+python src/pipeline/scrapers/new_york.py --party --force-walk --start-id 4000 --end-id 6000
+python src/pipeline/parsers/new_york.py                          # picks the overlay up automatically
 ```
 
 Writes `data/New York/raw/ElectionStats_Contests.csv` and `OpenStates_People.csv`, and records both in `data/New York/manifest.csv` under relation types `electionstats` / `openstates`.

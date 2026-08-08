@@ -55,9 +55,9 @@ CANDIDATES = [
                         # outside the state's own disclosure data rather than read
                         # off it. Blank means party came from the state (or is absent).
                         # Written by NY, whose board publishes no party at all (see
-                        # parsers/new_york_enrich.py), and by TX, as a fallback for
-                        # whatever TEC's own cover.csv leaves blank (see
-                        # parsers/texas_enrich.py).
+                        # the enrichment section in parsers/new_york.py), and by TX,
+                        # as a fallback for whatever TEC's own cover.csv leaves blank
+                        # (see the enrichment section in parsers/texas.py).
     "match_confidence", # sparse — how strongly the external record was tied to this
                         # candidate ("exact" | "high"). Blank wherever party_source is.
     "election_year",
