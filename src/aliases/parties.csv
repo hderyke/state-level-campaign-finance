@@ -74,3 +74,18 @@ OTH,OTHER
 OTHER,OTHER
 WRITE-IN,WRITE-IN
 WRITE IN,WRITE-IN
+# --- Vermont ballot lines ---
+# Vermont runs fusion voting like New York, but the archive spells the joined
+# lines inconsistently ("Democratic/Progressive", "Dem/Prog",
+# "Progressive/Democratic"). parsers/vermont.py splits on "/" and canonicalises
+# each side through this table, then rejoins pipe-delimited — so all three
+# spellings above collapse to DEMOCRAT|PROGRESSIVE. Only the COMPONENT labels
+# need to be listed here, not the combinations.
+PROG,PROGRESSIVE
+PROGRESSIVE,PROGRESSIVE
+VERMONT PROGRESSIVE,PROGRESSIVE
+LBRT,LIBERTARIAN
+LIBERTY UNION,LIBERTY UNION
+PEACE AND JUSTICE,PEACE AND JUSTICE
+GREEN MOUNTAIN,GREEN MOUNTAIN
+UNAFFILIATED,INDEPENDENT

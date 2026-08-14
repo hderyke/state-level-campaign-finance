@@ -1,165 +1,165 @@
 """
-parsers/kansas.py — Parse Kansas KPDC R&E PDFs into canonical cleaned CSVs.
+parsers/kansas.py — Parse scrapers/kansas.py's scraped CSVs into the
+canonical cleaned CSVs.
 
-Input:  data/Kansas/raw/
-    *.pdf         — Receipts & Expenditures report PDFs (one per candidate per period)
-    manifest.csv  — Downloaded file list with office/cycle/district/candidate metadata
+This replaces the old PDF-based parser (kept for reference as
+parsers/kansas_pdf_legacy.py) now that scrapers/kansas.py extracts
+structured data directly from the KS SOS CFR Examiner instead of
+downloading PDFs.
+
+Input:  data/Kansas/raw/ (written by scrapers/kansas.py)
+    candidates_summary.csv        — one row per candidate filing
+    schedule_a_contributions.csv  — itemized contributions (incl. loans)
+    schedule_b_inkind.csv         — itemized in-kind contributions
+    schedule_c_expenditures.csv   — itemized expenditures
+    schedule_d_other.csv          — other transactions; NOT read (see below)
+    data/Kansas/manifest.csv      — read only to log coverage vs. the scrape
 
 Output: data/Kansas/cleaned/
-    contributions.csv.gz, expenditures.csv.gz,
+    contributions.csv.gz, expenditures.csv.gz, loans_debts.csv.gz,
     candidates.csv.gz, committees.csv.gz
 
-Each R&E PDF contains:
-    Page 1  — Summary (candidate name, office, district, period dates, totals)
-    Sch A   — Contributions and Other Receipts (date, contributor, type, amount)
-    Sch B   — In-Kind Contributions (treated as contributions, transaction_type="In-Kind")
-    Sch C   — Expenditures and Other Disbursements (date, payee, purpose, amount)
-    Sch D   — Other Transactions / Loans (skipped)
+Joining schedule rows to their candidate:
+    Every row in every one of the scraper's output files carries a
+    candidate_uid column: "office_group|cycle_label|office_sought|
+    district_number|name|original_date|amendment_date" (identical to the
+    manifest's candidate_key). That's the join key used here — NOT the
+    "candidate" name-text column, which can collide across different
+    cycles/offices for two people who happen to share a name.
 
-id_model = "name_hash"
-    Kansas has no numeric filer ID in its source data — candidates are identified
-    only by name on the HTML index and in the PDF header.  person_id is derived
-    from MD5(state + normalized candidate_name), same model as Alaska and Idaho.
+    office_group and election_year are decoded straight out of candidate_uid
+    rather than joining against the manifest, which is only read to log how
+    many scraped candidates made it into this parse.
 
-Party: not available in source.
+Three ways the same money arrives more than once — all collapsed here:
 
-Column layout (from pdfplumber word-coordinate analysis):
-    Schedule A (contributions):
-        Date       x < 100
-        Name/Addr  100 ≤ x < 235
-        Pay Type   235 ≤ x < 360
-        Occupation 360 ≤ x < 475
-        Amount     x ≥ 475
+  1. Re-scrapes. The scraper appends to its CSVs and deliberately re-scrapes
+     cycles whose year is >= the current year (to pick up amendments), so a
+     filing scraped k times appears k times in every file. 6% of contribution
+     rows / $21M in the 2026-08 data. See _dedup_rescrapes.
 
-    Schedule C (expenditures):
-        Date       x < 100
-        Name/Addr  100 ≤ x < 290
-        Purpose    290 ≤ x < 490
-        Amount     x ≥ 490
+  2. Amendments. An amendment is a **separate row** in the results grid, not a
+     flag on the original, and it restates the entire reporting period. 1,707
+     of 5,165 periods had been filed more than once (up to 12 times).
 
-Parsing strategy:
-    For each page belonging to a schedule, extract all words with (x0, top, text)
-    from pdfplumber.  Group words into logical rows by clustering on y-coordinate
-    (words within ~4pt of each other share a row).  Identify transaction-anchor
-    rows by a date-pattern word (MM/DD/YY) appearing in the Date column.  For
-    each anchor, collect all words in Name/Addr and other columns between this
-    anchor and the next, assemble the address block, and extract the amount.
+  3. Overlapping search windows. The grid returns a filing under every search
+     whose date window contains its *filing* date, so an amendment filed in
+     2020 to a 2018 report comes back from both the 2018 and 2020 searches.
 
-Amendment handling:
-    A PDF named *_amend{period}.pdf is an amendment to the corresponding
-    *_{period}.pdf original.  When both exist for the same (candidate, period),
-    the amendment is used and the original is skipped.  Only the amendment's
-    transactions are emitted; the raw_file field records the amendment filename.
+  2 and 3 are handled together by resolve_amendments(), which keeps the newest
+  version of each (candidate, reporting period). Together these three cut the
+  contribution total from $185M to $109.5M — against $111.1M that the filings
+  themselves declare in their own summary totals (-1.5%, the expected gap for
+  unitemized contributions, which are summarised but never listed).
+
+Loans:
+    Schedule A tags some receipts `type_of_payment = "Loan"` — 1,264 rows /
+    $31.6M (14% of all KS receipts) in the 2026-08 data. Those are routed to
+    loans_debts.csv.gz rather than counted as contributions, following
+    Wyoming (which does the same for its LOAN contribution type) and Georgia.
+
+    Schedule D ("other transactions") is deliberately NOT read. Its only
+    amount column is `balance_at_close`, a period-end balance rather than an
+    original amount: 1,526 of 2,426 (candidate, counterparty, account) triples
+    recur across multiple filing periods, so summing it would multiply one
+    loan by its number of reporting periods. LOANS_DEBTS has no balance column
+    to hold it honestly, so the rows are left in the raw CSV only.
+
+id_model = "name_hash" — same as the old Kansas parser (and Alaska,
+Kentucky): Kansas has no numeric filer ID in its source data, so person_id
+is derived from MD5(state + normalized candidate_name).
+
+Party: joined from the SOS Candidate List roster — see PartyIndex.
+
+election_year is the *earliest* cycle a filing's period was searched under, not
+the cycle whose search returned it: a 2018 report amended in 2020 is still a
+2018-cycle filing. See resolve_amendments().
 """
 
+import collections
 import csv
 import gzip
 import re
-import subprocess
 import sys
 import time
-from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
-
-import pdfplumber
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src" / "pipeline"))
 from src.reporting.logger import get_logger
+from src.aliases import canonical_party, expand_nickname
 import columns as C
 import utils
 
 csv.field_size_limit(sys.maxsize)
 
 # =============================== Paths ================================
-RAW_DIR   = PROJECT_ROOT / "data" / "Kansas" / "raw"
-CLEAN_DIR = PROJECT_ROOT / "data" / "Kansas" / "cleaned"
-MANIFEST  = PROJECT_ROOT / "data" / "Kansas" / "manifest.csv"
+STATE_DIR = PROJECT_ROOT / "data" / "Kansas"
+RAW_DIR   = STATE_DIR / "raw"            # scrapers/kansas.py's output dir
+CLEAN_DIR = STATE_DIR / "cleaned"
+MANIFEST  = STATE_DIR / "manifest.csv"
 
 CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 
-STATE          = "KS"
-EARLIEST_YEAR  = 2013          # earliest R&E filing cycle (2014 statewide covers 2011-2014)
-MAX_VALID_YEAR = date.today().year + 4
-
-# Valid US state/territory codes — used to filter out PDF parsing artifacts
-VALID_US_STATES = {
-    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID',
-    'IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS',
-    'MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK',
-    'OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV',
-    'WI','WY','DC','PR','GU','VI','AS','MP',
+INPUT_NAMES = {
+    "summary":    "candidates_summary.csv",
+    "schedule_a": "schedule_a_contributions.csv",
+    "schedule_b": "schedule_b_inkind.csv",
+    "schedule_c": "schedule_c_expenditures.csv",
+    "roster":     "candidate_roster.csv",
 }
 
-# =================== Column x-ranges (points) ========================
-# Kansas PDFs are a mix of two formats:
-#
-#   Scanned physical forms (pre-2024):
-#     Sch A:  Date x<100 | Name/Addr 80-235 | Type 235-360 | Occ 360-475 | Amount x≥475
-#     Sch C:  Date x<100 | Name/Addr 80-290 | Purpose 290-490 | Amount x≥490
-#     (Amounts at x≈542 for Sch A; x≈471-490 for Sch C)
-#
-#   Web-form exports (online filing system, common 2024+):
-#     Sch A:  Date x<100 | Name/Addr ~80-150 | Type ~150-235 | Amount ~380-410 | PrimaryTotal ~470 | GeneralTotal ~530
-#     Sch C:  Date x<100 | Name/Addr ~80-150 | Purpose ~150-280 | Amount ~385-410 | PrimaryTotal ~450 | GeneralTotal ~540
-#     (Actual contribution amount is the LEFTMOST dollar figure in each row)
-#
-# Setting A_AMT_MIN / C_AMT_MIN = 350 captures the leftmost amount in both
-# formats.  In web forms this is the actual per-entry amount (not the running
-# Primary/General totals to its right); in scanned forms the single amount
-# column also falls above 350.  Nothing amount-like appears at x=235-400 on
-# anchor rows in scanned forms (the "$150" header sits on the non-anchor header
-# row and is never picked up by the anchor-row loop).
-# Schedule A
-A_DATE_MAX  = 100
-A_NAME_MIN  =  80;  A_NAME_MAX  = 235
-A_TYPE_MIN  = 235;  A_TYPE_MAX  = 360
-A_OCC_MIN   = 360;  A_OCC_MAX   = 475
-A_AMT_MIN   = 350                        # was 475; lowered to capture web-form amounts at x≈399
+STATE = "KS"
+# Filing periods reach back well before the earliest election cycle scraped:
+# 2014-cycle filings legitimately carry 2010-2012 transaction dates. A 2013
+# floor silently dropped 24,821 rows / $12.3M of real transactions, so this
+# matches validate.py's own 1990 horizon (older dates surface there as a
+# tier-2 note rather than being deleted here).
+EARLIEST_YEAR  = 1990
+MAX_VALID_YEAR = date.today().year + 4
 
-# Schedule C
-C_DATE_MAX  = 100
-C_NAME_MIN  =  80;  C_NAME_MAX  = 290
-C_PURP_MIN  = 290;  C_PURP_MAX  = 490
-C_AMT_MIN   = 350                        # was 490; lowered to capture web-form amounts at x≈388
+# Schedule A's payment types that are loans rather than contributions.
+LOAN_PAYMENT_TYPES = {"loan"}
 
-# Y-cluster tolerance: words within this many points share the same visual row
-Y_TOL = 4.0
+# candidate_uid's office_group tells us which viewer category a filing came
+# from. The PAC form's two committee types are scraped as their own groups, so
+# a filer's type needs no guessing from its name.
+COMMITTEE_TYPE_BY_GROUP = {
+    "PAC":   "PAC",
+    "Party": "Party Committee",
+}
+CANDIDATE_COMMITTEE_TYPE = "Candidate"
+
+
+def _input_path(key: str) -> Path:
+    """Resolve one scraper output file.
+
+    Prefers data/Kansas/raw/ (where scrapers/kansas.py writes), falling back
+    to data/Kansas/ so CSVs left behind by the pre-integration `kansas_v2`
+    scraper — which wrote to the state dir root — still parse without a
+    re-scrape.
+    """
+    name = INPUT_NAMES[key]
+    primary = RAW_DIR / name
+    if primary.exists():
+        return primary
+    legacy = STATE_DIR / name
+    return legacy if legacy.exists() else primary
+
 
 # ======================== Date / amount helpers =======================
-_DATE_RE   = re.compile(r"^\d{1,2}/\d{1,2}/\d{2,4}$")
-_AMOUNT_RE = re.compile(r"^\$?[\d,]+\.\d{2}$")
-# Matches "City ST 12345", "City, ST 12345-6789", or just "ST 12345" (no city).
-# The \s* (vs \s+) before the state code handles entries where city is on a
-# separate row from state+zip (common in statewide-candidate scanned PDFs).
-# The zip allows an optional trailing dash ("66213-") for truncated 9-digit zips.
-_CITY_ST_ZIP_RE = re.compile(
-    r"^(.*?),?\s*([A-Z]{2})\s+(\d{5}(?:-\d{0,4})?)\s*$", re.IGNORECASE
-)
-# Zip code alone on a row (used when city+state appeared on the previous row).
-_ZIP_ONLY_RE = re.compile(r"^(\d{5}(?:-\d{0,4})?)\s*$")
-# Characters OCR commonly substitutes for the digit "1": pipe, capital-I,
-# lowercase-l, backslash, brackets.  Used for garbled-zip detection in old PDFs.
-_OCR_DIGIT_LIKE_RE = re.compile(r'^[\d\[\\\|IlL]', re.IGNORECASE)
-# Strips payment-type keywords (and everything after them) from a text line.
-# Used to isolate contributor/payee names when they appear on the anchor row.
-_ANCHOR_TYPE_KW_RE = re.compile(
-    r'\s*\b(Credit|Debit|Check|Cash|Loan|E-?Transfer|Electronic|Other|Transfer)\b.*$',
-    re.IGNORECASE,
-)
-# If the entire extracted name is just a payment-type keyword, discard it.
-# (Covers "Loan" appearing in name col at x≈186 in Kobach statewide format.)
-_PAYMENT_TYPE_ONLY_RE = re.compile(
-    r'^\s*(Loan|Credit\s+Card|Check|Cash|Debit|Transfer|Electronic|Other)\s*$',
-    re.IGNORECASE,
-)
-
 
 def _parse_date(val: str) -> str:
-    """MM/DD/YY or MM/DD/YYYY → YYYY-MM-DD. Returns '' on failure."""
-    v = val.strip()
+    """M/D/YY or MM/DD/YYYY → YYYY-MM-DD. Returns '' on failure.
+
+    Both forms occur — the schedules use unpadded two-digit years for older
+    filings ("9/30/10") and four-digit ones elsewhere.
+    """
+    v = (val or "").strip()
+    if not v:
+        return ""
     for fmt in ("%m/%d/%y", "%m/%d/%Y"):
         try:
             d = datetime.strptime(v, fmt).date()
@@ -171,8 +171,12 @@ def _parse_date(val: str) -> str:
 
 
 def _parse_amount(val: str) -> str:
-    """'$1,234.56' or '1234.56' → plain decimal string. '' on failure."""
-    v = val.strip().replace("$", "").replace(",", "")
+    """The scraper already writes amounts as plain floats (e.g. '1400.0') via
+    money_to_float(); this re-normalizes and handles the empty-string case
+    (the scraper writes '' when a cell was blank)."""
+    v = (val or "").strip()
+    if not v:
+        return ""
     try:
         return str(float(v))
     except ValueError:
@@ -183,636 +187,413 @@ def _clean(val: str) -> str:
     return re.sub(r"\s+", " ", (val or "").strip())
 
 
+# Real postal codes only. "NA" is what filers leave behind when they skip the
+# field, and it passes a naive two-letter test, so the check is membership in
+# the same set validate.py uses (states + DC/territories + military APO/FPO).
+_VALID_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY",
+    "DC", "PR", "GU", "VI", "AS", "MP", "UM",
+    "AA", "AE", "AP",           # military addresses
+}
+
+
+def _clean_state_code(val: str) -> str:
+    """Keep only recognised state/territory codes; blank anything else.
+
+    Kentucky and Louisiana both filter their equivalents; without it Kansas's
+    "NA" placeholders trip validate.py's state-code check.
+    """
+    v = _clean(val).upper()
+    return v if v in _VALID_STATE_CODES else ""
+
+
+def _clean_zip(val: str) -> str:
+    """Normalize a ZIP, restoring a leading zero the source dropped.
+
+    New England ZIPs arrive numerically truncated ("2144" for Somerville MA,
+    1,918 rows), which fails validation. Pad to five digits, hand off to the
+    shared helper for the ZIP+4 rules, then blank anything still unusable
+    ("-", "0", "3-3149") rather than passing junk downstream.
+    """
+    v = _clean(val)
+    if v.isdigit() and 3 <= len(v) <= 4:
+        v = v.zfill(5)
+    else:
+        m = re.fullmatch(r"(\d{3,4})-(\d{4})", v)
+        if m:
+            v = f"{m.group(1).zfill(5)}-{m.group(2)}"
+    v = utils.clean_zip(v)
+    return v if re.fullmatch(r"\d{5}(-\d{4}|\d{4})?", v) else ""
+
+
 def _election_year_clean(val: str) -> str:
     """'2022-special' → '2022'; '2026' → '2026'. Strips non-numeric suffixes."""
     m = re.match(r"(\d{4})", (val or "").strip())
     return m.group(1) if m else val
 
 
-def _valid_state(code: str) -> str:
-    """Return the state code if it's a valid US state/territory, else ''."""
-    return code.upper() if code.upper() in VALID_US_STATES else ""
+def _split_candidate_uid(candidate_uid: str) -> dict:
+    """
+    Decode a candidate_uid ("office_group|cycle_label|office_sought|
+    district_number|name|original_date|amendment_date") back into its parts.
+    This is the same string make_candidate_key() built in the scraper.
+    Returns all-empty-string parts if candidate_uid doesn't have the expected
+    shape (e.g. blank/malformed row).
+    """
+    parts = (candidate_uid or "").split("|")
+    keys = ("office_group", "cycle_label", "office_sought", "district_number",
+            "name", "original_date", "amendment_date")
+    if len(parts) != len(keys):
+        return {k: "" for k in keys}
+    return dict(zip(keys, parts))
 
 
-# Text in the name column that signals "stop going further back" during the
-# backward payee/contributor lookup — column headers and "Not Available" placeholders.
-# Note: "Campaign Finance Schedule A Report" often has "Campaign"/"Schedule" at
-# x<80 so the name column sees only "A Report" or "Finance Schedule A Report".
-_SKIP_BACK_NAME_RE = re.compile(
-    r'^\s*(Name\s+and\s+Address|Name\s+and\b|and\s+Address\b'
-    r'|of\s+Contributor\b'         # PLF/GLF column header row 2: "of Contributor"
-    r'|Date\s+Name\b|^Date\b'      # PLF/GLF column header row 1: "Date Name and…"
-    r'|Mailing\s+Address\b'        # PLF/GLF address sub-header
-    r'|Not\s*Available\b|NotAvailable'
-    r'|Schedule\s+[A-Z]\b'
-    r'|Finance\s+Schedule\b'
-    r'|[A-Z]\s+Report\b'          # "A Report", "C Report" (partial header)
-    r'|Candidate:|Campaign\s+Finance)',
-    re.IGNORECASE,
+def _split_name(full: str) -> tuple[str, str]:
+    """Split a candidate's name into (first, last) heuristically — 'Last,
+    First' if a comma is present, otherwise 'First ... Last' by token
+    position. Identical heuristic to the old parser, for consistent
+    candidates.csv.gz output across both pipelines."""
+    if "," in full:
+        parts = full.split(",", 1)
+        return _clean(parts[1]), _clean(parts[0])   # (first, last)
+    tokens = full.split()
+    first = tokens[0] if tokens else ""
+    last  = tokens[-1] if len(tokens) > 1 else ""
+    return first, last
+
+
+def _normalize_district(raw: str) -> str:
+    """Reduce a district cell to a bare number: '005' -> '5', '/ 38' -> '38'.
+
+    The results grid renders the district with a leading slash, so a plain
+    int() cast left the slash in place — which then failed to match the SOS
+    roster's "38" when joining party. Falls back to the raw value for a
+    genuinely non-numeric district.
+    """
+    m = re.search(r"\d+", raw or "")
+    if m:
+        return str(int(m.group()))
+    return (raw or "").strip()
+
+
+# ==================== Expenditure purpose / category ==================
+# Schedule C's Purpose column is a fixed form label followed by the filer's
+# free text, with only a space between them ("Printing printing/mailing").
+# The scraper keeps it whole as purpose_raw because the boundary isn't marked
+# up; it is however recoverable, because the label comes from a closed list.
+# These 29 labels cover 100% of the 171,326 Schedule C rows in the 2026-08
+# data (26 real categories plus three legacy spellings), so the label lands in
+# `category` and the remainder in `purpose`.
+PURPOSE_LABELS = (
+    "Candidate (self)", "Donation/Contrib", "Electronic/Website Advertising",
+    "Electronics/Computers", "Filing Fee", "Fundraising Expenses",
+    "Meeting/Travel", "Newspaper Ads", "Postage/Shipping", "Radio/TV",
+    "Voter file", "Yard signs", "Cell Phone", "Consultant", "Miscellaneous",
+    "Newsletter", "Mileage", "Polling", "Printing", "Reimbursement",
+    "Refund", "Rental", "Subscription", "Supplies", "Tickets", "Gift",
+    # legacy/short spellings seen on a handful of older filings
+    "Ads", "Shipping", "TV",
 )
+# Longest first so "Newspaper Ads" wins over "Ads" and "Radio/TV" over "TV".
+_PURPOSE_LABELS_SORTED = tuple(sorted(PURPOSE_LABELS, key=len, reverse=True))
 
-# Detects rows that are street addresses rather than contributor/payee names,
-# so the backward lookup can skip them with `continue` and look further above
-# for the real name.  Scanned Kansas PDFs always put the street number at the
-# start of the address row; OCR sometimes fuses digits+street into one token.
-_STREET_LIKE_RE = re.compile(
-    r'(^\d{3,})'                              # 3+ leading digits → street number
-    r'|(\bP\.?O\.?\s*Box\b)'                  # PO Box
-    r'|(\b(?:Dr|St|Ave|Blvd|Rd|Ln|Ct|Pl|Ter|Cir|Hwy'
-    r'|Drive|Street|Avenue|Boulevard|Road|Lane|Court|Place|Terrace|Circle|Highway)'
-    r'\.?\s*$)',                               # ends with a street-type suffix
-    re.IGNORECASE,
-)
+# Purpose labels that describe a different kind of transaction, not just a
+# spending category. Everything else is an ordinary expenditure.
+_TXN_TYPE_BY_CATEGORY = {
+    "Refund":           "Refund",
+    "Donation/Contrib": "Contribution",
+}
 
 
-# ========================= pdfplumber helpers ========================
+def _split_purpose(raw: str) -> tuple[str, str]:
+    """'Printing printing/mailing' → ('Printing', 'printing/mailing').
 
-def _words(page) -> list[tuple[float, float, str]]:
-    """Return [(x0, top, text), ...] for all words on a page."""
-    return [(w["x0"], w["top"], w["text"]) for w in page.extract_words()]
+    Returns ('', raw) when no known label matches, so an unrecognised value is
+    preserved in `purpose` rather than silently dropped.
+    """
+    v = _clean(raw)
+    if not v:
+        return "", ""
+    for label in _PURPOSE_LABELS_SORTED:
+        if v == label:
+            return label, ""
+        if v.startswith(label + " "):
+            return label, v[len(label) + 1:].strip()
+    return "", v
 
 
-def _cluster_rows(words: list[tuple[float, float, str]]) -> list[list[tuple[float, float, str]]]:
-    """Group words into visual rows by clustering on y (top) within Y_TOL."""
-    if not words:
+# ===================== Party enrichment (roster) ======================
+# The CFR Examiner publishes no party. The SOS's Candidate List page does, so
+# scrapers/kansas.py saves it as candidate_roster.csv and it's joined on here.
+#
+# This is a name match, not an ID join — neither source carries a filer ID —
+# so matches are graded and recorded:
+#     party_source     = "ks_sos_candidate_list"
+#     match_confidence = "exact"  — last + first + office + district + year
+#                        "high"   — last + first + year (office/district
+#                                   disagree or are absent on one side)
+# Anything weaker is left unmatched rather than guessed at.
+
+# Roster office text -> a coarse office key, and the same for the CFR
+# Examiner's own office_sought text. Only offices that exist on both sides can
+# match; judicial races (nonpartisan in KS, blank party in the roster) and
+# federal races simply never produce a hit.
+_OFFICE_KEYS = [
+    ("HOUSE",     ("KANSAS HOUSE", "STATE REPRESENTATIVE", "REPRESENTATIVE")),
+    ("SENATE",    ("KANSAS SENATE", "STATE SENATE", "SENATOR")),
+    ("GOVERNOR",  ("GOVERNOR",)),
+    ("AG",        ("ATTORNEY GENERAL",)),
+    ("SOS",       ("SECRETARY OF STATE",)),
+    ("TREASURER", ("TREASURER",)),
+    ("INSURANCE", ("INSURANCE",)),
+    ("DA",        ("DISTRICT ATTORNEY", "COUNTY ATTORNEY")),
+    ("BOE",       ("BOARD OF EDUCATION",)),
+]
+
+
+def _office_key(raw: str) -> str:
+    """Coarse office bucket shared by both sources. 'Kansas House of
+    Representatives' and 'State Representative' both -> 'HOUSE'.
+
+    US House/Senate must not collapse into the state chambers, so federal
+    offices are tagged separately before the state patterns are tried.
+    """
+    up = re.sub(r"\s+", " ", (raw or "").strip().upper())
+    if not up:
+        return ""
+    if up.startswith("UNITED STATES") or up.startswith("U.S."):
+        return "FEDERAL"
+    for key, needles in _OFFICE_KEYS:
+        if any(n in up for n in needles):
+            return key
+    return "OTHER"
+
+
+def _norm_token(val: str) -> str:
+    """Uppercase, strip punctuation/whitespace — for name-part comparison."""
+    return re.sub(r"[^A-Z]", "", (val or "").upper())
+
+
+def _name_variants(first: str) -> set[str]:
+    """A first name plus any formal names it's a nickname for, so a roster
+    'Michael' still matches a filing's 'Mike'."""
+    f = _norm_token(first)
+    if not f:
+        return set()
+    return {f} | {_norm_token(v) for v in expand_nickname(f)}
+
+
+def _split_last_first(full: str) -> tuple[str, str]:
+    """Best-effort (last, first) from either 'Last, First M' or 'First M Last'.
+    The CFR Examiner's own name format isn't uniform, so both are handled."""
+    name = _clean(full)
+    if "," in name:
+        last, _, rest = name.partition(",")
+        return _norm_token(last), _norm_token(rest.strip().split(" ")[0] if rest.strip() else "")
+    parts = [p for p in name.split() if p]
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return _norm_token(parts[0]), ""
+    return _norm_token(parts[-1]), _norm_token(parts[0])
+
+
+class PartyIndex:
+    """Roster lookups keyed strongest-first.
+
+    Built once per parse; `lookup()` returns {"party", "party_source",
+    "match_confidence"} or None. A key that the roster maps to two different
+    parties (two same-named candidates, or a candidate who switched parties
+    between the primary and general) is dropped from that index rather than
+    resolved arbitrarily — better a blank party than a confidently wrong one.
+    """
+
+    def __init__(self, rows: list[dict]):
+        exact: dict[tuple, set[str]] = {}
+        loose: dict[tuple, set[str]] = {}
+        self.rows = 0
+
+        for r in rows:
+            party = canonical_party(_clean(r.get("party", "")))
+            if not party:
+                continue  # judicial/nonpartisan races carry no party
+            year = _election_year_clean(r.get("election_year", ""))
+            if not year:
+                continue
+            last = _norm_token(r.get("last_name", ""))
+            first = _norm_token(r.get("first_name", ""))
+            if not last:
+                last, first = _split_last_first(r.get("candidate", ""))
+            if not last:
+                continue
+            okey = _office_key(r.get("office", ""))
+            district = _normalize_district(r.get("district", ""))
+            self.rows += 1
+
+            for variant in (_name_variants(first) or {""}):
+                exact.setdefault((last, variant, okey, district, year), set()).add(party)
+                loose.setdefault((last, variant, year), set()).add(party)
+
+        # keep only unambiguous keys
+        self.exact = {k: v.pop() for k, v in exact.items() if len(v) == 1}
+        self.loose = {k: v.pop() for k, v in loose.items() if len(v) == 1}
+
+    def lookup(self, candidate_name: str, office: str, district: str,
+               election_year: str) -> dict | None:
+        last, first = _split_last_first(candidate_name)
+        if not last:
+            return None
+        okey = _office_key(office)
+        variants = _name_variants(first) or {""}
+
+        for variant in variants:
+            party = self.exact.get((last, variant, okey, district, election_year))
+            if party:
+                return {"party": party, "party_source": "ks_sos_candidate_list",
+                        "match_confidence": "exact"}
+        for variant in variants:
+            party = self.loose.get((last, variant, election_year))
+            if party:
+                return {"party": party, "party_source": "ks_sos_candidate_list",
+                        "match_confidence": "high"}
+        return None
+
+
+# ========================== CSV loading ===============================
+
+def _read_csv(path: Path) -> list[dict]:
+    """Read a scraper CSV, tagging each row with its source line number.
+
+    `_row_num` becomes the cleaned row's `row_num`, so with `raw_file` it
+    points back at an exact input line — the traceability pair columns.py
+    describes, and what Alaska and Wyoming write.
+    """
+    if not path.exists():
         return []
-    sorted_w = sorted(words, key=lambda w: w[1])
-    rows, current_y, current = [], sorted_w[0][1], []
-    for w in sorted_w:
-        if abs(w[1] - current_y) <= Y_TOL:
-            current.append(w)
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = []
+        for n, row in enumerate(csv.DictReader(f), start=2):   # 2 = after header
+            row["_row_num"] = n
+            rows.append(row)
+        return rows
+
+
+def _row_signature(row: dict) -> tuple:
+    """Everything about a row except where it came from."""
+    return tuple(sorted((k, v) for k, v in row.items() if k != "_row_num"))
+
+
+def _filing_sort_key(row: dict) -> tuple:
+    """How recent a filing version is: filed date, then amendment, then original."""
+    parts = _split_candidate_uid(row.get("candidate_uid", ""))
+    def d(v):
+        for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+            try:
+                return datetime.strptime((v or "").strip(), fmt).date()
+            except ValueError:
+                continue
+        return date.min
+    return (max(d(row.get("filed_date", "")), d(parts["amendment_date"])),
+            d(parts["original_date"]),
+            row.get("candidate_uid", ""))
+
+
+def resolve_amendments(summary_by_uid: dict[str, dict]) -> tuple[dict[str, dict], dict[str, str], int]:
+    """Keep one filing per (candidate, reporting period): the newest version.
+
+    An amendment is a **separate row** in the CFR Examiner's results grid, not
+    a flag on the original, and each version restates the entire period. The
+    grid also returns a filing under every search window its filing date falls
+    in, so an amendment filed in 2020 to a 2018 report comes back under both
+    the 2018 and 2020 cycle searches. Left alone, both effects multiply the
+    same money: 1,707 of 5,165 periods in the 2026-08 data were filed more
+    than once (up to 12 times), and $105.9M of the $167.4M in those filings is
+    superseded.
+
+    This is what the old PDF parser meant by "prefer amendments when both
+    exist for the same (candidate, period)".
+
+    Returns (winners_by_uid, election_year_by_uid, superseded_count).
+    `election_year` comes from the *earliest* cycle in each group: a 2018
+    report is a 2018-cycle filing even when its latest amendment was filed in
+    2020 and so was found by the 2020 search.
+    """
+    groups: dict[tuple, list[dict]] = collections.defaultdict(list)
+    ungrouped: list[dict] = []
+    for uid, row in summary_by_uid.items():
+        period = (_clean(row.get("period_start", "")), _clean(row.get("period_end", "")))
+        name = utils.clean_name(_clean(row.get("candidate_name", "")))
+        if all(period) and name:
+            groups[(name, *period)].append(row)
         else:
-            rows.append(sorted(current, key=lambda ww: ww[0]))
-            current_y = w[1]
-            current   = [w]
-    if current:
-        rows.append(sorted(current, key=lambda ww: ww[0]))
-    return rows
+            ungrouped.append(row)          # can't identify the period — keep as-is
+
+    winners: dict[str, dict] = {}
+    election_year: dict[str, str] = {}
+    superseded = 0
+    for members in groups.values():
+        best = max(members, key=_filing_sort_key)
+        superseded += len(members) - 1
+        uid = best["candidate_uid"]
+        winners[uid] = best
+        cycles = [_election_year_clean(_split_candidate_uid(m["candidate_uid"])["cycle_label"])
+                  for m in members]
+        cycles = [c for c in cycles if c]
+        election_year[uid] = min(cycles) if cycles else ""
+
+    for row in ungrouped:
+        uid = row["candidate_uid"]
+        winners[uid] = row
+        election_year[uid] = _election_year_clean(
+            _split_candidate_uid(uid)["cycle_label"])
+
+    return winners, election_year, superseded
 
 
-def _row_text(row: list[tuple], x_min: float, x_max: float) -> str:
-    """Join words in a row that fall within [x_min, x_max)."""
-    return " ".join(w[2] for w in row if x_min <= w[0] < x_max).strip()
+def _dedup_rescrapes(rows: list[dict], scrape_count: dict[str, int]) -> tuple[list[dict], int]:
+    """Collapse rows belonging to filings that were scraped more than once.
 
-
-def _any_in_col(row, x_min, x_max) -> bool:
-    return any(x_min <= w[0] < x_max for w in row)
-
-
-# ======================== Schedule detection =========================
-_SCH_A_MARKERS = {"SCHEDULE A", "CONTRIBUTIONS AND OTHER RECEIPTS"}
-_SCH_B_MARKERS = {"SCHEDULE B", "IN-KIND", "IN KIND"}
-_SCH_C_MARKERS = {"SCHEDULEC", "SCHEDULE C", "EXPENDITURES AND OTHER DISBURSEMENTS"}
-_SCH_D_MARKERS = {"SCHEDULED", "SCHEDULE D", "OTHER TRANSACTIONS"}
-_FOOTER_TEXTS  = {"Print", "this", "form", "or", "Go", "Back",
-                   "Total", "Itemized", "Unitemized", "TOTAL", "RECEIPTS",
-                   "EXPENDITURES", "DISBURSEMENTS", "THIS", "PERIOD",
-                   "Contributions", "Less"}
-
-
-def _page_schedule(page_text: str) -> str | None:
-    """Return 'A', 'B', 'C', 'D', or None based on schedule markers on the page."""
-    upper = page_text.upper()
-    # Check D before C because "SCHEDULE D" and "SCHEDULED" could both appear
-    if any(m in upper for m in ("SCHEDULE D", "SCHEDULED\n", "SCHEDULED ")):
-        return "D"
-    if any(m in upper for m in ("SCHEDULE C", "SCHEDULEC")):
-        return "C"
-    if "SCHEDULE B" in upper and "IN-KIND" in upper:
-        return "B"
-    if "SCHEDULE A" in upper:
-        return "A"
-    return None
-
-
-# ========================= PDF header parsing ========================
-# From the summary page (page 1) of each R&E PDF.
-# Web-form PDFs use "Candidate Name'.Dale" (apostrophe+period) instead of a colon.
-# The character class [:.'\s]{1,4} handles both the scanned-form colon and the
-# web-form apostrophe/period separators.
-_CAND_RE     = re.compile(r"Candidate\s*Name\s*[:.'\s]{1,4}(.+?)(?:\n|$)", re.IGNORECASE)
-_OFFICE_RE   = re.compile(r"Office\s*Sought\s*[:.'\s]{1,4}(.+?)(?:District|$)", re.IGNORECASE)
-_DIST_RE     = re.compile(r"District\s*(?:No\.?\s*)?:?\s*(\S+)", re.IGNORECASE)
-_PERIOD_RE   = re.compile(
-    r"(?:covering|period|from)\s+(\d{1,2}/\d{1,2}/\d{4})\s+through\s+(\d{1,2}/\d{1,2}/\d{4})",
-    re.IGNORECASE,
-)
-
-
-def _parse_header(page1_text: str) -> dict:
-    """Extract candidate name, office, district from the PDF summary page."""
-    result = {"candidate_name": "", "office": "", "district": ""}
-
-    m = _CAND_RE.search(page1_text)
-    if m:
-        result["candidate_name"] = _clean(m.group(1))
-
-    m = _OFFICE_RE.search(page1_text)
-    if m:
-        result["office"] = _clean(m.group(1))
-
-    m = _DIST_RE.search(page1_text)
-    if m:
-        result["district"] = _clean(m.group(1))
-
-    return result
-
-
-# ====================== Schedule A parser ============================
-#
-# Kansas R&E PDF layout for each contribution entry:
-#
-#   [name row, y ≈ date_y - 13]  [NAME COL]  "Kent Soucy"
-#   [date row, y ≈ date_y]       [DATE] MM/DD/YY | [NAME] "3381 SE Boston Mills" | [TYPE] Cash | [OCC] Business | [AMT] $100
-#   [addr row, y ≈ date_y + 13]  [NAME COL]  "Columbus KS 66725"
-#
-# The contributor NAME appears on the row BEFORE the date anchor.
-# The STREET ADDRESS appears on the anchor row's name column.
-# The city/state/zip appears on the row after the anchor.
-#
-# Entries with no known contributor show "Not Available" on the anchor row.
-
-def _parse_schedule_a(pages, schedule_pages: list[int]) -> list[dict]:
+    The scraper appends and re-checks current-year cycles on every run, so a
+    filing scraped k times contributes k copies of each of its rows. Where the
+    row count divides evenly by k the last block is kept — that's the most
+    recent scrape, so an amended filing wins. Otherwise (content changed
+    between scrapes) each distinct row is kept count//k times, which is the
+    conservative option: it preserves genuine repeat donations of the same
+    amount on the same day, which do occur.
     """
-    Parse Schedule A (contributions) from the given page indices.
-    Returns list of raw contribution dicts.
-    """
-    transactions = []
+    if not rows:
+        return rows, 0
+    by_uid: dict[str, list[dict]] = collections.defaultdict(list)
+    for r in rows:
+        by_uid[r.get("candidate_uid", "")].append(r)
 
-    for pi in schedule_pages:
-        page  = pages[pi]
-        words = _words(page)
-        rows  = _cluster_rows(words)
-
-        anchor_indices = []
-        for ri, row in enumerate(rows):
-            if any(w[0] < A_DATE_MAX and _DATE_RE.match(w[2]) for w in row):
-                anchor_indices.append(ri)
-
-        for idx, anchor_ri in enumerate(anchor_indices):
-            end_ri      = anchor_indices[idx + 1] if idx + 1 < len(anchor_indices) else len(rows)
-            anchor_row  = rows[anchor_ri]
-
-            # ── Date ─────────────────────────────────────────────────
-            date_word = next(
-                (w for w in anchor_row if w[0] < A_DATE_MAX and _DATE_RE.match(w[2])), None
-            )
-            if not date_word:
-                continue
-            parsed_date = _parse_date(date_word[2])
-            if not parsed_date:
-                continue
-
-            # ── Amount (on anchor row) ────────────────────────────────
-            amount = ""
-            for cr in rows[anchor_ri:min(anchor_ri + 3, end_ri)]:
-                amt_words = [w for w in cr if w[0] >= A_AMT_MIN and _AMOUNT_RE.match(w[2])]
-                if amt_words:
-                    amount = _parse_amount(amt_words[0][2])
-                    break
-
-            # ── Contributor name (row(s) BEFORE the anchor) ───────────
-            # Walk backward from anchor_ri - 1, collecting name-column text.
-            # Street/zip rows are SKIPPED via `continue`.  Two heuristics stop
-            # the scan before crossing into the PREVIOUS entry's address block:
-            #
-            #  A) found_street + name_parts: after passing the current entry's
-            #     street address, any row ending in a valid 2-letter state code
-            #     is the previous entry's "City ST" line (no zip on that row).
-            #     e.g. "Tonganoxie KS" / "66086" split → breaks at "Tonganoxie KS"
-            #
-            #  B) prev_was_zip: if the most-recently-skipped row was a bare zip
-            #     code ("67042"), the next backward row is very likely the
-            #     previous entry's "City ST" — break before adding it.
-            #     e.g. skip "67042", then see "ElDorado KS" → break.
-            #     This handles entries where the name is on the anchor row itself
-            #     (Kobach format: "12/31/25 Ann Peterson Credit Card …").
-            name_parts: list[str] = []
-            found_street = False
-            prev_was_zip = False
-            for back_ri in range(anchor_ri - 1, max(-1, anchor_ri - 6), -1):
-                back_row = rows[back_ri]
-                if any(w[0] < A_DATE_MAX and _DATE_RE.match(w[2]) for w in back_row):
-                    break   # previous date anchor — stop
-                line = _row_text(back_row, A_NAME_MIN, A_NAME_MAX)
-                if not line:
-                    break   # gap row — stop
-                if _SKIP_BACK_NAME_RE.match(line):
-                    break   # column header / "Schedule A" header / "Not Available"
-                if _CITY_ST_ZIP_RE.match(line):
-                    break   # "City ST 12345" of previous entry — stop
-                # Also stop on OCR-garbled "City ST zip" where the zip contains
-                # OCR noise ("SALINA KS 6740 I" for "SALINA KS 67401").  Detect
-                # as: any token is a valid state code, and the NEXT token starts
-                # with a digit-like character (including I/l/\\ OCR artifacts).
-                _toks = line.split()
-                _garbled = False
-                for _j, _tok in enumerate(_toks[1:-1], 1):
-                    if _valid_state(_tok) and _OCR_DIGIT_LIKE_RE.match(_toks[_j + 1]):
-                        _garbled = True
-                        break
-                if _garbled:
-                    break
-                if _STREET_LIKE_RE.search(line):
-                    found_street = True
-                    prev_was_zip = bool(_ZIP_ONLY_RE.match(line))
-                    continue  # address row — skip but keep looking above
-                # Heuristic A: once we have ≥1 name row, any subsequent row
-                # ending in a valid 2-letter state code is the previous entry's
-                # "City ST" line (no zip).  `found_street` is NOT required here;
-                # entries where the street is on the anchor row also need this.
-                if name_parts:
-                    toks = line.split()
-                    if toks and len(toks[-1]) == 2 and _valid_state(toks[-1]):
-                        break  # "Tonganoxie KS" / "Ottawa, KS" → previous entry
-                # Heuristic B: last skipped row was a bare zip → this row is
-                # "City ST" (no zip on this row).  name_parts may be empty here
-                # (entry whose name is on the anchor row, e.g. "Ann Peterson").
-                if prev_was_zip:
-                    toks = line.split()
-                    if toks and len(toks[-1]) == 2 and _valid_state(toks[-1]):
-                        break  # "ElDorado KS" after "67042" → previous entry
-                prev_was_zip = False
-                name_parts.insert(0, line)
-
-            # Fallback: some Kobach entries embed the name on the anchor row
-            # itself (e.g. "12/31/25 Ann Peterson Credit Card retired …").
-            # If the backward scan found nothing, try the anchor row's name
-            # column, stripping trailing payment-type keywords.  Also reject
-            # anything that looks like a street address ("12332 us 24 hwy").
-            contributor_name = _clean(" ".join(name_parts))
-            # Discard if the entire name is just a payment-type keyword
-            # (e.g. "Loan" from x≈186 in Kobach statewide format)
-            if _PAYMENT_TYPE_ONLY_RE.match(contributor_name):
-                contributor_name = ""
-            if not contributor_name:
-                anchor_line = _row_text(anchor_row, A_NAME_MIN, A_NAME_MAX)
-                anchor_line = _ANCHOR_TYPE_KW_RE.sub("", anchor_line).strip()
-                if anchor_line and not _STREET_LIKE_RE.search(anchor_line):
-                    contributor_name = _clean(anchor_line)
-
-            # Skip totals / summary rows
-            if any(kw in contributor_name.upper()
-                   for kw in ("TOTAL", "UNITEMIZED", "SALE OF", "CONTRIBUTOR NOT")):
-                continue
-
-            # ── City / State / ZIP (rows after anchor) ────────────────
-            # Kansas PDFs use several split layouts for the address block:
-            #   "City ST 12345"          (all on one row — easy)
-            #   "City" / "ST 12345"      (Kobach statewide: 2 rows)
-            #   "City ST" / "12345"      (some entries: city+state then zip-only)
-            # pending_city / pending_state track partial address components.
-            contributor_city = contributor_state_code = contributor_zip = ""
-            pending_city = ""
-            pending_state = ""
-            for cr in rows[anchor_ri + 1:end_ri]:
-                line = _row_text(cr, A_NAME_MIN, A_NAME_MAX)
-                if not line:
-                    continue
-                # Case 1: full "City ST 12345" (or "[blank] ST 12345") on one row
-                m = _CITY_ST_ZIP_RE.match(line)
-                if m:
-                    city_val  = _clean(m.group(1)) or pending_city
-                    state_val = _valid_state(m.group(2))
-                    zip_val   = m.group(3)
-                    if state_val:
-                        contributor_city       = city_val
-                        contributor_state_code = state_val
-                        contributor_zip        = zip_val
-                        break
-                # Case 2: zip-only row (5 digits, no state) and we already have state
-                # e.g. previous row was "Tonganoxie KS", this row is "66086"
-                if pending_state:
-                    m_zip = _ZIP_ONLY_RE.match(line)
-                    if m_zip:
-                        contributor_city       = pending_city
-                        contributor_state_code = pending_state
-                        contributor_zip        = m_zip.group(1)
-                        break
-                # Case 3: "City ST" (no zip) — carry state forward to next row
-                toks = line.split()
-                if (toks and len(toks[-1]) == 2 and _valid_state(toks[-1])
-                        and not any(c.isdigit() for c in line)):
-                    pending_state = _valid_state(toks[-1])
-                    pending_city  = _clean(" ".join(toks[:-1]))
-                elif not any(c.isdigit() for c in line) and not _STREET_LIKE_RE.search(line):
-                    # Plain city name — save in case next row has state+zip
-                    pending_city = _clean(line)
-
-            # ── Payment type (on anchor row) ──────────────────────────
-            transaction_type = _row_text(anchor_row, A_TYPE_MIN, A_TYPE_MAX)
-
-            # ── Occupation (on anchor row) ────────────────────────────
-            occ_raw = _row_text(anchor_row, A_OCC_MIN, A_OCC_MAX)
-            # Discard column-header fragments and dollar amounts (web-form PDFs place
-            # the actual contribution amount at x≈399, inside the occupation range).
-            occupation = ""
-            if occ_raw and occ_raw not in ("Amount", "Individual", "Giving",
-                                            "Other", "More", "Than", "$150"):
-                if not _AMOUNT_RE.match(occ_raw):
-                    occupation = occ_raw
-
-            transactions.append({
-                "date":              parsed_date,
-                "contributor_name":  contributor_name,
-                "contributor_city":  contributor_city,
-                "contributor_state": contributor_state_code,
-                "contributor_zip":   contributor_zip,
-                "occupation":        occupation,
-                "transaction_type":  transaction_type,
-                "amount":            amount,
-            })
-
-    return transactions
-
-
-# ====================== Schedule C parser ============================
-#
-# Kansas R&E PDF layout for each expenditure entry:
-#
-#   [purp row, y ≈ date_y - 26]  [PURP COL]  "Miscellaneous Halloween..."
-#   [name row, y ≈ date_y - 13]  [NAME COL]  "Sams Club"    [PURP COL] "candy"
-#   [date row, y ≈ date_y]       [DATE] MM/DD/YY | [NAME] "Not Available" | [AMT] $188.68
-#   [addr row, y ≈ date_y + 13]  [NAME COL]  "NotAvailable NA"
-#
-# The payee NAME appears on the row(s) BEFORE the date anchor (same as Sch A).
-# Purpose text appears in the purpose column on those same pre-anchor rows,
-# plus possibly on the anchor row itself.
-
-def _parse_schedule_c(pages, schedule_pages: list[int]) -> list[dict]:
-    """
-    Parse Schedule C (expenditures) from the given page indices.
-    Returns list of raw expenditure dicts.
-    """
-    transactions = []
-
-    for pi in schedule_pages:
-        page  = pages[pi]
-        words = _words(page)
-        rows  = _cluster_rows(words)
-
-        anchor_indices = []
-        for ri, row in enumerate(rows):
-            if any(w[0] < C_DATE_MAX and _DATE_RE.match(w[2]) for w in row):
-                anchor_indices.append(ri)
-
-        for idx, anchor_ri in enumerate(anchor_indices):
-            end_ri     = anchor_indices[idx + 1] if idx + 1 < len(anchor_indices) else len(rows)
-            anchor_row = rows[anchor_ri]
-
-            # ── Date ─────────────────────────────────────────────────
-            date_word = next(
-                (w for w in anchor_row if w[0] < C_DATE_MAX and _DATE_RE.match(w[2])), None
-            )
-            if not date_word:
-                continue
-            parsed_date = _parse_date(date_word[2])
-            if not parsed_date:
-                continue
-
-            # ── Amount ───────────────────────────────────────────────
-            amount = ""
-            for cr in rows[anchor_ri:min(anchor_ri + 3, end_ri)]:
-                amt_words = [w for w in cr if w[0] >= C_AMT_MIN and _AMOUNT_RE.match(w[2])]
-                if amt_words:
-                    amount = _parse_amount(amt_words[0][2])
-                    break
-
-            # ── Payee name (row(s) BEFORE anchor) + purpose (same rows) ──
-            name_parts: list[str] = []
-            purp_parts: list[str] = []
-            found_name = False
-            for back_ri in range(anchor_ri - 1, max(-1, anchor_ri - 8), -1):
-                back_row = rows[back_ri]
-                if any(w[0] < C_DATE_MAX and _DATE_RE.match(w[2]) for w in back_row):
-                    break   # hit previous anchor
-                name_line = _row_text(back_row, C_NAME_MIN, C_NAME_MAX)
-                purp_line = _row_text(back_row, C_PURP_MIN, C_PURP_MAX)
-                if not name_line and not purp_line:
-                    break   # true empty row = gap between entries
-                if name_line:
-                    if _SKIP_BACK_NAME_RE.match(name_line):
-                        break   # column header / "Schedule C" / "Not Available"
-                    if _CITY_ST_ZIP_RE.match(name_line):
-                        break   # city/zip of previous entry
-                    if found_name:
-                        break   # already captured the name; don't cross into prev entry
-                    if _STREET_LIKE_RE.search(name_line):
-                        # Street row — skip but still collect purpose
-                        if purp_line:
-                            purp_parts.insert(0, purp_line)
-                        continue
-                    name_parts.insert(0, name_line)
-                    found_name = True
-                if purp_line:
-                    purp_parts.insert(0, purp_line)
-
-            payee_name = _clean(" ".join(name_parts))
-            if any(kw in payee_name.upper()
-                   for kw in ("TOTAL", "ITEMIZED", "UNITEMIZED")):
-                continue
-
-            # Purpose may also appear on the anchor row itself (rare but possible)
-            t = _row_text(anchor_row, C_PURP_MIN, C_PURP_MAX)
-            if t:
-                purp_parts.append(t)
-
-            purpose = _clean(" ".join(purp_parts))
-            for hdr in ("Purpose of Expenditure or Disbursement",
-                         "Purpose of Expenditure", "or Disbursement"):
-                purpose = purpose.replace(hdr, "").strip()
-            purpose = _clean(purpose)
-
-            # ── Payee city / state / zip (rows after anchor) ─────────
-            payee_city = payee_state_code = payee_zip = ""
-            pending_city = ""
-            pending_state = ""
-            for cr in rows[anchor_ri + 1:end_ri]:
-                line = _row_text(cr, C_NAME_MIN, C_NAME_MAX)
-                if not line:
-                    continue
-                m = _CITY_ST_ZIP_RE.match(line)
-                if m:
-                    city_val  = _clean(m.group(1)) or pending_city
-                    state_val = _valid_state(m.group(2))
-                    zip_val   = m.group(3)
-                    if state_val:
-                        payee_city       = city_val
-                        payee_state_code = state_val
-                        payee_zip        = zip_val
-                        break
-                if pending_state:
-                    m_zip = _ZIP_ONLY_RE.match(line)
-                    if m_zip:
-                        payee_city       = pending_city
-                        payee_state_code = pending_state
-                        payee_zip        = m_zip.group(1)
-                        break
-                toks = line.split()
-                if (toks and len(toks[-1]) == 2 and _valid_state(toks[-1])
-                        and not any(c.isdigit() for c in line)):
-                    pending_state = _valid_state(toks[-1])
-                    pending_city  = _clean(" ".join(toks[:-1]))
-                elif not any(c.isdigit() for c in line) and not _STREET_LIKE_RE.search(line):
-                    pending_city = _clean(line)
-
-            transactions.append({
-                "date":        parsed_date,
-                "payee_name":  payee_name,
-                "payee_city":  payee_city,
-                "payee_state": payee_state_code,
-                "payee_zip":   payee_zip,
-                "purpose":     purpose,
-                "amount":      amount,
-            })
-
-    return transactions
-
-
-# ========================== PDF dispatcher ===========================
-
-def _parse_pdf(pdf_path: Path, meta: dict) -> dict:
-    """
-    Open one R&E PDF and return:
-        {header, contributions: [...], expenditures: [...]}
-    meta: {office, election_year, district, candidate_name, period}
-    """
-    result = {
-        "header":        {},
-        "contributions": [],
-        "expenditures":  [],
-    }
-
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            if not pdf.pages:
-                return result
-
-            pages = pdf.pages
-
-            # ── Header from page 1 ────────────────────────────────────
-            page1_text = pages[0].extract_text() or ""
-            result["header"] = _parse_header(page1_text)
-
-            # ── Classify pages by schedule ────────────────────────────
-            sch_a_pages: list[int] = []
-            sch_b_pages: list[int] = []
-            sch_c_pages: list[int] = []
-
-            page_texts: list[str] = []
-            for i, page in enumerate(pages):
-                pt = page.extract_text() or ""
-                page_texts.append(pt)
-                sch = _page_schedule(pt)
-                if sch == "A":
-                    sch_a_pages.append(i)
-                elif sch == "B":
-                    sch_b_pages.append(i)
-                elif sch == "C":
-                    sch_c_pages.append(i)
-                # D is skipped
-
-            # ── PLF/GLF "Last Minute" fallback ────────────────────────────
-            # These filings (Pre-general / General Last-minute contributions)
-            # are single-section reports with no "SCHEDULE A" header.  All
-            # contribution rows appear on pages 2..n-1; page 1 is the cover
-            # and the last page is a signature/declaration.
-            if not sch_a_pages and not sch_b_pages and not sch_c_pages:
-                period   = meta.get("period",   "").upper()
-                filename = meta.get("filename", "").upper()
-                if re.search(r"PLF|GLF", period) or re.search(r"PLF|GLF", filename):
-                    # PLF/GLF "Last Minute" filings have no SCHEDULE A header.
-                    # Parse all pages — the contribution parser naturally ignores
-                    # non-contribution pages (cover, instructions, declaration)
-                    # because they contain no date-anchors with matching amounts.
-                    sch_a_pages = list(range(len(pages)))
-
-            # ── Parse contributions (Sch A + B) ───────────────────────
-            contribs = _parse_schedule_a(pages, sch_a_pages)
-            inkind   = _parse_schedule_a(pages, sch_b_pages)
-            for row in inkind:
-                row["transaction_type"] = "In-Kind"
-
-            # ── Duplicate-report dedup (content-based) ────────────────
-            # Some Kansas amendments embed two or more full copies of each
-            # schedule in a single PDF (e.g. SW01JX_amend1801.pdf has
-            # Schedule A pages 1-7 repeated as pages 9-15).  Page-level
-            # truncation (_first_block) caused false cuts when a PDF has
-            # Schedule A → Schedule C → more Schedule A (a legitimate
-            # multi-section layout).  Instead, deduplicate by content key
-            # after parsing: same (date, amount, contributor, city) within
-            # a single file = duplicate row from a repeated schedule block.
-            def _dedup_rows(rows: list[dict], key_fields: list[str]) -> list[dict]:
-                seen: set[tuple] = set()
-                out: list[dict] = []
-                for r in rows:
-                    k = tuple(r.get(f, "") for f in key_fields)
-                    if k not in seen:
-                        seen.add(k)
-                        out.append(r)
-                return out
-
-            contrib_key = ["date", "amount", "contributor_name", "contributor_city",
-                           "transaction_type"]
-            contribs = _dedup_rows(contribs, contrib_key)
-            inkind   = _dedup_rows(inkind,   contrib_key)
-            result["contributions"] = contribs + inkind
-
-            # ── Parse expenditures (Sch C) ────────────────────────────
-            expends = _parse_schedule_c(pages, sch_c_pages)
-            expend_key = ["date", "amount", "payee_name", "payee_city"]
-            result["expenditures"] = _dedup_rows(expends, expend_key)
-
-    except Exception as e:
-        # Non-fatal: log and return empty
-        result["_error"] = str(e)
-
-    return result
-
-
-# ======================== Amendment resolution =======================
-
-def _normalize_period(period: str) -> str:
-    """
-    Normalize a filing period code so that originals and their amendments
-    collapse to the same key:
-
-      "amend1807"  →  "1807"   (strip "amend" prefix)
-      "201807"     →  "1807"   (strip leading "20" from 6-digit YYYYMM)
-      "2018PLF"    →  "2018plf" (unchanged — special period, no amendment)
-    """
-    p = period.lower().strip()
-    if p.startswith("amend"):
-        return p[5:]                                # "amend1807" → "1807"
-    if len(p) == 6 and p[:2] == "20" and p[2:].isdigit():
-        return p[2:]                                # "201807" → "1807"
-    return p
-
-
-def _choose_files(manifest_rows: list[dict]) -> list[dict]:
-    """
-    For each (candidate_name, normalized_period) group, prefer the amendment
-    PDF over the original when both exist.
-
-    "amend1807" and "201807" both normalize to base period "1807", so an
-    amendment correctly suppresses its original (fixing the Willis Hartman
-    duplicate-contribution problem where both SW01KK_201807 and
-    SW01KK_amend1807 were parsed independently).
-    """
-    groups: dict[tuple, list[dict]] = defaultdict(list)
-    for row in manifest_rows:
-        key = (row["candidate_name"], _normalize_period(row["period"]))
-        groups[key].append(row)
-
-    chosen = []
-    for key, rows in groups.items():
-        amendments = [r for r in rows if "amend" in r["filename"].lower()]
-        originals  = [r for r in rows if "amend" not in r["filename"].lower()]
-        if amendments:
-            chosen.extend(amendments)   # amendment supersedes original
+    kept: list[dict] = []
+    dropped = 0
+    for uid, group in by_uid.items():
+        k = scrape_count.get(uid, 1)
+        if k <= 1:
+            kept.extend(group)
+            continue
+        if len(group) % k == 0:
+            block = len(group) // k
+            kept.extend(group[-block:])
+            dropped += len(group) - block
         else:
-            chosen.extend(originals)
-    return chosen
+            quota = {sig: max(1, cnt // k) for sig, cnt
+                     in collections.Counter(_row_signature(r) for r in group).items()}
+            for r in group:
+                sig = _row_signature(r)
+                if quota.get(sig, 0) > 0:
+                    quota[sig] -= 1
+                    kept.append(r)
+                else:
+                    dropped += 1
+    kept.sort(key=lambda r: r.get("_row_num", 0))
+    return kept, dropped
 
 
 # ============================== run ==================================
@@ -836,212 +617,382 @@ def run():
 
 
 def _run(log, t0: float):
-    # ── Load manifest ──────────────────────────────────────────────────
-    if not MANIFEST.exists():
-        print("ERROR: manifest not found — run the scraper first")
-        sys.exit(1)
+    # ── Load the scraper's output CSVs ─────────────────────────────────
+    # Raised, not sys.exit()'d: SystemExit is a BaseException, so exiting here
+    # would skip run()'s handler and emit no parse_completed event at all,
+    # leaving the run report showing a parse that started and never finished.
+    summary_path = _input_path("summary")
+    summary_rows = _read_csv(summary_path)
+    if not summary_rows:
+        raise FileNotFoundError(
+            f"{summary_path} is missing or empty — run "
+            f"src/pipeline/scrapers/kansas.py first")
 
-    with open(MANIFEST, newline="", encoding="utf-8") as f:
-        all_rows = list(csv.DictReader(f))
+    sched_a_rows = _read_csv(_input_path("schedule_a"))
+    sched_b_rows = _read_csv(_input_path("schedule_b"))
+    sched_c_rows = _read_csv(_input_path("schedule_c"))
 
-    # Only parse R&E PDFs that exist on disk
-    manifest_rows = [
-        r for r in all_rows
-        if (RAW_DIR / r["filename"]).exists()
-        and "amend" not in r["filename"].lower()  # handled separately by _choose_files
-        or ("amend" in r["filename"].lower() and (RAW_DIR / r["filename"]).exists())
-    ]
-    manifest_rows = _choose_files(manifest_rows)
-    # Also exclude AT / affidavit filenames (shouldn't be in manifest but just in case)
-    manifest_rows = [
-        r for r in manifest_rows
-        if not re.search(r"_AT\.pdf$|_aff\w*\.pdf$", r["filename"], re.IGNORECASE)
-    ]
+    if MANIFEST.exists():
+        manifest_rows = _read_csv(MANIFEST)
+        log.info(f"  {len(summary_rows):,} candidate filings scraped "
+                 f"({len(manifest_rows):,} in manifest)")
+    else:
+        log.info(f"  {len(summary_rows):,} candidate filings scraped (no manifest.csv found)")
 
-    log.info(f"  {len(manifest_rows):,} PDFs to parse (after amendment dedup)")
+    # ── Collapse re-scraped filings ────────────────────────────────────
+    scrape_count = collections.Counter(r.get("candidate_uid", "") for r in summary_rows)
+    rescraped = {u: c for u, c in scrape_count.items() if c > 1}
+    if rescraped:
+        log.info(f"  {len(rescraped):,} filings were scraped more than once "
+                 f"(up to {max(rescraped.values())}x) — collapsing duplicate rows")
+
+    dropped_dupes = {}
+    sched_a_rows, dropped_dupes["schedule_a"] = _dedup_rescrapes(sched_a_rows, scrape_count)
+    sched_b_rows, dropped_dupes["schedule_b"] = _dedup_rescrapes(sched_b_rows, scrape_count)
+    sched_c_rows, dropped_dupes["schedule_c"] = _dedup_rescrapes(sched_c_rows, scrape_count)
+
+    # Keep the LAST summary row per filing — the most recent scrape.
+    summary_by_uid: dict[str, dict] = {}
+    for row in summary_rows:
+        uid = row.get("candidate_uid", "")
+        if uid:
+            summary_by_uid[uid] = row
+
+    # ── Keep only the newest version of each reporting period ──────────
+    summary_by_uid, election_year_by_uid, superseded = resolve_amendments(summary_by_uid)
+    if superseded:
+        log.info(f"  {superseded:,} superseded filings dropped (amendments restate "
+                 f"the whole period) — {len(summary_by_uid):,} current filings remain")
+
+    live_uids = set(summary_by_uid)
+    def _keep_live(rows):
+        kept = [r for r in rows if r.get("candidate_uid", "") in live_uids]
+        return kept, len(rows) - len(kept)
+
+    sched_a_rows, sup_a = _keep_live(sched_a_rows)
+    sched_b_rows, sup_b = _keep_live(sched_b_rows)
+    sched_c_rows, sup_c = _keep_live(sched_c_rows)
+    dropped_dupes["schedule_a"] += sup_a
+    dropped_dupes["schedule_b"] += sup_b
+    dropped_dupes["schedule_c"] += sup_c
+
+    for key, rows, dropped in (("schedule_a", sched_a_rows, dropped_dupes["schedule_a"]),
+                               ("schedule_b", sched_b_rows, dropped_dupes["schedule_b"]),
+                               ("schedule_c", sched_c_rows, dropped_dupes["schedule_c"])):
+        log.file_parsed(INPUT_NAMES[key], key, len(rows), skipped=dropped)
+    log.file_parsed(INPUT_NAMES["summary"], "summary", len(summary_by_uid),
+                    skipped=len(summary_rows) - len(summary_by_uid))
+
+    # ── Build the candidate lookup: candidate_uid -> resolved metadata ──
+    cand_by_uid: dict[str, dict] = {}
+    for uid, row in summary_by_uid.items():
+        parts = _split_candidate_uid(uid)
+        cand_name = utils.clean_name(_clean(row.get("candidate_name", "")))
+        office    = _clean(row.get("office_sought", "")) or parts["office_sought"]
+        district  = _normalize_district(row.get("district", "") or parts["district_number"])
+        election_year = election_year_by_uid.get(
+            uid, _election_year_clean(parts["cycle_label"]))
+        # candidate_uid's amendment_date component is populated by the scraper
+        # only when the CFR Examiner grid shows this filing as amended —
+        # that's a real, known signal, unlike filing_id (no stable filing
+        # identifier exists in the scraped data, so that column stays blank).
+        amended = "1" if parts["amendment_date"] else ""
+        committee_type = COMMITTEE_TYPE_BY_GROUP.get(
+            parts["office_group"], CANDIDATE_COMMITTEE_TYPE)
+        cand_by_uid[uid] = {
+            # For a PAC or party committee this is the organisation's name and
+            # there is no candidate behind it, so candidate_name stays blank on
+            # its transactions and it never enters candidates.csv.gz.
+            "filer_name":     cand_name,
+            "committee_type": committee_type,
+            "is_candidate":   committee_type == CANDIDATE_COMMITTEE_TYPE,
+            "candidate_name": cand_name if committee_type == CANDIDATE_COMMITTEE_TYPE else "",
+            "office":         office,
+            "district":       district,
+            "election_year":  election_year,
+            "office_group":   parts["office_group"],
+            "amended":        amended,
+            # County is the only jurisdiction-shaped field in the source and is
+            # filled on 91% of filings; it's what scopes a District Attorney
+            # race. Kentucky and Alaska map their own equivalents the same way.
+            "jurisdiction":   _clean(row.get("county", "")),
+            # Candidate committees share the candidate's own address —
+            # populate committees.csv.gz's city/zip from it below.
+            "city":           _clean(row.get("city", "")),
+            "zip":            _clean_zip(row.get("zip", "")),
+        }
 
     # ── Output writers ─────────────────────────────────────────────────
     contrib_path = CLEAN_DIR / "contributions.csv.gz"
     expend_path  = CLEAN_DIR / "expenditures.csv.gz"
+    loans_path   = CLEAN_DIR / "loans_debts.csv.gz"
     cand_path    = CLEAN_DIR / "candidates.csv.gz"
     comm_path    = CLEAN_DIR / "committees.csv.gz"
 
-    contrib_f = gzip.open(contrib_path, "wt", newline="", encoding="utf-8")
-    expend_f  = gzip.open(expend_path,  "wt", newline="", encoding="utf-8")
+    contrib_rownum = expend_rownum = loan_rownum = 0
+    unmatched = 0
+    dropped_no_amount = dropped_no_date = 0
+    contrib_f = expend_f = loans_f = None
 
-    contrib_w = csv.DictWriter(contrib_f, fieldnames=C.CONTRIBUTIONS,
-                               extrasaction="ignore", restval="")
-    expend_w  = csv.DictWriter(expend_f,  fieldnames=C.EXPENDITURES,
-                               extrasaction="ignore", restval="")
-    contrib_w.writeheader()
-    expend_w.writeheader()
+    try:
+        contrib_f = gzip.open(contrib_path, "wt", newline="", encoding="utf-8")
+        expend_f  = gzip.open(expend_path,  "wt", newline="", encoding="utf-8")
+        loans_f   = gzip.open(loans_path,   "wt", newline="", encoding="utf-8")
 
-    # Accumulators for candidates / committees
-    # Key: (normalized_name, office, district, election_year) → most recent meta
+        contrib_w = csv.DictWriter(contrib_f, fieldnames=C.CONTRIBUTIONS,
+                                   extrasaction="ignore", restval="")
+        expend_w  = csv.DictWriter(expend_f,  fieldnames=C.EXPENDITURES,
+                                   extrasaction="ignore", restval="")
+        loans_w   = csv.DictWriter(loans_f,   fieldnames=C.LOANS_DEBTS,
+                                   extrasaction="ignore", restval="")
+        contrib_w.writeheader()
+        expend_w.writeheader()
+        loans_w.writeheader()
+
+        def _candidate_for(txn: dict) -> dict:
+            """Resolved filing metadata, or a name-only fallback.
+
+            A schedule row whose candidate_uid has no summary row would
+            otherwise be dropped, taking real money with it. Wyoming keeps such
+            rows with blank enrichment instead; the schedules carry the filer's
+            name text, which is enough to keep committee_name populated.
+            """
+            nonlocal unmatched
+            cand = cand_by_uid.get(txn.get("candidate_uid", ""))
+            if cand is not None:
+                return cand
+            unmatched += 1
+            name = utils.clean_name(_clean(txn.get("candidate", "")))
+            return {
+                "filer_name": name, "candidate_name": name,
+                "committee_type": CANDIDATE_COMMITTEE_TYPE, "is_candidate": True,
+                "office": "", "district": "", "election_year": "",
+                "office_group": "", "amended": "", "jurisdiction": "",
+                "city": "", "zip": "",
+            }
+
+        # ── Contributions: Schedule A (minus loans) + Schedule B as In-Kind ──
+        def _write_contribution_rows(rows: list[dict], source_key: str,
+                                     forced_type: str, amount_field: str):
+            nonlocal contrib_rownum, loan_rownum
+            nonlocal dropped_no_amount, dropped_no_date
+            raw_file = INPUT_NAMES[source_key]
+            for txn in rows:
+                cand = _candidate_for(txn)
+                amount = _parse_amount(txn.get(amount_field, ""))
+                txn_date = _parse_date(txn.get("date", ""))
+                if not amount:
+                    dropped_no_amount += 1
+                    continue
+                if not txn_date:
+                    dropped_no_date += 1
+                    continue
+
+                payment_type = _clean(txn.get("type_of_payment", ""))
+                shared = {
+                    "state":             STATE,
+                    "committee_name":    cand["filer_name"],
+                    "amount":            amount,
+                    "date":              txn_date,
+                    "candidate_name":    cand["candidate_name"],
+                    "election_year":     cand["election_year"],
+                    "amended":           cand["amended"],
+                    "raw_file":          raw_file,
+                }
+
+                # Loans are receipts the campaign has to repay, not income.
+                if payment_type.lower() in LOAN_PAYMENT_TYPES:
+                    loan_rownum += 1
+                    loans_w.writerow({
+                        **shared,
+                        "original_amount":    amount,
+                        "record_type":        "Loan",
+                        "counterparty_name":  _clean(txn.get("contributor_name", "")),
+                        "counterparty_city":  _clean(txn.get("contributor_city", "")),
+                        "counterparty_state": _clean_state_code(txn.get("contributor_state", "")),
+                        "counterparty_zip":   _clean_zip(txn.get("contributor_zip", "")),
+                        "row_num":            txn.get("_row_num", ""),
+                    })
+                    continue
+
+                contrib_rownum += 1
+                contrib_w.writerow({
+                    **shared,
+                    "transaction_type":  forced_type or payment_type,
+                    "contributor_name":  _clean(txn.get("contributor_name", "")),
+                    "contributor_city":  _clean(txn.get("contributor_city", "")),
+                    "contributor_state": _clean_state_code(txn.get("contributor_state", "")),
+                    "contributor_zip":   _clean_zip(txn.get("contributor_zip", "")),
+                    # Schedule B's own occupation column is used as-is; its
+                    # in-kind `description` is transaction text, not an
+                    # occupation, so it is deliberately not substituted here.
+                    "occupation":        _clean(txn.get("occupation", "")),
+                    "office":            cand["office"],
+                    "row_num":           txn.get("_row_num", ""),
+                })
+
+        _write_contribution_rows(sched_a_rows, "schedule_a", "", "amount")
+        _write_contribution_rows(sched_b_rows, "schedule_b", "In-Kind", "value")
+
+        # ── Expenditures: Schedule C ────────────────────────────────────
+        raw_file_c = INPUT_NAMES["schedule_c"]
+        for txn in sched_c_rows:
+            cand = _candidate_for(txn)
+            amount = _parse_amount(txn.get("amount", ""))
+            txn_date = _parse_date(txn.get("date", ""))
+            if not amount:
+                dropped_no_amount += 1
+                continue
+            if not txn_date:
+                dropped_no_date += 1
+                continue
+            category, purpose = _split_purpose(txn.get("purpose_raw", ""))
+            expend_rownum += 1
+            expend_w.writerow({
+                "state":            STATE,
+                "committee_name":   cand["filer_name"],
+                "amount":           amount,
+                "date":             txn_date,
+                "transaction_type": _TXN_TYPE_BY_CATEGORY.get(category, "Expenditure"),
+                "payee_name":       _clean(txn.get("payee_name", "")),
+                "purpose":          purpose,
+                "category":         category,
+                "payee_city":       _clean(txn.get("payee_city", "")),
+                "payee_state":      _clean_state_code(txn.get("payee_state", "")),
+                "payee_zip":        _clean_zip(txn.get("payee_zip", "")),
+                "candidate_name":   cand["candidate_name"],
+                "office":           cand["office"],
+                "election_year":    cand["election_year"],
+                "amended":          cand["amended"],
+                "raw_file":         raw_file_c,
+                "row_num":          txn.get("_row_num", ""),
+            })
+    finally:
+        for handle in (contrib_f, expend_f, loans_f):
+            if handle is not None:
+                handle.close()
+
+    log.file_parsed("contributions.csv.gz", "contributions", contrib_rownum, role="output")
+    log.file_parsed("expenditures.csv.gz", "expenditures", expend_rownum, role="output")
+    log.file_parsed("loans_debts.csv.gz", "loans_debts", loan_rownum, role="output")
+    log.info(f"  Dropped: {dropped_no_amount:,} with no amount, "
+             f"{dropped_no_date:,} with an unusable date. "
+             f"Unmatched candidate_uid: {unmatched:,}")
+
+    # ── Write candidates.csv.gz ────────────────────────────────────────
+    # Dedup key mirrors the old parser: a candidate can file multiple R&E
+    # periods within the same cycle, but they collapse to one candidates.csv
+    # row (name, office, district, election_year) — NOT one row per
+    # candidate_uid, since candidate_uid varies per filing period.
+    roster_rows = _read_csv(_input_path("roster"))
+    party_index = PartyIndex(roster_rows) if roster_rows else None
+    if party_index:
+        log.file_parsed(INPUT_NAMES["roster"], "party_roster", len(roster_rows),
+                        skipped=len(roster_rows) - party_index.rows)
+    else:
+        log.warning("  No candidate_roster.csv — candidates will have no party. "
+                    "Re-run the scraper without --no-roster to fetch it.")
+
     candidates_seen: dict[tuple, dict] = {}
-    # Track row numbers across all output files
-    contrib_rownum = 0
-    expend_rownum  = 0
-
-    errors = 0
-
-    # ── Parse each PDF ─────────────────────────────────────────────────
-    for i, meta in enumerate(manifest_rows):
-        filename     = meta["filename"]
-        pdf_path     = RAW_DIR / filename
-        office       = meta.get("office", "")
-        election_year = _election_year_clean(meta.get("election_year", ""))
-        district     = meta.get("district", "")
-        cand_name_raw = meta.get("candidate_name", "")
-
-        if (i + 1) % 100 == 0:
-            log.info(f"  Parsed {i + 1:,}/{len(manifest_rows):,} PDFs …")
-
-        parsed = _parse_pdf(pdf_path, meta)
-
-        if "_error" in parsed:
-            log.warning(f"    Error in {filename}: {parsed['_error']}")
-            errors += 1
-            continue
-
-        # ── Resolve candidate name (PDF header > manifest) ─────────────
-        hdr       = parsed["header"]
-        cand_name = hdr.get("candidate_name") or utils.clean_name(cand_name_raw)
-        if not cand_name:
-            cand_name = utils.clean_name(cand_name_raw)
-        else:
-            cand_name = utils.clean_name(cand_name)
-
-        pdf_office   = hdr.get("office") or office
-        pdf_district = hdr.get("district") or district
-
-        # Normalize district — strip leading zeros for consistency
-        try:
-            pdf_district = str(int(pdf_district))
-        except (ValueError, TypeError):
-            pdf_district = pdf_district or district
-
-        # ── Register candidate ─────────────────────────────────────────
-        cand_key = (cand_name, pdf_office, pdf_district, election_year)
+    for uid, cand in cand_by_uid.items():
+        if not cand["is_candidate"]:
+            continue            # PACs and party committees aren't candidates
+        cand_key = (cand["candidate_name"], cand["office"], cand["district"], cand["election_year"])
         if cand_key not in candidates_seen:
             candidates_seen[cand_key] = {
                 "state":          STATE,
-                "candidate_name": cand_name,
-                "office":         pdf_office,
-                "district":       pdf_district,
-                "election_year":  election_year,
-                "party":          "",
-                "state_filer_id": "",
-                "raw_file":       filename,
-                "row_num":        "",
+                "candidate_name": cand["candidate_name"],
+                "office":         cand["office"],
+                "district":       cand["district"],
+                "election_year":  cand["election_year"],
+                "jurisdiction":   cand["jurisdiction"],
+                "party":          "",   # filled from the roster below
+                "state_filer_id": "",   # not available in source
+                "raw_file":       INPUT_NAMES["summary"],
+                "row_num":        summary_by_uid[uid].get("_row_num", ""),
+                # carried through to committees.csv.gz below, not part of
+                # C.CANDIDATES itself (extrasaction="ignore" drops it there)
+                "_city":          cand["city"],
+                "_zip":           cand["zip"],
             }
 
-        # ── Contributions ──────────────────────────────────────────────
-        committee_name = cand_name  # candidate's own campaign is the "committee"
-
-        for txn in parsed["contributions"]:
-            if not txn.get("amount") or not txn.get("date"):
-                continue
-            contrib_rownum += 1
-            contrib_w.writerow({
-                "state":             STATE,
-                "committee_name":    committee_name,
-                "amount":            txn["amount"],
-                "date":              txn["date"],
-                "transaction_type":  txn.get("transaction_type", ""),
-                "contributor_name":  txn.get("contributor_name", ""),
-                "contributor_city":  txn.get("contributor_city", ""),
-                "contributor_state": txn.get("contributor_state", ""),
-                "contributor_zip":   utils.clean_zip(txn.get("contributor_zip", "")),
-                "occupation":        txn.get("occupation", ""),
-                "candidate_name":    cand_name,
-                "office":            pdf_office,
-                "election_year":     election_year,
-                "raw_file":          filename,
-                "row_num":           contrib_rownum,
-            })
-
-        # ── Expenditures ───────────────────────────────────────────────
-        for txn in parsed["expenditures"]:
-            if not txn.get("amount") or not txn.get("date"):
-                continue
-            expend_rownum += 1
-            expend_w.writerow({
-                "state":          STATE,
-                "committee_name": committee_name,
-                "amount":         txn["amount"],
-                "date":           txn["date"],
-                "payee_name":     txn.get("payee_name", ""),
-                "purpose":        txn.get("purpose", ""),
-                "payee_city":     txn.get("payee_city", ""),
-                "payee_state":    txn.get("payee_state", ""),
-                "payee_zip":      utils.clean_zip(txn.get("payee_zip", "")),
-                "candidate_name": cand_name,
-                "office":         pdf_office,
-                "election_year":  election_year,
-                "raw_file":       filename,
-                "row_num":        expend_rownum,
-            })
-
-    contrib_f.close()
-    expend_f.close()
-    log.info(f"  Contributions: {contrib_rownum:,}   Expenditures: {expend_rownum:,}   Errors: {errors}")
-
-    # ── Write candidates.csv.gz ────────────────────────────────────────
     cand_rows = []
-    for ri, (key, meta_row) in enumerate(candidates_seen.items(), start=1):
-        # Split name into first/last heuristically (Last, First or First Last)
-        full = meta_row["candidate_name"]
-        if "," in full:
-            parts  = full.split(",", 1)
-            c_last = _clean(parts[0])
-            c_first = _clean(parts[1])
-        else:
-            tokens  = full.split()
-            c_first = tokens[0] if tokens else ""
-            c_last  = tokens[-1] if len(tokens) > 1 else ""
-
-        cand_rows.append({
+    conf_counts = {"exact": 0, "high": 0}
+    for meta_row in candidates_seen.values():
+        first, last = _split_name(meta_row["candidate_name"])
+        row = {
             **meta_row,
-            "person_id":      "",    # filled by assign_person_ids
-            "candidate_first": c_first,
-            "candidate_last":  c_last,
-            "incumbent":       "",
-            "jurisdiction":    "",
-            "raw_file":        meta_row["raw_file"],
-            "row_num":         ri,
-        })
+            "person_id":       "",   # filled by assign_person_ids
+            "candidate_first": first,
+            "candidate_last":  last,
+            "incumbent":       "",   # not available in source
+        }
+        if party_index:
+            hit = party_index.lookup(meta_row["candidate_name"], meta_row["office"],
+                                     meta_row["district"], meta_row["election_year"])
+            if hit:
+                row["party"]            = hit["party"]
+                row["party_source"]     = hit["party_source"]
+                row["match_confidence"] = hit["match_confidence"]
+                conf_counts[hit["match_confidence"]] += 1
+        cand_rows.append(row)
+
+    if party_index and cand_rows:
+        matched = sum(conf_counts.values())
+        log.info(f"  Party matched: {matched:,}/{len(cand_rows):,} candidates "
+                 f"({matched / len(cand_rows):.0%}) — "
+                 f"{conf_counts['exact']:,} exact, {conf_counts['high']:,} high")
 
     with gzip.open(cand_path, "wt", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=C.CANDIDATES,
-                           extrasaction="ignore", restval="")
+        w = csv.DictWriter(f, fieldnames=C.CANDIDATES, extrasaction="ignore", restval="")
         w.writeheader()
         w.writerows(cand_rows)
 
     n_cands = utils.assign_person_ids(cand_path, id_model="name_hash")
-    log.info(f"  Candidates: {n_cands:,}")
+    log.file_parsed("candidates.csv.gz", "candidates", n_cands, role="output")
 
     # ── Write committees.csv.gz ────────────────────────────────────────
-    # One committee row per candidate (their campaign committee).
+    # One committee row per candidate (their own campaign), same as the old
+    # parser — Kansas has no separate committee filer concept in this source.
+    # city/zip come from the candidate's own address, since a candidate
+    # committee's address is the candidate's address. treasurer_name is
+    # deliberately blank: the summary's signature_name is the report's
+    # e-signature and can be either the candidate or the treasurer, with no
+    # way to tell which, so mapping it would be worse than leaving it empty.
+    # Every filer gets a committee row: a candidate's own campaign committee,
+    # plus the PACs and party committees scraped from the viewer's other
+    # category. `candidate_name` is only populated for a candidate's own
+    # committee — a PAC is legally separate from any candidate, and
+    # assign_committee_person_ids leaves its person_id NULL by design
+    # (see columns.py). Which committee an independent PAC supports is
+    # enrichment, handled by enrich.py from a hand-reviewed registry.
+    committees_seen: dict[tuple, dict] = {}
+    for cand in cand_by_uid.values():
+        key = (cand["filer_name"], cand["committee_type"], cand["election_year"])
+        committees_seen.setdefault(key, cand)
+
     with gzip.open(comm_path, "wt", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=C.COMMITTEES,
-                           extrasaction="ignore", restval="")
+        w = csv.DictWriter(f, fieldnames=C.COMMITTEES, extrasaction="ignore", restval="")
         w.writeheader()
-        for ri, row in enumerate(cand_rows, start=1):
+        for ri, cand in enumerate(committees_seen.values(), start=1):
             w.writerow({
                 "state":          STATE,
-                "person_id":      "",         # filled by assign_committee_person_ids
-                "committee_name": row["candidate_name"],
-                "committee_type": "Candidate",
-                "election_year":  row["election_year"],
-                "candidate_name": row["candidate_name"],
+                "person_id":      "",   # filled by assign_committee_person_ids
+                "committee_name": cand["filer_name"],
+                "committee_type": cand["committee_type"],
+                "election_year":  cand["election_year"],
+                "candidate_name": cand["candidate_name"],
+                "city":           cand["city"],
+                "zip":            cand["zip"],
                 "state_filer_id": "",
-                "raw_file":       row["raw_file"],
+                "raw_file":       INPUT_NAMES["summary"],
                 "row_num":        ri,
             })
 
     n_comm_matched = utils.assign_committee_person_ids(comm_path, cand_path)
-    log.info(f"  Committees: {len(cand_rows):,}  (matched {n_comm_matched:,} to candidates)")
+    by_type = collections.Counter(c["committee_type"] for c in committees_seen.values())
+    log.file_parsed("committees.csv.gz", "committees", len(committees_seen), role="output")
+    log.info(f"  Committee types: {dict(by_type)} — {n_comm_matched:,} matched to candidates")
 
     duration = round(time.perf_counter() - t0, 1)
     log._emit("parse_completed",
@@ -1049,8 +1000,10 @@ def _run(log, t0: float):
               duration_s=duration,
               contributions=contrib_rownum,
               expenditures=expend_rownum,
+              loans_debts=loan_rownum,
               candidates=n_cands,
-              errors=errors)
+              duplicate_rows_dropped=sum(dropped_dupes.values()),
+              unmatched=unmatched)
     log.info(f"Done in {duration}s")
 
 
