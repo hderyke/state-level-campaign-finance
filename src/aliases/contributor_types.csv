@@ -455,3 +455,11 @@ NM,Lobbying Organization,Organization,
 # One stray row carries the literal 'Committee' -- too vague to place,,,
 "# between a PAC and a party committee, so left unmapped.",,,
 NM,Committee,,
+# MEC's contribution export has no raw contributor-type field of its own --
+# these three are synthesized by the parser itself (Contributor-Committee
+# transfer flag = Yes -> Committee; Contributor-Company present -> Business;
+# otherwise Contributor-First/Last Name -> Individual) and mapped here like any
+# other state's raw value would be.
+MO,Individual,Individual,
+MO,Business,Organization,
+MO,Committee,Committee,

@@ -435,3 +435,16 @@ NM,Independent Expenditure,Independent Expenditure,,,,
 NM,Mixed (Independent & Contribution/Coordination),PAC,,,,
 NM,Individual Independent Expenditure Filer,Independent Expenditure,,,,
 NM,Other,Other,,,,
+MO,Candidate,Candidate Committee,,,,
+MO,Exploratory,Candidate Committee,,,,
+MO,Federal PAC,PAC,,,,
+MO,Political Action,PAC,,,,
+MO,Out of State,PAC,,,,
+MO,Political Party,Party Committee,,,,
+# Campaign/Debt Service/Exemption/Non-Committee are MEC-specific administrative
+# sub-types (e.g. debt-retirement-only committees, exemption filers) that don't
+# map cleanly onto the shared Candidate/PAC/Party vocabulary -- left as Other.
+MO,Campaign,Other,,,,
+MO,Debt Service,Other,,,,
+MO,Exemption,Other,,,,
+MO,Non-Committee,Other,,,,
