@@ -396,3 +396,31 @@ NM,Contributions - Intra-Candidate Transfer,Transfer
 NM,Contributions - Anonymous,Monetary
 NM,Special Event,Monetary
 NM,Contributions - Other,Other
+# == Kansas ===================================================================,,
+# KS Schedule A 'type of payment'. Loan-typed receipts are routed to,,
+# loans_debts by the parser, so KS,Loan is a safety net only.
+KS,Check,Monetary
+KS,Credit Card,Monetary
+KS,E Funds,Monetary
+KS,Cash,Monetary
+KS,Other,Other
+KS,Refund,Refund
+KS,Loan,Loan
+KS,In-Kind,In-Kind
+# == Vermont ===================================================================,,
+"# Transaction Subtype on the bulk contributions feed, which is where the real",,
+"# distinction lives (Transaction Type is the literal ""Contribution"" on every row).",,
+# Loan rows are routed to loans_debts by the parser and so never reach this,,
+# table; mapped anyway so a routing change can't produce an unmapped value.,,
+VT,Monetary Contribution,Monetary
+VT,In-Kind (Non-Money) Contribution,In-Kind
+VT,In-Kind Contribution,In-Kind
+VT,Refunded Contribution,Refund
+VT,Refund Contribution,Refund
+VT,Returned Contribution,Refund
+VT,Loan Received,Loan
+VT,Loan Forgiven,Loan
+"# The grid feed (open year) publishes no subtype at all — every 2026 row",,
+"# carries the coarse ""Contribution"". Mapped to Monetary because monetary",,
+# contributions are ~99% of the itemized feed; see docs/states/vermont.md.,,
+VT,Contribution,Monetary
