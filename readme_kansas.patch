@@ -1,0 +1,44 @@
+diff --git a/README.md b/README.md
+index b0dc5d3..7cbf30d 100644
+--- a/README.md
++++ b/README.md
+@@ -40,6 +40,8 @@ pip install -r requirements.txt
+ playwright install
+ ```
+ 
++Most browser-driven scrapers (AK, FL, MS, OR) use Playwright, hence `playwright install`. Kansas is the exception — it drives Chrome through Selenium, so it needs a local **Google Chrome** install; Selenium Manager fetches the matching chromedriver itself, nothing else to set up.
++
+ **Configure your user agent:**
+ 
+ `config.py` contains a `USER_AGENT` string used by all scrapers to avoid 403s from state disclosure sites. The default is a Mac Chrome string — if you're on Linux or Windows, replace it with your own. You can find your user agent at [whatismybrowser.com](https://www.whatismybrowser.com).
+@@ -210,7 +212,7 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
+ | Illinois (IL) | ✅ | ✅ | Full-history flat files updated nightly; large |
+ | Indiana (IN) | ✅ | ✅ | Bulk ZIP by year; entity sweep via CommitteeDetail pages |
+ | Iowa (IA) | ✅ | ✅ | Individual PDFs via IECDB API |
+-| Kansas (KS) | 🚧 | 🚧 | In development — a `kansas_v2` rewrite is underway (see `kansas_v2.py`). The original `kansas.py` works (individual PDFs from KPDC static index pages, name_hash ID, no party data in source) but is being superseded; treat output as provisional |
++| Kansas (KS) | ⚠️ | ✅ | **Only e-filed reports exist in machine-readable form.** A filing submitted on paper appears in the results grid but is a scanned PDF with no HTML report behind it, so it cannot be scraped — the scraper counts those rows as `paper-only` and skips them. This applies to **candidates, PACs and party committees alike**: a filer who only ever filed on paper is absent entirely, and one who filed both ways has only their e-filed periods. The gap is large in older cycles — 771 of 1,695 rows in House 2016. SOS **CFR Examiner** (`sos.ks.gov`), Selenium + Chrome driving the ASP.NET search form; 78 searches across the three filer types. name_hash ID; no filer ID in source. Party joined from the SOS Candidate List roster (`party_source`/`match_confidence`). **Headed only** — CloudFront blocks headless Chrome and rate-limits sustained runs (see `--delay`). See [docs/states/kansas.md](docs/states/kansas.md) |
+ | Kentucky (KY) | ✅ | ✅ | KREF flat CSV exports; per-party candidate exports for party data; per-year contributions + expenditures; name_hash ID |
+ | Louisiana (LA) | ✅ | ✅ | Bulk CSVs in 4-year ranges; no committee_type in source; person_id from stable FilerNumber |
+ | Maine (ME) | ⚠️ | ⚠️ | In progress; occupation/employer enrichment requires a per-transaction detail-page scrape via Playwright (~400K pages) |
+@@ -241,10 +244,18 @@ For full details on adding a new state, see [docs/contributing.md](docs/contribu
+ 
+ **Mississippi — the 2024–2026 data gap.** Mississippi is fully implemented and validated, but if you query it you'll notice contributions and expenditures cut off cleanly after 2023, with recent years all but empty. This is **not** a scraper bug. It was investigated by querying the live source API directly with explicit date ranges, which returns the same near-empty result — ruling out silent truncation. The root cause is state law: Mississippi does not require electronic filing until **January 1, 2027** ([HB1334, 2025 Regular Session](https://legiscan.com/MS/bill/HB1334/2025)). Until then, candidates and committees may file on paper, and those filings aren't reliably transcribed into the searchable system this pipeline reads from. The window should backfill naturally once mandatory e-filing begins; re-scrapes after that date should be checked for a sudden jump in 2024–2026 coverage. Full detail in [docs/states/mississippi.md](docs/states/mississippi.md).
+ 
+-**Kansas and Montana — in development.** These are not production-ready and their output (if any) should be treated as provisional:
++**Kansas — headed only, and rate-limited.** Kansas reads the Secretary of State's CFR Examiner directly (`sos.ks.gov/elections/cfr_viewer/`) rather than downloading ~3,600 PDFs. Two operational constraints, both confirmed on live runs:
++
++- **It must run headed.** CloudFront serves headless Chrome a "403 ERROR / Request blocked" page instead of the site; a visible Chrome window on the same machine and IP works fine. So KS can't run unattended on a headless box without a virtual display — exclude it from daemon runs or give those runs a display.
++- **The site rate-limits sustained scraping.** A full run was cut off ~54 candidates in. The scraper pauses between candidates (`--delay`, default 0.5s; use 1–2s if you get blocked), and on a block it backs off up to ~30 minutes, then re-submits the search and pages back to where it stopped. Runs are resumable: Ctrl-C is safe, and re-running the same command skips everything already in the manifest.
++
++A full sweep is 78 searches across candidate committees, PACs and party committees, and takes hours.
++
++**Know the coverage limit before using this data.** Kansas accepts filings on paper as well as electronically, and a paper filing is published only as a scanned PDF — there is no HTML report behind it, and nothing itemized to parse. The two are told apart in the results grid: an e-filed row puts the filer's name inside the link, a paper-only row leaves that link empty and prints the name beside it. The scraper recognises the second kind, counts it as `paper-only`, and moves on.
++
++The consequence: **a candidate, PAC or party committee that filed only on paper does not appear in the cleaned data at all**, and one that filed both ways appears with only its e-filed periods. So a $0 total in this dataset means "nothing e-filed", not "raised nothing". The gap is largest in older cycles — 771 of 1,695 rows in the House 2016 search were paper-only — and the `paper-only skipped` count in each run's summary is the honest size of it. If you need those filings, the PDFs are still on the site and the old `kansas_pdf_legacy.py` scraper/parser (unwired) show one way to read them.
+ 
+-- **Kansas** has a working original scraper/parser (`kansas.py`) but is mid-rewrite — `kansas_v2.py` is the in-progress replacement.
+-- **Montana** has its source fully reverse-engineered and documented (`docs/states/montana.md`), but the scraper and parser are not yet wired into the pipeline.
++Full detail in [docs/states/kansas.md](docs/states/kansas.md).
+ 
+ **Tennessee — confirm the search form before the first scrape.** TNCAMP has no bulk download and no API; the scraper drives the public search form and walks the paginated results, downloading each page's CSV export. The POST field names it submits come from a script that scraped this same form successfully, and an earlier iteration in this repo did pull real result pages with them — but they could not be re-verified against the live form's raw HTML while the current version was written, and TN.gov's form has gained at least one selector since. Run:
+ 
