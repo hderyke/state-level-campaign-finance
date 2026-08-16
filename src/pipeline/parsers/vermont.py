@@ -211,6 +211,15 @@ CORPORATE_SUFFIXES = {
     "corp", "corp.", "pc", "p.c.", "pa", "p.a.", "company", "incorporated",
 }
 
+# Generational suffixes that Vermont's bulk feed sometimes renders as their
+# own comma-separated segment — "TURNER, JR, DONALD H" rather than the usual
+# "TURNER JR, DONALD H" or "TURNER, DONALD H". Confirmed against real rows
+# for at least eight distinct filers (Antonellis, Burnham, Clarke, Dakin,
+# Davis, Gulley, Smith, Turner), so this is handled generally in
+# split_person_name rather than patched per name — see NAME_SUFFIXES usage
+# there.
+NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
+
 
 # ============================== helpers ===============================
 
@@ -318,6 +327,13 @@ def split_person_name(raw: str) -> tuple[str, str, str]:
     punctuation, not a name inversion, and is left alone — this function is
     only applied to candidate names, but the guard keeps an organization
     filing as a candidate from being mangled.
+
+    A generational suffix can also land as its own comma-separated segment —
+    "TURNER, JR, DONALD H" rather than "TURNER JR, DONALD H" — which a plain
+    first-comma split would misread as last="TURNER", first="JR,". When the
+    segment right after the first comma is nothing but a known suffix
+    (NAME_SUFFIXES), it's folded onto the surname and the split continues
+    into the segment after it for the real given names.
     """
     v = utils.clean_name(raw)
     if not v:
@@ -326,6 +342,13 @@ def split_person_name(raw: str) -> tuple[str, str, str]:
     if "," in v:
         last, rest = v.split(",", 1)
         last, rest = last.strip(), rest.strip()
+
+        if "," in rest:
+            maybe_suffix, remainder = rest.split(",", 1)
+            if maybe_suffix.strip().lower().rstrip(".") in NAME_SUFFIXES:
+                last = f"{last} {maybe_suffix.strip()}"
+                rest = remainder.strip()
+
         tail = rest.split()[0].lower().rstrip(".") if rest else ""
         if rest and tail not in CORPORATE_SUFFIXES:
             display = utils.clean_name(f"{rest} {last}")
