@@ -20,6 +20,10 @@ src/main.py — Single entry point for the campaign finance pipeline.
   --no-report        skip HTML report generation after run
   --fallback         on state failure, restore from S3 successful/ and
                      aggregate anyway (mix of fresh + fallback data)
+  --keep-local       (pipeline commands only, needs ops/) don't wipe a
+                     state's local data/ folder after syncing it back to
+                     the external drive — default is to wipe, to keep
+                     internal disk space free for aggregate's DuckDB spill
 
   Scraper flags (forwarded to the scraper subprocess; orc validates before passing)
   ─────────────────────────────────────────────────────────────────
@@ -92,6 +96,28 @@ def _cloud_s3():
         print(f"    ({e})")
         sys.exit(1)
 
+
+def _ops_data_sync():
+    """Lazy-load ops.data_sync — optional external-drive load/save wrapped
+    around a pipeline run (pulls each state onto local disk before the run,
+    pushes the updated folder back after a successful one).
+
+    ops/ holds personal Mac-Mini scheduling/deployment scripts and is
+    gitignored (not part of the public repo — same reasoning as cloud/, see
+    _cloud_s3() above). Unlike cloud/s3, this integration is optional rather
+    than required: data_sync's own load_states/save_states already no-op
+    (with a warning) if CF_EXTERNAL_DATA_ROOT isn't set or the drive isn't
+    mounted, so a clone without ops/ should behave the same way — the
+    pipeline just runs against whatever's already in data/, silently
+    skipping the external-drive sync step instead of failing.
+    """
+    try:
+        from ops import data_sync
+        return data_sync
+    except ImportError:
+        return None
+
+
 DATA_COMMANDS     = {"push", "pull"}
 ALL_COMMANDS      = PIPELINE_COMMANDS | DATA_COMMANDS
 
@@ -109,7 +135,7 @@ def _print_help():
     print(__doc__)
 
 
-def _parse_args(argv: list[str]) -> tuple[bool, bool, bool, str, list[str], list[str]]:
+def _parse_args(argv: list[str]) -> tuple[bool, bool, bool, bool, str, list[str], list[str]]:
     """
     Parse top-level CLI arguments.
 
@@ -117,13 +143,15 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, bool, str, list[str], list
         daemon      — True if --daemon was present
         no_report   — True if --no-report was present
         fallback    — True if --fallback was present
+        keep_local  — True if --keep-local was present
         command     — the pipeline/data command (first non-flag arg)
         state_args  — remaining non-flag args (state abbreviations, 'all', 'db')
         extra_flags — scraper flags to forward via orc
     """
-    daemon    = False
-    no_report = False
-    fallback  = False
+    daemon     = False
+    no_report  = False
+    fallback   = False
+    keep_local = False
     extra_flags: list[str] = []
     clean_args: list[str]  = []
 
@@ -145,6 +173,10 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, bool, str, list[str], list
 
         elif a == "--fallback":
             fallback = True
+            i += 1
+
+        elif a == "--keep-local":
+            keep_local = True
             i += 1
 
         elif a == "--force":
@@ -192,7 +224,7 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, bool, str, list[str], list
     command   = clean_args[0] if clean_args else ""
     state_args = clean_args[1:]
 
-    return daemon, no_report, fallback, command, state_args, extra_flags
+    return daemon, no_report, fallback, keep_local, command, state_args, extra_flags
 
 
 # ====================== Push / pull dispatch =========================
@@ -335,7 +367,7 @@ def _sync_with_fallback(command: str, state_args: list[str],
 
 def main():
     """Parse top-level CLI args and dispatch to orc, push, or pull."""
-    daemon, no_report, fallback, command, state_args, extra_flags = _parse_args(sys.argv[1:])
+    daemon, no_report, fallback, keep_local, command, state_args, extra_flags = _parse_args(sys.argv[1:])
 
     if not command or command in ("-h", "--help"):
         _print_help()
@@ -358,6 +390,10 @@ def main():
         print(f"[!] --fallback only applies to pipeline commands (sync, reparse)")
         sys.exit(1)
 
+    if keep_local and command not in PIPELINE_COMMANDS:
+        print(f"[!] --keep-local only applies to pipeline commands (sync, reparse)")
+        sys.exit(1)
+
     # Daemon mode + run ID (push/pull only — pipeline lets orc handle its own run ID)
     if command in DATA_COMMANDS:
         setup_run(command, state_args, daemon=daemon)
@@ -366,12 +402,28 @@ def main():
 
     try:
         if command in PIPELINE_COMMANDS:
-            if fallback:
-                ok = _sync_with_fallback(command, state_args, extra_flags)
-                if not ok:
-                    sys.exit(1)
-            else:
-                orc.main(command, state_args, extra_flags=extra_flags)
+            # Pull these states onto local disk from the external drive (if
+            # ops/ is present and configured) before touching them, and push
+            # the updated folders back once the run succeeds. See
+            # _ops_data_sync() / ops/data_sync.py for why this is optional.
+            data_sync    = _ops_data_sync()
+            sync_targets = ([abbr for abbr, _ in orc.resolve_states(state_args)]
+                            if data_sync else None)
+            if data_sync:
+                data_sync.load_states(sync_targets)
+
+            agg_ok = False
+            try:
+                if fallback:
+                    agg_ok = _sync_with_fallback(command, state_args, extra_flags)
+                    if not agg_ok:
+                        sys.exit(1)
+                else:
+                    orc.main(command, state_args, extra_flags=extra_flags)
+                    agg_ok = True  # orc.main() only returns normally when every state passed
+            finally:
+                if agg_ok and data_sync:
+                    data_sync.save_states(sync_targets, wipe_local=not keep_local)
 
         elif command == "push":
             _push(state_args)
