@@ -14,6 +14,9 @@ data/
 logs/
 metadata/
 
+#playwright browser profiles (recreated by scrapers that need a persistent context — MO etc.)
+.playwright-profiles/
+
 # personal AWS deployment + operational tooling — not part of the public
 # pipeline; requires your own AWS account/bucket/Lambda/ECS setup to use
 cloud/
