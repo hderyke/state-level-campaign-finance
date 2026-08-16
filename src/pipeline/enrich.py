@@ -104,10 +104,27 @@ def _norm(val: str) -> str:
 
 
 def _clean_dir(state: str) -> Path:
-    state_lower = state.lower()
+    """Locate data/{State}/cleaned/ regardless of how the directory is cased.
+
+    The exact-case and .capitalize() attempts below resolve on a case-insensitive
+    filesystem (macOS, Windows) but not on Linux, and .capitalize() can't produce
+    a two-word name like "New Mexico" on any filesystem. The directory scan is
+    the same case-insensitive match tabulate.py already uses, and is what makes
+    multi-word states work off macOS.
+    """
+    state_lower = state.lower().replace("_", " ")
     d = PROJECT_ROOT / "data" / state_lower / "cleaned"
-    if not d.exists():
-        d = PROJECT_ROOT / "data" / state.capitalize() / "cleaned"
+    if d.exists():
+        return d
+    d = PROJECT_ROOT / "data" / state.capitalize() / "cleaned"
+    if d.exists():
+        return d
+
+    data_dir = PROJECT_ROOT / "data"
+    if data_dir.is_dir():
+        for sub in data_dir.iterdir():
+            if sub.is_dir() and sub.name.lower().replace("_", " ") == state_lower:
+                return sub / "cleaned"
     return d
 
 

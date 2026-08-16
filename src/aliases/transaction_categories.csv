@@ -381,6 +381,21 @@ WI,Transfer,Transfer
 "# An independent expenditure is spending, not a donation to the filer — Other",,
 # keeps it out of donor rankings on the contributions side.,,
 WI,Independent Expenditure,Other
+# == New Mexico ==============================================================,,
+"# Contribution Type (column W). Complete observed set, 2020-2026.",,
+# 'Loans Received' is routed to loans_debts by the parser and so never,,
+# reaches this table; it is mapped anyway so a routing change can't,,
+# silently produce an uncategorised row.,,
+NM,Contributions - Monetary,Monetary
+NM,Contributions - In-Kind,In-Kind
+NM,Loans Received,Loan
+NM,Return Contribution,Refund
+NM,Contributions - Intra-Candidate Transfer,Transfer
+# Anonymous and Special Event are both cash in the door -- the distinction,,
+"# is how it was collected, not what form it took.",,
+NM,Contributions - Anonymous,Monetary
+NM,Special Event,Monetary
+NM,Contributions - Other,Other
 # == Kansas ===================================================================,,
 # KS Schedule A 'type of payment'. Loan-typed receipts are routed to,,
 # loans_debts by the parser, so KS,Loan is a safety net only.
