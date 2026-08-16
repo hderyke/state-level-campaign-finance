@@ -94,9 +94,37 @@ REQUIRED_COLS = {
 # for states in STATES_WITHOUT_FILER_ID — these are columns where REQUIRED_COLS
 # demands a fill rate that the source data structurally can't provide for those
 # states (no numeric filer ID anywhere in the source, period).
+#
+# NOTE: this used to also carry "expenditures": {"committee_name"} for TN,
+# on the theory that TN's expenditure export had no per-row filer identifier
+# at all. That turned out to be a parsers/tennessee.py bug, not a source gap:
+# the filer name is 100% populated under a *different* header
+# ("Candidate/PAC Name") than the one the parser was reading
+# ("Recipient Name", 0% filled for expenditures) — see get_recipient() in
+# that parser. Fixed 2026-08-08; committee_name is now 100% filled for TN
+# expenditures, and AK/KS/KY (the other name_hash states) were already 100%
+# filled, so this entry is gone rather than left as dead code.
 TIER1_OPTIONAL_FOR_NAME_HASH = {
     "candidates": {"state_filer_id"},
     "committees": {"state_filer_id"},
+}
+
+# Per-state, per-table columns downgraded from a tier-1 failure to a tier-2
+# warning for a gap specific to *that* state's source data — as opposed to
+# TIER1_OPTIONAL_FOR_NAME_HASH above, which applies to every state lacking a
+# filer ID. Checked independently of `lacks_filer_id` so it never loosens the
+# check for other states in that class.
+TIER1_OPTIONAL_BY_STATE = {
+    "tennessee": {
+        # TNCAMP's expenditure export has no Date value at all for 2000-2002
+        # (100% blank) and 2003 (98.9% blank), tapering from ~21% blank in
+        # 2004 down to under 3% by 2007 and near-zero after. Confirmed against
+        # the raw CSVs directly — the Date column itself is empty for these
+        # rows, not a parser/header-alias miss. Contributions from the same
+        # years are dated fine (0.1% blank overall), so this is specific to
+        # TN's expenditure schedule. See docs/states/tennessee.md.
+        "expenditures": {"date"},
+    },
 }
 
 # Tables that have amount fields
@@ -150,7 +178,45 @@ ZIP_FIELDS = {
 # Categorical fields to show value breakdowns for in tier 2
 BREAKDOWN_FIELDS = {
     "committees": ["committee_type", "active"],
+    # Provenance for externally joined party values. Deliberately a breakdown
+    # rather than a fill-rate row: these are only ever populated where `party`
+    # itself was joined in from outside the state's disclosure data, so their
+    # fill rate carries no information beyond party's, whereas the split
+    # between "exact" and "high" matches is what tells you how much to trust
+    # it. Blank for every state that publishes party directly.
+    "candidates": ["party_source", "match_confidence"],
 }
+
+# Breakdown fields that are dropped entirely — from both the console report and
+# the JSON — when a state populates none of them, instead of printing a lone
+# "(blank) 100%" row.
+#
+# Only a couple of states ever write these, so on the other forty that row says
+# nothing except "this column doesn't apply here", while adding two lines to
+# every report and two dead entries to every metadata JSON. Fields NOT listed
+# here keep the old always-print behaviour: `committee_type` and `active` are
+# expected on every state, so an all-blank breakdown there is a genuine finding
+# worth surfacing rather than noise worth hiding.
+SPARSE_BREAKDOWN_FIELDS = {"party_source", "match_confidence"}
+
+
+def _breakdown(rows: list[dict], bfield: str) -> dict[str, int] | None:
+    """Value counts for one categorical field, ordered by count descending.
+
+    Returns None when the field is in SPARSE_BREAKDOWN_FIELDS and every row is
+    blank (or the column is absent entirely, as it is in any state parsed
+    before the column existed) — the caller then omits it.
+
+    Shared by the console report and the JSON builder so the two can't drift:
+    they previously carried separate copies of this counting loop.
+    """
+    counts: dict[str, int] = {}
+    for r in rows:
+        val = (r.get(bfield) or "").strip() or "(blank)"
+        counts[val] = counts.get(val, 0) + 1
+    if bfield in SPARSE_BREAKDOWN_FIELDS and set(counts) <= {"(blank)"}:
+        return None
+    return dict(sorted(counts.items(), key=lambda x: -x[1]))
 
 ENRICHMENT_FIELDS = {
     "candidates": [
@@ -464,10 +530,70 @@ def run(state: str):
     if not clean_dir.exists():
         print(f"ERROR: cleaned dir not found for state '{state}'")
         sys.exit(1)
+def _state_slug(name: str) -> str:
+    """"new york" / "New York" → "new_york" — the filename form used for
+    metadata/{state}_latest.json. Mirrors orc._state_slug."""
+    return _norm_dir_key(name).replace(" ", "_")
 
+
+def _norm_dir_key(name: str) -> str:
+    """Fold a state name / directory name to a comparable key.
+
+    Lowercases and treats spaces, underscores and hyphens as equivalent, so
+    "new york", "New York", "new_york" and "New_York" all collapse to
+    "new york"."""
+    return re.sub(r"[\s_-]+", " ", name.strip().lower())
+
+
+def _find_clean_dir(state: str) -> Path | None:
+    """Locate data/<State>/cleaned/ for a state name, case- and separator-
+    insensitively.
+
+    The two literal attempts below cover the single-word states. Multi-word
+    states (New York, New Hampshire, North Carolina, ...) need the scan:
+    `str.capitalize()` lowercases every letter after the first, so
+    "new york".capitalize() is "New york", which only resolves to the real
+    "New York" directory on a case-insensitive filesystem (macOS). On Linux —
+    CI, containers, the daemon host — it doesn't, and validate would exit 1
+    with "cleaned dir not found" on a state that parsed perfectly well. The
+    scan mirrors what tabulate.py and queries.py already do.
+    """
+    data_dir = PROJECT_ROOT / "data"
+    for candidate in (data_dir / state.lower(), data_dir / state.capitalize()):
+        if candidate.joinpath("cleaned").exists():
+            return candidate / "cleaned"
+
+    if not data_dir.exists():
+        return None
+    want = _norm_dir_key(state)
+    for d in sorted(data_dir.iterdir()):
+        if d.is_dir() and _norm_dir_key(d.name) == want and (d / "cleaned").exists():
+            return d / "cleaned"
+    return None
+
+
+def run(state: str):
+    # Normalized so "new_york" and "new york" behave identically everywhere
+    # downstream (STATES_WITHOUT_FILER_ID lookup, docs path in messages,
+    # report filenames) — orc.py spells multi-word states with a space, people
+    # typing them by hand tend to use an underscore.
+    state_lower = _norm_dir_key(state)
+    state_upper = STATE_ABBR.get(_norm_dir_key(state), state.upper())  # "alabama" → "AL"
+    clean_dir   = _find_clean_dir(state)
+
+    # Logger first: a missing cleaned dir is a real validation failure and has
+    # to leave a record, otherwise orc's run report shows no validate event at
+    # all for the state rather than showing why it failed.
     log = get_logger(state_lower, "validate")
     t0  = time.perf_counter()
     log._emit("validate_started")
+
+    if clean_dir is None:
+        print(f"ERROR: cleaned dir not found for state '{state}'")
+        log._emit("validate_completed", status="error",
+                  duration_s=round(time.perf_counter() - t0, 1),
+                  error="cleaned dir not found")
+        sys.exit(1)
 
     try:
         _run(state_lower, state_upper, clean_dir, log, t0)
@@ -487,8 +613,13 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
     print(f"  Validating {state_upper} — {clean_dir}")
     print(f"{'='*60}\n")
 
-    # Load previous report for drift detection
-    report_path  = REPORTS_DIR / f"{state_lower}_latest.json"
+    # Load previous report for drift detection.
+    # The filename is slugified (spaces → underscores) so a multi-word state
+    # lands on the same file whether it was invoked as "new york" (how orc.py
+    # spells it, from states.csv) or "new_york" (how a person types it on the
+    # command line) — otherwise the two spellings write two different files
+    # and drift detection silently compares a run against nothing.
+    report_path  = REPORTS_DIR / f"{_state_slug(state_lower)}_latest.json"
     prev_counts  = {}
     if report_path.exists():
         try:
@@ -537,6 +668,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
             if col == "state":
                 continue
             fill_errors = check_required_filled(table, rows, col)
+            state_optional_cols = TIER1_OPTIONAL_BY_STATE.get(state_lower, {})
             if (fill_errors and lacks_filer_id
                     and col in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set())):
                 # Documented structural gap — this state's source data has no
@@ -545,7 +677,17 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
                     tier2_warnings.append({
                         "table":   table,
                         "warning": f"{e} — expected, this state's source data has "
-                                   f"no filer ID (see docs/states/{state_lower}.md)",
+                                   f"no filer ID (see docs/states/{_state_slug(state_lower)}.md)",
+                    })
+            elif fill_errors and col in state_optional_cols.get(table, set()):
+                # Documented structural gap specific to this state alone (see
+                # TIER1_OPTIONAL_BY_STATE) — downgrade to a tier-2 warning
+                # without affecting any other state.
+                for e in fill_errors:
+                    tier2_warnings.append({
+                        "table":   table,
+                        "warning": f"{e} — expected, documented source gap for "
+                                   f"this state (see docs/states/{_state_slug(state_lower)}.md)",
                     })
             else:
                 checks.append((f"fill:{col}", fill_errors))
@@ -644,18 +786,27 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
         else:
             print(f"  {table.capitalize()} ({len(rows):,} rows)")
         any_downgraded = False
+        any_state_downgraded = False
+        state_optional_cols = TIER1_OPTIONAL_BY_STATE.get(state_lower, {})
         for field in required:
-            rate       = rates[field]
-            downgraded = (lacks_filer_id and rate < TIER1_PASS_RATE * 100
-                          and field in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set()))
+            rate            = rates[field]
+            downgraded      = (lacks_filer_id and rate < TIER1_PASS_RATE * 100
+                                and field in TIER1_OPTIONAL_FOR_NAME_HASH.get(table, set()))
+            state_downgraded = (rate < TIER1_PASS_RATE * 100
+                                 and field in state_optional_cols.get(table, set()))
             if downgraded:
                 ok = "↓"
                 any_downgraded = True
+            elif state_downgraded:
+                ok = "◇"
+                any_state_downgraded = True
             else:
                 ok = "✓" if rate >= TIER1_PASS_RATE * 100 else "✗"
             print(f"    {field:<25} {_bar(rate)}  {rate:5.1f}%  {ok}")
         if any_downgraded:
-            print(f"    ↓ = tier-2 (no filer ID in source data; see docs/states/{state_lower}.md)")
+            print(f"    ↓ = tier-2 (no filer ID in source data; see docs/states/{_state_slug(state_lower)}.md)")
+        if any_state_downgraded:
+            print(f"    ◇ = tier-2 (documented source gap for this state; see docs/states/{_state_slug(state_lower)}.md)")
         print()
 
 
@@ -674,12 +825,11 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
 
         # Value breakdowns for categorical fields (e.g. committee_type, active)
         for bfield in BREAKDOWN_FIELDS.get(table, []):
-            counts: dict[str, int] = {}
-            for r in rows:
-                val = r.get(bfield, "").strip() or "(blank)"
-                counts[val] = counts.get(val, 0) + 1
+            counts = _breakdown(rows, bfield)
+            if counts is None:
+                continue
             print(f"    {bfield + ' breakdown':<25}")
-            for val, count in sorted(counts.items(), key=lambda x: -x[1]):
+            for val, count in counts.items():
                 rate = pct(count, len(rows))
                 print(f"      {val:<30} {count:>7,}  {rate:5.1f}%")
 
@@ -739,16 +889,15 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
         bfields = BREAKDOWN_FIELDS.get(table, [])
         if not bfields:
             continue
-        tier2_breakdowns[table] = {}
+        table_breakdowns = {}
         for bfield in bfields:
-            counts: dict[str, int] = {}
-            for r in rows:
-                val = r.get(bfield, "").strip() or "(blank)"
-                counts[val] = counts.get(val, 0) + 1
-            # Sort by count descending
-            tier2_breakdowns[table][bfield] = dict(
-                sorted(counts.items(), key=lambda x: -x[1])
-            )
+            counts = _breakdown(rows, bfield)
+            if counts is not None:
+                table_breakdowns[bfield] = counts
+        # Omit the table key entirely rather than emitting an empty object when
+        # every one of its breakdowns was sparse-and-blank.
+        if table_breakdowns:
+            tier2_breakdowns[table] = table_breakdowns
 
     # ── Newest record date (max transaction date across contributions/expenditures,
     #    capped at today — LATEST_YEAR is a generous tier-1 validity bound for
@@ -786,7 +935,7 @@ def _run(state_lower: str, state_upper: str, clean_dir: Path, log, t0: float):
     if run_id:
         run_dir = run_dir_for(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
-        run_report = run_dir / f"{state_lower}_validate.json"
+        run_report = run_dir / f"{_state_slug(state_lower)}_validate.json"
         run_report.write_text(json.dumps(report, indent=2))
         print(f"  Report copied to: {run_report}")
     print()

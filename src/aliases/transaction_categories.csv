@@ -285,6 +285,69 @@ NH,Loan Forgiven,Loan
 # has one of the two," no blanks to fall back on ""Contribution"" in practice).",
 WA,Cash,Monetary
 WA,In-kind,In-Kind
+# == Tennessee ===================================================================,,
+"# TN's contributions.transaction_type is TNCAMP's Type column, with the",,
+# Adjustment column appended when it's set (see parsers/tennessee.py _txn_type).,,
+"# Confirmed against the full 2026-08-08 scrape (3.17M rows) -- exactly the 2",,
+"# distinct Type values the original R port asserted, plus each one's",,
+"# amended-row variant (Adjustment != N/blank appended as — Y).",,
+# No other values observed; an unmapped value still yields a NULL category,,
+# rather than a guess if TNCAMP's Type vocabulary ever expands.,,
+TN,Monetary,Monetary
+TN,Monetary — Y,Monetary
+TN,InKind,In-Kind
+# == New York ====================================================================,,
+# NY's contributions.transaction_type is the schedule label from,,
+"# parsers/new_york.py's SCHEDULES map, with a bounded sub-type appended for",,
+# schedules D/E/G (see contribution_subtype()). Both the bare label and every,,
+"# observed label+subtype combination are listed, since a schedule D row with no",,
+# cntrbn_type_desc emits the bare label.,,
+NY,Monetary Contribution — Individual/Partnership,Monetary
+NY,Monetary Contribution — Corporate,Monetary
+NY,Monetary Contribution — Other,Monetary
+NY,Housekeeping Receipt,Monetary
+NY,Public Fund Receipt,Monetary
+NY,In-Kind Contribution,In-Kind
+NY,In-Kind Contribution — Services/Facilities Provided,In-Kind
+NY,In-Kind Contribution — Property Given,In-Kind
+NY,In-Kind Contribution — Campaign Expenses Paid,In-Kind
+NY,Contribution Refunded,Refund
+NY,Transfer In,Transfer
+NY,Transfer In — Type 1,Transfer
+NY,Transfer In — Type 2,Transfer
+NY,Other Receipt,Other
+NY,Other Receipt — Interest/Dividends,Other
+NY,Other Receipt — Proceeds Sale/Lease,Other
+NY,Other Receipt — Public Funds,Other
+NY,Other Receipt — Other,Other
+# == Texas =======================================================================,,
+# TX contributions.transaction_type is the schedule label from,,
+# parsers/texas.py CONTRIB_SCHEDULES (schedFormTypeCd expanded via CFS-Codes.txt).,,
+TX,Monetary Political Contribution,Monetary
+TX,Monetary Political Contribution (Judicial),Monetary
+TX,Monetary Contribution from Corporation or Labor Organization,Monetary
+TX,Monetary Support from Corporation or Labor Organization,Monetary
+TX,Monetary Contribution (Speaker),Monetary
+TX,Non-Caucus Member Contribution,Monetary
+TX,In-Kind Political Contribution,In-Kind
+TX,In-Kind Political Contribution (Special Session),In-Kind
+TX,In-Kind Contribution from Corporation or Labor Organization,In-Kind
+TX,Non-Monetary Support from Corporation or Labor Organization,In-Kind
+TX,In-Kind Contribution (Speaker),In-Kind
+"# Schedule K is bank interest, investment gains, credits and contributions",,
+"# returned TO the filer — money in, but not donations. Mapping it to Other is",,
+"# what lets a donor ranking exclude it; without the filter, banks paying",,
+# interest outrank every actual donor in Texas. See docs/states/texas.md.,,
+TX,"Interest, Credit, Gain or Returned Contribution",Other
+# == Wyoming ====================================================================,,
+# transaction_type is the export's own "Contribution Type" column — one of five
+# controlled values. LOAN rows never reach contributions.csv (routed to
+# loans_debts.csv.gz by the parser), so LOAN doesn't need a row here.
+# ANONYMOUS contributions could be cash or in-kind — the source doesn't say
+# which, so left unmapped rather than guessed.,,
+WY,MONETARY,Monetary
+WY,UN-ITEMIZED,Monetary
+WY,IN-KIND,In-Kind
 # == Virginia ==================================================================,,
 "# Only Schedule A's fixed ""Contribution"" value is mapped here. Schedule B (in-kind)",,
 # and Schedule C (other receipts) transaction_type values carry a dynamic,,
@@ -333,3 +396,31 @@ NM,Contributions - Intra-Candidate Transfer,Transfer
 NM,Contributions - Anonymous,Monetary
 NM,Special Event,Monetary
 NM,Contributions - Other,Other
+# == Kansas ===================================================================,,
+# KS Schedule A 'type of payment'. Loan-typed receipts are routed to,,
+# loans_debts by the parser, so KS,Loan is a safety net only.
+KS,Check,Monetary
+KS,Credit Card,Monetary
+KS,E Funds,Monetary
+KS,Cash,Monetary
+KS,Other,Other
+KS,Refund,Refund
+KS,Loan,Loan
+KS,In-Kind,In-Kind
+# == Vermont ===================================================================,,
+"# Transaction Subtype on the bulk contributions feed, which is where the real",,
+"# distinction lives (Transaction Type is the literal ""Contribution"" on every row).",,
+# Loan rows are routed to loans_debts by the parser and so never reach this,,
+# table; mapped anyway so a routing change can't produce an unmapped value.,,
+VT,Monetary Contribution,Monetary
+VT,In-Kind (Non-Money) Contribution,In-Kind
+VT,In-Kind Contribution,In-Kind
+VT,Refunded Contribution,Refund
+VT,Refund Contribution,Refund
+VT,Returned Contribution,Refund
+VT,Loan Received,Loan
+VT,Loan Forgiven,Loan
+"# The grid feed (open year) publishes no subtype at all — every 2026 row",,
+"# carries the coarse ""Contribution"". Mapped to Monetary because monetary",,
+# contributions are ~99% of the itemized feed; see docs/states/vermont.md.,,
+VT,Contribution,Monetary
