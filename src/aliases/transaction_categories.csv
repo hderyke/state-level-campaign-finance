@@ -424,3 +424,49 @@ VT,Loan Forgiven,Loan
 "# carries the coarse ""Contribution"". Mapped to Monetary because monetary",,
 # contributions are ~99% of the itemized feed; see docs/states/vermont.md.,,
 VT,Contribution,Monetary
+# == New Jersey ================================================================
+NJ,MONETARY,Monetary
+NJ,CURRENCY,Monetary
+NJ,CHECK,Monetary
+NJ,IN-KIND,In-Kind
+NJ,INKIND,In-Kind
+NJ,LOAN,Other
+NJ,REFUND,Refund
+NJ,RETURNED CONTRIBUTION,Refund
+NJ,TRANSFER,Other
+NJ,OTHER,
+# -- NJ, second pass: values seen in the real data (2026-08-16)
+NJ,CASH,Monetary
+NJ,CASH N/SUBM,Monetary
+NJ,CURRENCY (MO),Monetary
+NJ,NON-DEPOSITED,Monetary
+NJ,PART/MONETARY,Monetary
+NJ,CURRENCY LOAN,Other
+NJ,CAND LOAN,Other
+NJ,BANK LOAN,Other
+NJ,LOAN PAY,Other
+NJ,LOAN PAY-C,Other
+NJ,CAND FUNDS,Other
+NJ,REBURS/REFD,Refund
+NJ,REFUND-FS,Refund
+NJ,REFUND-FN/S,Refund
+NJ,REFUND-CONT,Refund
+NJ,REFUND-PS,Refund
+NJ,REFUND-PN/S,Refund
+NJ,REFUND-PF,Refund
+NJ,RET REFUND,Refund
+NJ,ALLOC REF,Refund
+NJ,BAD CHECK-N,Refund
+NJ,BAD CHECK-S,Refund
+# Public financing of gubernatorial campaigns.
+NJ,PUB FUNDS,Other
+NJ,SEED $$,Other
+NJ,SEED$-CURRENCY,Other
+NJ,GRANT (SEED) $$,Other
+# Bank interest — income, but not a contribution category.
+NJ,INTEREST,
+NJ,ADJUSTMENTS,
+NJ,N/SUBMITTED,
+NJ,ESCHEATS NJ,
+NJ,EXEMPT,
+NJ,SCHEDULE 1D,
