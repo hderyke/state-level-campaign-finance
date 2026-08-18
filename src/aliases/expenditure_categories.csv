@@ -487,6 +487,13 @@ NM,Candidate filing/ballot fees,Monetary,,
 # Disbursement). The free-text detail survives in purpose either way.,,,,
 NM,Other,Other,,
 NM,00-No Category Applies(Explain Below),Other,,
+# MEC's expenditure export exposes "Paid" vs "Incurred" (payment status, not an
+# in-kind/monetary distinction like other states' export) as Expenditure Type --
+# both land in Monetary since MEC does not separately flag in-kind expenditures
+# on this export.
+MO,Paid,Monetary,,
+MO,Incurred,Monetary,,
+MO,Independent Expenditure,Independent Expenditure,,
 # == Vermont ====================================================================,,,,
 # Transaction Subtype on the bulk expenditures feed; Expenditure Type on the grid.,,,,
 VT,Monetary Expenditure,Monetary,,

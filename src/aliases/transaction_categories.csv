@@ -396,6 +396,8 @@ NM,Contributions - Intra-Candidate Transfer,Transfer
 NM,Contributions - Anonymous,Monetary
 NM,Special Event,Monetary
 NM,Contributions - Other,Other
+MO,Monetary,Monetary
+MO,In-Kind,In-Kind
 # == Kansas ===================================================================,,
 # KS Schedule A 'type of payment'. Loan-typed receipts are routed to,,
 # loans_debts by the parser, so KS,Loan is a safety net only.
