@@ -1360,15 +1360,37 @@ def run(
     do_independent_expenditures = no_horizontal or transactions or independent_expenditures
 
     current_year = datetime.today().year
-    if force:
-        # force just means "re-fetch the requested range, or current year if no
-        # range was given" — there's no meaningful "all years" for Phase D since
-        # the site has no per-committee filing-history index cheap enough to sweep
-        # (see docs/states/missouri.md's Election History discussion).
-        wipe_years = range(start_year or current_year, (end_year or current_year) + 1)
-    elif start_year is not None or end_year is not None:
-        wipe_years = range(start_year or (end_year or current_year),
-                            (end_year or start_year) + 1)
+    # force just means "re-fetch the requested range, or current year if no
+    # range was given" — there's no meaningful "all years" for Phase D since
+    # the site has no per-committee filing-history index cheap enough to sweep
+    # (see docs/states/missouri.md's Election History discussion). It doesn't
+    # change which years are IN scope, only whether already-done chunks in
+    # that scope get re-fetched (see the `and not force` manifest checks
+    # below) — so the year-range resolution is identical whether or not
+    # force is set.
+    #
+    # Confirmed live via direct user report: a plain `--start-year 2020`
+    # invocation (no --end-year) silently swept ONLY 2020 and stopped, not
+    # 2020-through-present as "historical backfill" / "earliest year to
+    # sweep" implies. Root cause was this block's old fallback for a
+    # missing end_year: `(end_year or start_year) + 1`, which used
+    # start_year itself as the upper bound whenever end_year was omitted —
+    # collapsing any "--start-year YYYY" backfill request down to exactly
+    # one year. Every year of this project's historical backfill so far was
+    # actually run as a separate manual `--start-year YYYY` call per year
+    # as a result, not as a single unattended multi-year sweep.
+    #
+    # --end-year alone (no --start-year) still resolves to just that single
+    # year, not some open lower bound — there's no absolute "earliest year
+    # MEC has data for" constant in this codebase to default down to, so an
+    # end-year-only call is intentionally scoped to that one year rather
+    # than guessing how far back to reach.
+    if start_year is not None and end_year is not None:
+        wipe_years = range(start_year, end_year + 1)
+    elif start_year is not None:
+        wipe_years = range(start_year, current_year + 1)
+    elif end_year is not None:
+        wipe_years = range(end_year, end_year + 1)
     else:
         wipe_years = range(current_year, current_year + 1)
 
