@@ -3,8 +3,8 @@ src/main.py — Single entry point for the campaign finance pipeline.
 
   Pipeline commands          stages run
   ─────────────────────────────────────────────────────────────────
-  sync <states>              scrape → parse → validate → tabulate → aggregate
-  reparse <states>           parse → validate → tabulate → aggregate  (skip scrape)
+  sync <states>              scrape → parse → enrich → validate → tabulate → aggregate
+  reparse <states>           parse → enrich → validate → tabulate → aggregate  (skip scrape)
 
   Data commands
   ─────────────────────────────────────────────────────────────────

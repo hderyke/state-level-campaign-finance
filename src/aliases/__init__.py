@@ -95,16 +95,24 @@ def _load_office_types() -> dict[tuple[str, str], str | None]:
 
 
 def _load_parties() -> dict[str, str]:
-    """raw_upper → canonical_upper."""
+    """raw_upper → canonical_upper.
+
+    Skips `#` comment lines the same way _load_state_keyed does. The `or ""`
+    guards matter here and not in the state-keyed loader: a comment line
+    carries fewer fields than the header, so DictReader fills the trailing
+    keys with None rather than "" and a bare .strip() raises AttributeError.
+    """
     path = _DIR / "parties.csv"
     result: dict[str, str] = {}
     if not path.exists():
         return result
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            raw   = row.get("raw",       "").strip().upper()
-            canon = row.get("canonical", "").strip().upper()
-            if raw and canon:
+            raw = (row.get("raw") or "").strip().upper()
+            if not raw or raw.startswith("#"):
+                continue
+            canon = (row.get("canonical") or "").strip().upper()
+            if canon:
                 result[raw] = canon
     return result
 

@@ -585,6 +585,8 @@ Once your parser is working, add normalization mappings for your state to the al
 
 Each file uses the format `state,raw,canonical`. Lines beginning with `#` are treated as comments — use them to annotate non-obvious decisions. See the existing Alabama and Alaska entries as examples.
 
+**Committee affiliation is separate and optional.** If your state has PACs/CCEs/ECOs that support or oppose a candidate without being that candidate's own committee, that's not an alias mapping — it's per-committee, per-state fact data. See [`src/registries/committees/{abbr}.csv`](pipeline.md#7b-registries) and `enrich.py` in pipeline.md §4. Only add a registry file if you actually know of such committees for your state; most new states won't need one at first.
+
 ---
 
 ## 8. CLI

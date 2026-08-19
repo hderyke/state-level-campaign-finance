@@ -46,9 +46,14 @@ def _state_key(name: str) -> str:
 
 
 def tabulate(state: str):
-    # Match data/ subdirectories ignoring case and space/underscore spelling
+    # Case-insensitive match against data/ subdirectories. Underscores and
+    # spaces are treated as equivalent so a multi-word state resolves whether
+    # it's given as orc.py passes it ("new mexico", from states.csv) or as the
+    # scraper/parser module is named ("new_mexico"), which is what a human
+    # hand-running this stage will reach for.
+    want    = state.lower().replace("_", " ")
     matches = [d for d in (PROJECT_ROOT / "data").iterdir()
-               if d.is_dir() and _state_key(d.name) == _state_key(state)]
+               if d.is_dir() and d.name.lower().replace("_", " ") == want]
     if not matches:
         print(f"[!] No data directory found for '{state}'")
         sys.exit(1)

@@ -40,7 +40,7 @@ PA,Pennsylvania,42,1
 RI,Rhode Island,44,1
 SC,South Carolina,45,1
 SD,South Dakota,46,1
-TN,Tennessee,47,1
+TN,Tennessee,47,0
 TX,Texas,48,1
 UT,Utah,49,1
 VA,Virginia,51,1
@@ -48,4 +48,4 @@ VT,Vermont,50,1
 WA,Washington,53,1
 WI,Wisconsin,55,1
 WV,West Virginia,54,1
-WY,Wyoming,56,1
+WY,Wyoming,56,0
