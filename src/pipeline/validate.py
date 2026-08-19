@@ -501,7 +501,33 @@ def drift_check(table: str, current: int, previous: int | None) -> dict | None:
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
+def _state_key(name: str) -> str:
+    """Normalize a state name for lookups: lowercase, underscores/hyphens → spaces.
+
+    Multi-word states get referred to several ways — "west virginia" from
+    orc.py (which reads states.csv), "west_virginia" by anyone typing the
+    module name, and potentially "west-virginia" if a data directory ever
+    uses a hyphen. STATE_ABBR is keyed on the spaced form, so an
+    underscore/hyphen form used to miss and fall through to `state.upper()`,
+    yielding e.g. "WEST_VIRGINIA" as the expected value of the `state`
+    column. Every row then failed the tier-1 state check against the
+    correct "WV" — a 100% failure that looked like a data problem but was
+    purely a key mismatch.
+
+    Hyphen is included pre-emptively: `data/West_Virginia` doesn't match
+    states.csv's "West Virginia" (space), and ops/data_sync.py's
+    load_states/save_states do a literal, unnormalized path match — they
+    silently skip WV entirely. Renaming the directory to use a hyphen is
+    one option under discussion; this keeps validate.py's own lookup
+    working either way rather than only for the underscore case.
+    """
+    return re.sub(r"[\s_-]+", " ", (name or "").strip().lower())
+
+
 def run(state: str):
+    state_lower = state.lower()
+    state_key   = _state_key(state)
+    state_upper = STATE_ABBR.get(state_key, state.upper())  # "alabama" → "AL"
     # Accept either separator for multi-word states. orc.py passes the spaced
     # name from states.csv ("new mexico"), but the scraper/parser modules are
     # named with underscores (new_mexico.py), so that's what a human runs this
@@ -515,18 +541,21 @@ def run(state: str):
     # Try capitalized dir too (Alabama vs alabama)
     if not clean_dir.exists():
         clean_dir = PROJECT_ROOT / "data" / state.capitalize() / "cleaned"
-    # Both attempts above rely on the filesystem being case-insensitive (macOS,
-    # Windows), and .capitalize() can't produce a two-word directory name like
-    # "New Mexico" on any filesystem. Fall back to the same case-insensitive
-    # directory scan tabulate.py uses so multi-word states work off macOS.
+
+    # Last resort: scan data/ comparing normalized names, so "West Virginia",
+    # "west_virginia" and "West_Virginia" all resolve to the same directory.
+    # str.capitalize() only uppercases the FIRST word, so a multi-word state
+    # resolves to "West virginia" / "New hampshire" and misses the real
+    # directory on any case-sensitive filesystem — invisible on Windows and
+    # macOS, broken on Linux.
     if not clean_dir.exists():
         data_dir = PROJECT_ROOT / "data"
-        if data_dir.is_dir():
-            match = next((d for d in data_dir.iterdir()
-                          if d.is_dir()
-                          and d.name.lower().replace("_", " ") == state_lower), None)
-            if match:
-                clean_dir = match / "cleaned"
+        if data_dir.exists():
+            for d in data_dir.iterdir():
+                if d.is_dir() and _state_key(d.name) == state_key:
+                    clean_dir = d / "cleaned"
+                    break
+
     if not clean_dir.exists():
         print(f"ERROR: cleaned dir not found for state '{state}'")
         sys.exit(1)

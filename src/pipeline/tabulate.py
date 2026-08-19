@@ -8,6 +8,7 @@ bloat from incremental updates.
 """
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -30,6 +31,18 @@ OPTS         = "null_padding=true, ignore_errors=true, parallel=false"
 # DuckDB map literal passed to read_csv_auto's types= parameter; enforces
 # consistent typing and prevents all-NULL columns from defaulting to VARCHAR.
 _TYPES_STR = "{" + ", ".join(f"'{k}': '{v}'" for k, v in C.COLUMN_TYPES.items()) + "}"
+
+
+def _state_key(name: str) -> str:
+    """Normalize a state name for directory matching: lowercase, _ -> space.
+
+    Multi-word states are referred to both ways — "west virginia" from orc.py
+    and "west_virginia" from the module/docs naming — and the data directory
+    may be spelled either way. Comparing normalized keys means all of
+    "West Virginia", "west_virginia" and "West_Virginia" resolve to the same
+    directory instead of exiting "No data directory found".
+    """
+    return re.sub(r"[\s_]+", " ", (name or "").strip().lower())
 
 
 def tabulate(state: str):

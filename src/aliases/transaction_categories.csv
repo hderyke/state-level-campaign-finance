@@ -381,6 +381,28 @@ WI,Transfer,Transfer
 "# An independent expenditure is spending, not a donation to the filer — Other",,
 # keeps it out of donor rankings on the contributions side.,,
 WI,Independent Expenditure,Other
+# == West Virginia =============================================================,,
+"# Source column: CONTRIBUTION TYPE in CON_*.csv, falling back to RECEIPT TYPE",,
+# on the short rows CFRS emits without a trailing column. The first four,,
+# mapped values below were all observed in real exports.,,
+WV,Monetary,Monetary
+WV,In-Kind,In-Kind
+# RECEIPT TYPE fallback - a plain contribution whose CONTRIBUTION TYPE,,
+# column was omitted by the exporter.,,
+WV,Contributions,Monetary
+"# Interest, dividends and similar non-donation receipts.",,
+WV,Other Income,Other
+# Excess funds moved in from another committee the candidate controls - a,,
+"# transfer between committees, not new outside money.",,
+WV,Receipt of Transfer of Excess Funds,Transfer
+WV,Transfer of Excess Funds,Transfer
+WV,Refund,Refund
+WV,Returned Contribution,Refund
+# Loan rows are routed to loans_debts by the parser and normally never reach,,
+# the contributions table; mapped anyway so a stray row categorizes sanely.,,
+WV,Loans,Loan
+WV,Loan Received,Loan
+WV,Forgiven Loan,Loan
 # == New Mexico ==============================================================,,
 "# Contribution Type (column W). Complete observed set, 2020-2026.",,
 # 'Loans Received' is routed to loans_debts by the parser and so never,,
