@@ -197,6 +197,7 @@ def run(state: str):
               AND payee_name NOT ILIKE '%previous disbursements%'
               AND payee_name NOT ILIKE 'itemized principal campaign%'
               AND payee_name NOT ILIKE 'non-itemized principal campaign%'
+              AND payee_name NOT ILIKE '%offset%loan%'
             GROUP BY payee_name
         ),
         top_client AS (
@@ -211,6 +212,7 @@ def run(state: str):
               AND payee_name NOT ILIKE '%previous disbursements%'
               AND payee_name NOT ILIKE 'itemized principal campaign%'
               AND payee_name NOT ILIKE 'non-itemized principal campaign%'
+              AND payee_name NOT ILIKE '%offset%loan%'
             GROUP BY payee_name, committee_name
         )
         SELECT p.payee_name, p.n, ROUND(p.total,0), t.committee_name, ROUND(t.from_client,0)

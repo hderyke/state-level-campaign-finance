@@ -436,17 +436,26 @@ def drift_check(table: str, current: int, previous: int | None) -> dict | None:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def _state_key(name: str) -> str:
-    """Normalize a state name for lookups: lowercase, underscores → spaces.
+    """Normalize a state name for lookups: lowercase, underscores/hyphens → spaces.
 
-    Multi-word states get referred to both ways — "west virginia" from orc.py
-    (which reads states.csv) and "west_virginia" by anyone typing the module
-    name. STATE_ABBR is keyed on the spaced form, so the underscore form used
-    to miss and fall through to `state.upper()`, yielding "WEST_VIRGINIA" as
-    the expected value of the `state` column. Every row then failed the
-    tier-1 state check against the correct "WV" — a 100% failure that looked
-    like a data problem but was purely a key mismatch.
+    Multi-word states get referred to several ways — "west virginia" from
+    orc.py (which reads states.csv), "west_virginia" by anyone typing the
+    module name, and potentially "west-virginia" if a data directory ever
+    uses a hyphen. STATE_ABBR is keyed on the spaced form, so an
+    underscore/hyphen form used to miss and fall through to `state.upper()`,
+    yielding e.g. "WEST_VIRGINIA" as the expected value of the `state`
+    column. Every row then failed the tier-1 state check against the
+    correct "WV" — a 100% failure that looked like a data problem but was
+    purely a key mismatch.
+
+    Hyphen is included pre-emptively: `data/West_Virginia` doesn't match
+    states.csv's "West Virginia" (space), and ops/data_sync.py's
+    load_states/save_states do a literal, unnormalized path match — they
+    silently skip WV entirely. Renaming the directory to use a hyphen is
+    one option under discussion; this keeps validate.py's own lookup
+    working either way rather than only for the underscore case.
     """
-    return re.sub(r"[\s_]+", " ", (name or "").strip().lower())
+    return re.sub(r"[\s_-]+", " ", (name or "").strip().lower())
 
 
 def run(state: str):
