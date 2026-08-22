@@ -13,6 +13,7 @@ Source code documentation for the state-level campaign finance pipeline. For CLI
 5. [Validation and Queries](#5-validation-and-queries)
 6. [Person IDs and Name Matching](#6-person-ids-and-name-matching)
 7. [Aliases](#7-aliases)
+7b. [Registries](#7b-registries)
 8. [S3](#8-s3)
 9. [Logging](#9-logging)
 10. [Error Handling](#10-error-handling)
@@ -21,7 +22,7 @@ Source code documentation for the state-level campaign finance pipeline. For CLI
 
 ## 1. Architecture
 
-A full pipeline run flows through five sequential stages for each state, then merges all states into one aggregate database.
+A full pipeline run flows through six sequential stages for each state, then merges all states into one aggregate database.
 
 ```
 python3 src/main.py sync AL AK AZ
@@ -35,6 +36,7 @@ python3 src/main.py sync AL AK AZ
          │  for each state:
          ├──▶  scrapers/{state}.py   → data/{State}/raw/
          ├──▶  parsers/{state}.py    → data/{State}/cleaned/*.csv
+         ├──▶  pipeline/enrich.py    → data/{State}/cleaned/committees.csv (affiliation columns only)
          ├──▶  pipeline/validate.py  → metadata/{state}_latest.json
          ├──▶  pipeline/tabulate.py  → data/{State}/cleaned/{state}.db
          │
@@ -95,18 +97,18 @@ Every managed run gets a unique `run_id` of the form `{YYYYMMDD_HHMMSS}_{command
 
 ### Subprocess dispatch
 
-Each stage — scraper, parser, validate, tabulate — is run via `subprocess.run()` rather than a direct function call. This has a few practical consequences:
+Each stage — scraper, parser, enrich, validate, tabulate — is run via `subprocess.run()` rather than a direct function call. This has a few practical consequences:
 
 - A crash in one stage (e.g. an unhandled parser exception) cannot corrupt the orchestrator's state or skip the failure check.
 - `stdout` and `stderr` stream to the terminal in real time.
-- The exit code is the failure signal. A non-zero exit from any stage causes `orc.py` to abort that state and record it as failed. Subsequent states in the batch still run.
+- The exit code is the failure signal. A non-zero exit from any stage causes `orc.py` to abort that state and record it as failed. Subsequent states in the batch still run. **Exception: `enrich` is non-blocking** — a non-zero exit is logged and printed but the pipeline continues to `validate` regardless, since enrich only writes optional affiliation metadata, not core transaction data.
 
 ### Pipeline commands
 
 | Command | Stages |
 |---|---|
-| `sync` | scrape → parse → validate → tabulate → aggregate |
-| `reparse` | *(skip scrape)* parse → validate → tabulate → aggregate |
+| `sync` | scrape → parse → enrich → validate → tabulate → aggregate |
+| `reparse` | *(skip scrape)* parse → enrich → validate → tabulate → aggregate |
 
 `reparse` is useful when the raw data is already current (e.g. a scrape just finished) and only the parser, alias mappings, or schema has changed.
 
@@ -159,6 +161,27 @@ After all states finish, `orc.py` checks whether any failed. Aggregate only runs
 ## 4. Pipeline Stages
 
 > **Note:** Scrapers and parsers vary significantly across states — each is written specifically for its source system's structure, format, and update mechanism. For state-specific details on how a scraper or parser works, see `docs/states/{state}.md`.
+
+### Enrich (`src/pipeline/enrich.py`)
+
+Enrich runs immediately after the parser and before validate. It writes two columns onto `committees.csv` — `affiliated_candidate_name` and `support_oppose` — identifying which candidate a PAC/CCE/ECO is tied to but legally separate from. This is distinct from the existing `candidate_name` column, which is only populated for a candidate's *own* committee.
+
+**No-op by default.** Enrich only acts on states that have a registry file at `src/registries/committees/{abbr}.csv` (see §7b). Most states won't have one — the stage prints "No registry ... skipping" and exits 0 immediately.
+
+**Non-blocking.** A non-zero exit from `enrich.py` is logged (`enrich_subprocess_failed`) and printed but does not stop the pipeline — `orc.py` proceeds to `validate` regardless. This is deliberate: the affiliation columns are optional enrichment metadata, not core transaction data, so a bug or bad registry row here shouldn't be able to block validation/tabulation of data the parser already correctly produced.
+
+**Matching.** Registry rows are matched to `committees.csv` rows by normalized (uppercase, whitespace-collapsed) `committee_name`, optionally narrowed by `state_filer_id` when given. Before writing, each registry row's `(candidate_name, office, election_year)` triple is checked against that state's own `candidates.csv` — if the exact triple isn't found, `enrich.py` retries on just `(candidate_name, office)`, but *only* against candidates.csv rows where that state's own `election_year` is itself blank (some states, e.g. MI, never populate it — confirmed 0/7,205 rows). This avoids a permanent false-positive warning on a state that structurally can't record a cycle, without weakening the check for states that do populate `election_year` (a genuine year mismatch there still warns — verified with a fixture). If neither the exact triple nor that fallback matches, the affiliation is still written (a typo in a hand-maintained CSV shouldn't silently drop real data), but a warning is printed and logged (`enrich_warning`, `reason=candidate_not_found`). The same happens if a registry entry doesn't match any committee at all (`reason=committee_not_found`) or if the registry file itself has a duplicate `committee_name` (`reason=duplicate_committee`, first entry wins).
+
+**Ambiguous `committee_name` is refused, not guessed.** If a registry row's `committee_name` matches *more than one* row in `committees.csv`, `enrich.py` tries to resolve it in two tiers before giving up — this is the one case where a warning isn't enough, because writing would mean picking a side between two real committees:
+
+1. `state_filer_id`, if given — exact and decisive on its own.
+2. Otherwise, AND together whichever of `treasurer_name` / `registration_year` are filled in on the registry row, matched against the corresponding `committees.csv` fields (`treasurer_name`, `election_year`). This is the fallback for states with no filer IDs at all (`id_model="name_hash"` states like AK) or the rare case the filer ID wasn't on hand.
+
+If neither tier narrows it to exactly one row, nothing is written for that registry entry (`reason=ambiguous_committee_name`). Discovered 2026-07-26: FL reused the exact name "FLORIDA FIRST PAC" for an unrelated closed 2008-era committee, and a name-only match would have silently tagged it alongside the real 2026 committee it was meant for. See §7b for the full column reference.
+
+**Why name-based, not ID-based.** The registry could instead have resolved `candidate_name` to a synthetic `person_id` and stored that. It deliberately doesn't — `person_id` was retired from the aggregate database (2026-07-10, see §2 and §6) specifically because the `id_model` split makes it an unreliable identity for the same person across different offices or cycles. Storing `candidate_name` + `office` + `election_year` directly avoids inheriting that problem.
+
+**Automated extraction (future).** Some states' source disclosure data includes committee-candidate affiliation directly (e.g. Florida's Statement of Organization, Section 7) and a parser could extract it without a hand-maintained registry at all. When a parser does this itself, it writes `affiliated_candidate_name`/`support_oppose` directly onto `committees.csv` during parsing — enrich's registry lookup for that state then simply finds no blank rows left to fill for the committees the parser already handled. The two paths coexist without conflict.
 
 ### Tabulate (`src/pipeline/tabulate.py`)
 
@@ -281,6 +304,41 @@ Lines beginning with `#` in the `state`/`raw`/`canonical` CSVs are treated as co
 ### Adding a mapping
 
 To add a new normalization mapping, append a row to the relevant CSV. The `(state, raw)` key is case-insensitive (the loader uppercases both before storing). Changes take effect the next time `aggregate.py` runs — no code changes needed.
+
+---
+
+## 7b. Registries
+
+`src/registries/` holds hand-maintained, **per-state** CSVs used by `enrich.py` (§4) — a different concept from `src/aliases/` above. Aliases are flat, state-agnostic *value* mappings (a raw string → a canonical label) that make sense to look up across every state. Registries are per-state *fact* tables about specific real-world committees and candidates that have zero cross-state reuse, which is why each state gets its own file rather than one shared CSV keyed by `state`.
+
+```
+src/registries/
+├── committees/
+│   └── {abbr}.csv     e.g. fl.csv
+└── candidates/        reserved — not yet consumed by any pipeline stage
+```
+
+### `committees/{abbr}.csv`
+
+Columns: `committee_name, candidate_name, office, election_year, support_oppose, state_filer_id, treasurer_name, registration_year, notes`.
+
+- `committee_name` — must match a `committee_name` in that state's `committees.csv` (normalized: uppercase, whitespace-collapsed — exact casing/spacing doesn't matter).
+- `candidate_name`, `office`, `election_year` — must together identify a real row in that state's `candidates.csv`. `enrich.py` validates this and warns (but does not fail) if the triple isn't found. `election_year` here means the **candidate's** cycle — don't confuse with `registration_year` below.
+- `support_oppose` — `S` or `O`.
+- `state_filer_id` — **include it whenever you have it, for every row, not just the ones that turn out to need it.** `committee_name` alone is not a reliable key — a state can (and FL does) reuse a closed/defunct committee's exact name for a new, unrelated registrant years later, with no way to know in advance which names will collide. You typically already have the filer ID on hand from confirming the committee in the first place, so there's little cost to recording it every time. It's the primary, decisive disambiguator when `committee_name` turns out to match more than one row in `committees.csv`.
+- `treasurer_name`, `registration_year` — optional secondary disambiguators, used together (AND'd) only when `state_filer_id` is blank and `committee_name` is ambiguous. Matched against `committees.csv`'s own `treasurer_name` and `election_year` fields respectively. This is the fallback for states with no filer IDs at all (`id_model="name_hash"` states like AK) — `registration_year` means the **committee's own** registration year, which can differ from the candidate's `election_year` above (a PAC registered in 2024 can back a 2026 candidate). If `state_filer_id` is blank, ambiguous, *and* these two don't narrow it to exactly one committee either, `enrich.py` writes nothing for that row and warns — it never guesses across multiple real committees.
+- `notes` — free text; use it to record how the affiliation was confirmed (e.g. "confirmed via committee-scoped expenditure fetch, added 2026-07-25").
+
+Example (`src/registries/committees/fl.csv`):
+
+```
+committee_name,candidate_name,office,election_year,support_oppose,state_filer_id,treasurer_name,registration_year,notes
+"Friends of Byron Donalds PAC","BYRON DONALDS",Governor,2026,S,89043,,,"..."
+```
+
+### `candidates/`
+
+Reserved for a future candidate-side registry (party/office/election_year fallback for states where the scraper can't get them). Empty today — nothing currently needs it, since every state's candidate data already gets those fields from its own scraper.
 
 ---
 

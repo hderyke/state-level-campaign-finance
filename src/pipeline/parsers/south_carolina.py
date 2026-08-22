@@ -502,6 +502,25 @@ def _noncand_address(val: str) -> tuple[str, str, str]:
             utils.clean_zip(m.group("zip")))
 
 
+def _noncand_city_state_zip(idx: dict) -> tuple[str, str, str]:
+    """(city, state, zip) for a Contributions/Expenditures item, preferring
+    the DisplayCsv.aspx export's pre-split CITY/STATE/ZIP columns (see
+    scrapers/south_carolina.py's _noncand_csv_rows -- confirmed live
+    2026-08-20 across Non-Candidate, Caucus, State Party, and Ballot
+    Measure) over the older HTML table's single two-line 'street\\ncity, ST
+    zip' Address cell (_noncand_address). The HTML-table shape is still
+    what Loans/Repayments always produce (that export doesn't exist for
+    those two tabs) and what any committee's raw JSON still carries if it
+    hasn't been rewalked since this rebuild, so both paths stay live
+    rather than the older one being dropped."""
+    city, state, zipc = pick(idx, "city"), pick(idx, "state"), pick(idx, "zip")
+    if city or state or zipc:
+        return (utils.clean_name(city) if city else "",
+                state.upper() if state else "",
+                utils.clean_zip(zipc) if zipc else "")
+    return _noncand_address(pick(idx, "address"))
+
+
 _NONCAND_ITEM_CATEGORIES = ("contributions", "expenditures", "loans", "loan_payments")
 
 
@@ -680,7 +699,13 @@ def parse_noncand_pacs(log, cmte_w, cont_w, expn_w, loan_w,
 
             for item in filing.get("contributions", []):
                 idx = index_row(item)
-                city, st, zipc = _noncand_address(pick(idx, "address"))
+                # _noncand_city_state_zip(), not _noncand_address(pick(idx,
+                # "address")) -- prefers the DisplayCsv.aspx export's
+                # pre-split CITY/STATE/ZIP over the older combined-Address
+                # cell (falls back to it automatically when those keys
+                # aren't present, e.g. an item still in the old HTML-table
+                # shape). See _noncand_city_state_zip's docstring.
+                city, st, zipc = _noncand_city_state_zip(idx)
                 occupation = pick(idx, "occupation")
                 if _nk(occupation) == "unknown":
                     occupation = ""
@@ -688,7 +713,12 @@ def parse_noncand_pacs(log, cmte_w, cont_w, expn_w, loan_w,
                     "state":             STATE,
                     "committee_name":    name,
                     "amount":            parse_amount(pick(idx, "amount")),
-                    "date":              parse_date(pick(idx, "date")),
+                    # "contribution_date" -- the CSV export's own column
+                    # name (CONTRIBUTION_DATE) normalizes to
+                    # "contributiondate" under _nk(), distinct from the old
+                    # HTML table's plain "Date" -- both candidates needed so
+                    # neither raw-JSON shape loses this field.
+                    "date":              parse_date(pick(idx, "date", "contribution_date")),
                     "transaction_type":  "",
                     "contributor_name":  clean(pick(idx, "contributor")),
                     "contributor_type":  "",
@@ -709,15 +739,24 @@ def parse_noncand_pacs(log, cmte_w, cont_w, expn_w, loan_w,
 
             for item in filing.get("expenditures", []):
                 idx = index_row(item)
-                city, st, zipc = _noncand_address(pick(idx, "address"))
+                # See the matching comment in the contributions loop above.
+                city, st, zipc = _noncand_city_state_zip(idx)
                 expn_w.writerow({
                     "state":            STATE,
                     "committee_name":   name,
-                    "amount":           parse_amount(pick(idx, "amount")),
+                    # "expenditure_amount"/"expenditure_desc" -- the CSV
+                    # export's own column names (EXPENDITURE_AMOUNT,
+                    # EXPENDITURE_DESC) normalize to "expenditureamount"/
+                    # "expendituredesc" under _nk(), distinct from the old
+                    # HTML table's plain "Amount"/"Description" -- both
+                    # candidates needed so neither raw-JSON shape loses
+                    # these fields. DATE needs no extra candidate: the CSV
+                    # export uses a plain "DATE" column here already.
+                    "amount":           parse_amount(pick(idx, "amount", "expenditure_amount")),
                     "date":             parse_date(pick(idx, "date")),
                     "transaction_type": "",
                     "payee_name":       clean(pick(idx, "vendor", "payee")),
-                    "purpose":          clean(pick(idx, "description", "purpose")),
+                    "purpose":          clean(pick(idx, "description", "purpose", "expenditure_desc")),
                     "category":         "",
                     "payee_city":       city,
                     "payee_state":      st,
@@ -870,7 +909,13 @@ def parse_party_caucus(log, cmte_w, cont_w, expn_w, loan_w,
 
             for item in filing.get("contributions", []):
                 idx = index_row(item)
-                city, st, zipc = _noncand_address(pick(idx, "address"))
+                # _noncand_city_state_zip(), not _noncand_address(pick(idx,
+                # "address")) -- prefers the DisplayCsv.aspx export's
+                # pre-split CITY/STATE/ZIP over the older combined-Address
+                # cell (falls back to it automatically when those keys
+                # aren't present, e.g. an item still in the old HTML-table
+                # shape). See _noncand_city_state_zip's docstring.
+                city, st, zipc = _noncand_city_state_zip(idx)
                 occupation = pick(idx, "occupation")
                 if _nk(occupation) == "unknown":
                     occupation = ""
@@ -878,7 +923,12 @@ def parse_party_caucus(log, cmte_w, cont_w, expn_w, loan_w,
                     "state":             STATE,
                     "committee_name":    name,
                     "amount":            parse_amount(pick(idx, "amount")),
-                    "date":              parse_date(pick(idx, "date")),
+                    # "contribution_date" -- the CSV export's own column
+                    # name (CONTRIBUTION_DATE) normalizes to
+                    # "contributiondate" under _nk(), distinct from the old
+                    # HTML table's plain "Date" -- both candidates needed so
+                    # neither raw-JSON shape loses this field.
+                    "date":              parse_date(pick(idx, "date", "contribution_date")),
                     "transaction_type":  "",
                     "contributor_name":  clean(pick(idx, "contributor")),
                     "contributor_type":  "",
@@ -899,15 +949,24 @@ def parse_party_caucus(log, cmte_w, cont_w, expn_w, loan_w,
 
             for item in filing.get("expenditures", []):
                 idx = index_row(item)
-                city, st, zipc = _noncand_address(pick(idx, "address"))
+                # See the matching comment in the contributions loop above.
+                city, st, zipc = _noncand_city_state_zip(idx)
                 expn_w.writerow({
                     "state":            STATE,
                     "committee_name":   name,
-                    "amount":           parse_amount(pick(idx, "amount")),
+                    # "expenditure_amount"/"expenditure_desc" -- the CSV
+                    # export's own column names (EXPENDITURE_AMOUNT,
+                    # EXPENDITURE_DESC) normalize to "expenditureamount"/
+                    # "expendituredesc" under _nk(), distinct from the old
+                    # HTML table's plain "Amount"/"Description" -- both
+                    # candidates needed so neither raw-JSON shape loses
+                    # these fields. DATE needs no extra candidate: the CSV
+                    # export uses a plain "DATE" column here already.
+                    "amount":           parse_amount(pick(idx, "amount", "expenditure_amount")),
                     "date":             parse_date(pick(idx, "date")),
                     "transaction_type": "",
                     "payee_name":       clean(pick(idx, "vendor", "payee")),
-                    "purpose":          clean(pick(idx, "description", "purpose")),
+                    "purpose":          clean(pick(idx, "description", "purpose", "expenditure_desc")),
                     "category":         "",
                     "payee_city":       city,
                     "payee_state":      st,
@@ -1044,7 +1103,13 @@ def parse_ballot_measure(log, cmte_w, cont_w, expn_w, loan_w,
 
             for item in filing.get("contributions", []):
                 idx = index_row(item)
-                city, st, zipc = _noncand_address(pick(idx, "address"))
+                # _noncand_city_state_zip(), not _noncand_address(pick(idx,
+                # "address")) -- prefers the DisplayCsv.aspx export's
+                # pre-split CITY/STATE/ZIP over the older combined-Address
+                # cell (falls back to it automatically when those keys
+                # aren't present, e.g. an item still in the old HTML-table
+                # shape). See _noncand_city_state_zip's docstring.
+                city, st, zipc = _noncand_city_state_zip(idx)
                 occupation = pick(idx, "occupation")
                 if _nk(occupation) == "unknown":
                     occupation = ""
@@ -1052,7 +1117,12 @@ def parse_ballot_measure(log, cmte_w, cont_w, expn_w, loan_w,
                     "state":             STATE,
                     "committee_name":    name,
                     "amount":            parse_amount(pick(idx, "amount")),
-                    "date":              parse_date(pick(idx, "date")),
+                    # "contribution_date" -- the CSV export's own column
+                    # name (CONTRIBUTION_DATE) normalizes to
+                    # "contributiondate" under _nk(), distinct from the old
+                    # HTML table's plain "Date" -- both candidates needed so
+                    # neither raw-JSON shape loses this field.
+                    "date":              parse_date(pick(idx, "date", "contribution_date")),
                     "transaction_type":  "",
                     "contributor_name":  clean(pick(idx, "contributor")),
                     "contributor_type":  "",
@@ -1073,15 +1143,24 @@ def parse_ballot_measure(log, cmte_w, cont_w, expn_w, loan_w,
 
             for item in filing.get("expenditures", []):
                 idx = index_row(item)
-                city, st, zipc = _noncand_address(pick(idx, "address"))
+                # See the matching comment in the contributions loop above.
+                city, st, zipc = _noncand_city_state_zip(idx)
                 expn_w.writerow({
                     "state":            STATE,
                     "committee_name":   name,
-                    "amount":           parse_amount(pick(idx, "amount")),
+                    # "expenditure_amount"/"expenditure_desc" -- the CSV
+                    # export's own column names (EXPENDITURE_AMOUNT,
+                    # EXPENDITURE_DESC) normalize to "expenditureamount"/
+                    # "expendituredesc" under _nk(), distinct from the old
+                    # HTML table's plain "Amount"/"Description" -- both
+                    # candidates needed so neither raw-JSON shape loses
+                    # these fields. DATE needs no extra candidate: the CSV
+                    # export uses a plain "DATE" column here already.
+                    "amount":           parse_amount(pick(idx, "amount", "expenditure_amount")),
                     "date":             parse_date(pick(idx, "date")),
                     "transaction_type": "",
                     "payee_name":       clean(pick(idx, "vendor", "payee")),
-                    "purpose":          clean(pick(idx, "description", "purpose")),
+                    "purpose":          clean(pick(idx, "description", "purpose", "expenditure_desc")),
                     "category":         "",
                     "payee_city":       city,
                     "payee_state":      st,
@@ -1680,9 +1759,18 @@ def run():
                         "date":             tx_date,
                         "transaction_type": clean(pick(idx, "expenditureType",
                                                        "transactionType", "type")),
-                        "payee_name":       person_name(pick(idx, "vendorName",
-                                                             "payeeName", "vendor",
-                                                             "payee")),
+                        # Vendor/payee names are usually organizations, not people, and
+                        # even ones that look like a person shouldn't be treated as
+                        # "Last, First" -- this field is company names far more often
+                        # than filer/candidate names are. person_name()'s comma-flip
+                        # heuristic (designed for filer names) mangles ordinary
+                        # business names that legitimately contain a comma
+                        # ("Red Sea, LLC" -> "LLC RED SEA") or a source typo in place
+                        # of a period ("GoDaddy,com" -> "COM GODADDY"). clean() matches
+                        # the other three payee_name call sites in this file.
+                        "payee_name":       clean(pick(idx, "vendorName",
+                                                       "payeeName", "vendor",
+                                                       "payee")),
                         # expDesc/expId, like expDate, are the abbreviated names
                         # this API really uses.
                         "purpose":          clean(pick(idx, "expDesc",

@@ -8,6 +8,7 @@ bloat from incremental updates.
 """
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -32,10 +33,27 @@ OPTS         = "null_padding=true, ignore_errors=true, parallel=false"
 _TYPES_STR = "{" + ", ".join(f"'{k}': '{v}'" for k, v in C.COLUMN_TYPES.items()) + "}"
 
 
+def _state_key(name: str) -> str:
+    """Normalize a state name for directory matching: lowercase, _ -> space.
+
+    Multi-word states are referred to both ways — "west virginia" from orc.py
+    and "west_virginia" from the module/docs naming — and the data directory
+    may be spelled either way. Comparing normalized keys means all of
+    "West Virginia", "west_virginia" and "West_Virginia" resolve to the same
+    directory instead of exiting "No data directory found".
+    """
+    return re.sub(r"[\s_]+", " ", (name or "").strip().lower())
+
+
 def tabulate(state: str):
-    # Case-insensitive match against data/ subdirectories
+    # Case-insensitive match against data/ subdirectories. Underscores and
+    # spaces are treated as equivalent so a multi-word state resolves whether
+    # it's given as orc.py passes it ("new mexico", from states.csv) or as the
+    # scraper/parser module is named ("new_mexico"), which is what a human
+    # hand-running this stage will reach for.
+    want    = state.lower().replace("_", " ")
     matches = [d for d in (PROJECT_ROOT / "data").iterdir()
-               if d.is_dir() and d.name.lower() == state.lower()]
+               if d.is_dir() and d.name.lower().replace("_", " ") == want]
     if not matches:
         print(f"[!] No data directory found for '{state}'")
         sys.exit(1)

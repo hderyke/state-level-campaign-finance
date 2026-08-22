@@ -327,6 +327,64 @@ whose own Expenditures tab read "*** No Expenditures Reported. ***".
 no equivalent zero signal on the summary page, so those two tabs are always
 fetched regardless.
 
+### Itemized rows: CSV export, not just the HTML table
+
+Every `ViewContributions.aspx`/`ViewExpenditures.aspx` tab that has
+itemized rows also carries a real server-rendered CSV export — an
+`<a class="csvButton" href="...DisplayCsv.aspx">Download CSV File</a>`
+button, first spotted from a user screenshot after an earlier pass of this
+document wrongly concluded no export existed anywhere on the site (that
+pass only checked `ReviewSummary.aspx` for export-ish text, not the actual
+tab pages). Confirmed live (2026-08-20) against real committees across
+every one of the four sources that reuse this code path — Non-Candidate,
+Caucus, State Political Party, and Ballot Measure (County/City Party share
+State Party's page code exactly, so trusted by construction rather than
+separately reconfirmed):
+
+- **Present iff the tab has itemized rows.** Absent exactly when the tab
+  reads "*** No X Reported ***" — so a missing button is never a sign of
+  lost data, just a real zero.
+- **Never present on Loans or Loan Payments**, even for a filing with real
+  itemized loan activity (checked directly against Charleston Metro Chamber
+  of Commerce PAC's actual Loan and Loan Payment rows). Those two tabs stay
+  on the HTML-table scrape (`_noncand_itemized_rows`) — this site simply
+  doesn't offer the export for them.
+- **The href's `../` depth is not fixed** — 2 levels up from Non-Candidate/
+  Ballot Measure's tab URL, 3 from Caucus/Party's (which land one folder
+  deeper, under `.../NONCAND/`). Hardcoding either depth 404s the other
+  family; `_csv_button_url()` resolves the href against the tab page's own
+  final URL (`requests`' `response.url`, not the URL requested — see the
+  `_form_action` redirect note in "Caucus & Party Committees" below for why
+  that distinction matters here too) instead of assuming a fixed prefix.
+
+Columns, identical across every source tested:
+
+```
+Contributions: CONTRIBUTOR, ADDRESS, CITY, STATE, ZIP, OCCUPATION, AMOUNT, CONTRIBUTION_DATE
+Expenditures:  VENDOR, ADDRESS, CITY, STATE, ZIP, EXPENDITURE_DESC, EXPENDITURE_AMOUNT, DATE
+```
+
+City/State/Zip arrive pre-split — a real data-quality win over the HTML
+table's single `<br>`-joined Address cell, and no regex address-tail
+parsing is needed for these two categories once this path is taken (see
+"Addresses are two lines" below for the one case that still needs it).
+Every export's header row carries one extra trailing empty column (a
+trailing comma, e.g. `...,CONTRIBUTION_DATE,`) — `_noncand_csv_rows()`
+drops it rather than surfacing a `''` key.
+
+`_walk_report_index()` fetches the tab page first either way (its HTML is
+still needed to find the button, and is the fallback source if the export
+is ever missing unexpectedly), then reads `_csv_button_url()`'s result: CSV
+export when the button is present, `_noncand_itemized_rows()` otherwise.
+Raw JSON written this way carries the CSV's own uppercase column names
+(`CONTRIBUTOR`, `CITY`, `EXPENDITURE_AMOUNT`, etc.) instead of the HTML
+table's title-case ones (`Contributor`, `Address`, `Amount`) — the parser's
+`pick()` calls were extended with the CSV's exact names as extra candidates
+(e.g. `pick(idx, "date", "contribution_date")`) rather than replaced, so
+raw files scraped before this change — and any committee not yet rewalked
+since, since a "done" committee isn't refetched without `--force` — keep
+parsing correctly under the old shape.
+
 ### Output
 
 Raw: `data/South Carolina/raw/noncand/filings/{slug}.json`, one file per
@@ -350,10 +408,15 @@ filing's own `date_filed` (identifies the *report*, not the individual
 row) — the same tradeoff several other states make when the source has no
 finer-grained key.
 
-**Addresses are two lines** (`street\ncity, ST zip`), not the single
-unsplit line `ethicsfiling.sc.gov` uses — `_noncand_address()` is a
-separate, simpler parser from `split_address()` above, since the last line
-here is already just `City, ST ZIP` with nothing else mixed in.
+**Addresses are two lines** (`street\ncity, ST zip`) in the HTML-table
+shape — still true for Loans/Loan Payments and any raw file not yet
+rewalked since the CSV rebuild above — not the single unsplit line
+`ethicsfiling.sc.gov` uses; `_noncand_address()` is a separate, simpler
+parser from `split_address()` above, since the last line here is already
+just `City, ST ZIP` with nothing else mixed in. Contributions/Expenditures
+prefer the CSV export's already-split City/State/Zip columns instead
+(`_noncand_city_state_zip()` in the parser tries those first and only
+falls back to `_noncand_address()` when they're absent).
 
 ### Not yet covered
 
@@ -366,6 +429,9 @@ here is already just `City, ST ZIP` with nothing else mixed in.
   them tolerantly through the same `pick()` field-name list the other tabs
   use. Worth checking against a real filing if `loans_debts.csv.gz` ever
   comes up empty for a PAC whose summary page shows a nonzero loan balance.
+  Unaffected by the CSV-export rebuild above, since apps.sc.gov doesn't
+  offer that export for these two tabs at all — they stay on the HTML
+  table regardless.
 
 ---
 
@@ -422,24 +488,31 @@ This is the exact same shape as Non-Candidate's chain, and confirmed to be
 literally the same underlying report subsystem: Campaign Disclosure
 summaries land under a `.../NONCAND/` URL segment regardless of which of
 the five committee types you started from. All of the itemized-row parsing
-(`_noncand_itemized_rows`), report-index parsing (`_noncand_report_rows`),
-and the filing-history walker (`_walk_report_index`, factored out of
+(`_noncand_itemized_rows`, `_csv_button_url`/`_noncand_csv_rows` — see
+"Itemized rows: CSV export, not just the HTML table" under Non-Candidate
+Committees above, confirmed live for Caucus and State Political Party
+specifically), report-index parsing (`_noncand_report_rows`), and the
+filing-history walker (`_walk_report_index`, factored out of
 `walk_noncand_committee` when this was built) are shared unchanged.
 
 **One genuine difference: three report types.** Caucus and Party committees
 file up to three different report types under one report index —
 "Campaign Disclosure" (identical shape to everything else in this document),
-"Operating Disclosure" (a legislative-caucus-specific administrative-
-expense report, landing on a differently-shaped `ReviewSummary.aspx`
-instead of `ViewReport.aspx`, with its own distinct fields), and
-"Statement of Organization" (a registration/organizational filing, not
-transactional — confirmed to exist during the first live `--party-caucus`
-run on 2026-08-03, not seen during earlier development). This build
-covers **Campaign Disclosure only** — the other two are detected and
-logged as skipped via `REPORT_TYPES_BUILT`'s whitelist, never silently
-dropped, but nothing about their content is parsed anywhere in this
-pipeline yet. The whitelist approach means a future fourth type would be
-handled the same way (skipped + logged) without any code change required.
+"Operating Disclosure" (a Caucus/Political Party administrative-expense
+report, landing on a differently-shaped `ReviewSummary.aspx` instead of
+`ViewReport.aspx`, with its own distinct fields — not legislative-Caucus-
+specific as first thought; State Political Party committees file it too,
+confirmed live 2026-08-21), and "Statement of Organization" (a
+registration/organizational filing, not transactional — confirmed to
+exist during the first live `--party-caucus` run on 2026-08-03, not seen
+during earlier development). This build covers **Campaign Disclosure and
+Operating Disclosure** — see "Operating Disclosure" below for how the
+second one works. Statement of Organization is still detected and logged
+as skipped via `REPORT_TYPES_BUILT`'s whitelist, never silently dropped,
+but nothing about its content is parsed anywhere in this pipeline (there's
+genuinely no financial data on a registration filing to extract). The
+whitelist approach means a future new type would be handled the same way
+(skipped + logged) without any code change required to avoid data loss.
 
 **A real bug found and fixed while building this**: `_form_action()` (used
 to compute the URL to fetch a filing's itemized tabs from) parses the
@@ -453,6 +526,81 @@ is ground truth regardless of any redirect — a strict improvement for
 Non-Candidate too, not just a fix for this build. Confirmed live
 (2026-08-03): South Carolina American Party's Campaign Disclosure tabs
 404'd on every fetch before this fix, resolved cleanly after.
+
+### Operating Disclosure
+
+A second, differently-shaped report subsystem under the same site —
+`ReviewSummary.aspx` (not `ViewReport.aspx`), landing under an `OPDISC`
+URL segment (not `NONCAND`). Confirmed live (2026-08-21) it's filed by
+both Caucus and State Political Party committees (County/City Party
+share State Party's page code, so trusted by construction). Structurally:
+
+```
+Lookup{...}Result.aspx  (report index -- Operating Disclosure rows interleaved
+                          with Campaign Disclosure ones, same 4-column table)
+  -> {...}/OPDISC/ReviewSummary.aspx  (per-filing summary -- different span ids,
+                                        see below)
+  -> ReviewContributions.aspx / ReviewExpenditures.aspx  (Contributions/
+     (or ReviewCaucusExpenditures.aspx  Expenditures tabs -- no Loans or
+      for Caucus committees)             Loan Payments tab exists here)
+```
+
+Three things distinguish it from Campaign Disclosure's chain, each
+confirmed directly against the live site rather than assumed from the
+similar shape:
+
+- **The Expenditures tab's filename depends on committee family, and
+  isn't safe to hardcode.** Caucus committees link to
+  `ReviewCaucusExpenditures.aspx`, which — confirmed live across every
+  Caucus filing checked with a real nonzero total — never has an itemized
+  table or CSV button, just a lump-sum figure. State/County/City Party
+  link to `ReviewExpenditures.aspx`, which does itemize (and does have the
+  CSV export — see below). `_od_tab_urls()` reads the actual href off the
+  summary page's own tab links rather than assuming either filename;
+  those links share the exact "Contributions"/"Expenditures" text with a
+  second, unrelated pair of navbar links on the same page that point at
+  `ethicsfiling.sc.gov` (a different site entirely) — hrefs are filtered
+  to the relative `.aspx` one, not just matched by link text, after an
+  early text-only match grabbed the wrong link during initial exploration.
+- **Committee name and demographics use different span ids.** The filer
+  name lives at `lbl_OPDISC_FILER_NAME`, not `lblName` (`_noncand_filer_name()`
+  tries both). Demographics are NOT pulled from this page at all: its
+  city/state/zip is one combined `lblCity` span (`"Columbia, SC 29211"`),
+  not the three separate spans `_noncand_demographics()` expects, and
+  every Operating-Disclosure-filing committee also files Campaign
+  Disclosure (confirmed live — none were found filing one without the
+  other), so demographics are only ever pulled from a Campaign Disclosure
+  summary. The zero-fetch totals (`TOTAL_CONTRIBUTION_PERIOD`/
+  `TOTAL_EXPENDITURE_PERIOD`) use the *same* span ids as Campaign
+  Disclosure, so `_noncand_summary_nonzero()` needed no changes.
+- **The itemized-row CSV export (`DisplayCsv.aspx` — see "Itemized rows:
+  CSV export" under Non-Candidate Committees above) works identically
+  here**, same column names, confirmed live on both a Caucus committee's
+  Contributions tab and a State Party committee's Expenditures tab. No
+  separate parsing code was needed for this half of Operating Disclosure
+  — `_csv_button_url`/`_noncand_csv_rows` are reused unchanged.
+
+**Caucus's lump-sum Expenditures total is logged, not written as a row.**
+When `ReviewCaucusExpenditures.aspx` has a nonzero total but no itemized
+table (the normal case, confirmed live across every Caucus Operating
+Disclosure filing with expenditure activity checked — e.g. House
+Democratic Caucus Committee's 10/09/2009 filing: $18,788.78 total, zero
+line items anywhere on the site), the scraper logs the total (so it's
+auditable, not silently lost) but does not invent a synthetic row for
+`expenditures.csv.gz` — every other row in that file represents one real,
+individually-sourced transaction, and a single fabricated lump-sum row
+would look identical to a real one to any downstream consumer doing
+per-payee analysis. This means Caucus committees' committee-level
+expenditure totals will legitimately undercount their true Operating
+Disclosure spending — a real, disclosed limitation of the source data's
+own itemization, not a bug in this pipeline.
+
+Output-wise, Operating Disclosure's Contributions/Expenditures rows land
+in the exact same `filing["contributions"]`/`filing["expenditures"]` keys
+Campaign Disclosure uses (same CSV column names, same `pick()` candidates
+already added for the CSV-export rebuild above) — they flow into the same
+`contributions.csv.gz`/`expenditures.csv.gz` output with no separate file
+and no parser changes beyond what the CSV rebuild already required.
 
 ### Output
 
@@ -484,10 +632,12 @@ constructing one.
 
 ### Not yet covered
 
-- **Operating Disclosure filings** — a different report format with
-  different fields (see above); detected and skipped, not parsed.
 - **Statement of Organization filings** — a registration/organizational
   filing, not transactional (see above); detected and skipped, not parsed.
+- **Caucus committees' Operating Disclosure Expenditures total** — see
+  "Operating Disclosure" above; the site itself has no line-item data for
+  this, only a lump sum, so it's logged rather than parsed as a
+  transaction row.
 
 ---
 
@@ -528,8 +678,11 @@ identical to Non-Candidate in every respect:
 Every low-level helper built for Non-Candidate (`_noncand_session`,
 `_postback`, `_noncand_result_names`, `_noncand_slug`,
 `_noncand_demographics`, `_noncand_report_rows`, `_noncand_itemized_rows`,
-`_noncand_summary_nonzero`, `_walk_report_index`) is reused unchanged — only
-the search URL, manifest files, and output directory are Ballot-specific.
+`_csv_button_url`/`_noncand_csv_rows` (see "Itemized rows: CSV export, not
+just the HTML table" under Non-Candidate Committees above — confirmed live
+for Ballot Measure specifically), `_noncand_summary_nonzero`,
+`_walk_report_index`) is reused unchanged — only the search URL, manifest
+files, and output directory are Ballot-specific.
 The two-phase sweep-then-walk structure (`sweep_ballot_registry()` /
 `run_ballot_measure()`) mirrors `sweep_noncand_registry()` /
 `run_noncand_pacs()` line for line.
@@ -573,7 +726,7 @@ Non-Candidate above — no assets table anywhere in `columns.py`).
 - **Rows dropped at parse.** A contribution or expenditure missing filer, amount, or date is skipped rather than written — those three are tier-1 required and an untraceable row is worse than a missing one. Counts appear in the `file_parsed` events as `skipped`.
 - **`election_year` semantics differ by screen.** Contributions carry an explicit Election Date, so `election_year` is taken from it. Expenditures have no election date at all — `election_year` there is the year of expenditure, which is the closest available proxy and may differ from the actual cycle.
 - **Election-history coverage.** The SC Election Commission dataset starts at 2008 and only covers people who actually appeared on a ballot. Candidates who filed with the Ethics Commission but withdrew before the ballot, and non-candidate filers, will never match and keep empty party/district/incumbent.
-- **PACs, Caucus/Party, and Ballot Measure committees are covered, but opt-in and not yet complete.** The default (no-flag) scrape is a candidate/public-official dataset only, same as before. Standalone PACs (`--pacs`), Caucus/State/County/City Party committees (`--party-caucus`), and Ballot Measure committees (`--ballot-measure`) are separate sources — if a scrape hasn't been run for a given `data/South Carolina/`, treat that coverage as absent, not zero activity. Even with all three run to completion, Operating Disclosure and Statement of Organization filings still aren't covered for any of them.
+- **PACs, Caucus/Party, and Ballot Measure committees are covered, but opt-in and not yet complete.** The default (no-flag) scrape is a candidate/public-official dataset only, same as before. Standalone PACs (`--pacs`), Caucus/State/County/City Party committees (`--party-caucus`), and Ballot Measure committees (`--ballot-measure`) are separate sources — if a scrape hasn't been run for a given `data/South Carolina/`, treat that coverage as absent, not zero activity. Statement of Organization filings (registration, not transactional) still aren't covered for any of them, and Caucus committees' Operating Disclosure Expenditures are a lump sum with no line-item data on the site at all (see "Operating Disclosure" under Caucus & Party Committees) — everything else Campaign Disclosure and Operating Disclosure report is covered as of 2026-08-21.
 
 ---
 
@@ -581,6 +734,12 @@ Non-Candidate above — no assets table anywhere in `columns.py`).
 
 | Component | Date |
 |---|---|
+| Scraper | 2026-08-21 (Caucus/Party's Operating Disclosure filings are now walked -- `REPORT_TYPES_BUILT` expanded, `_od_tab_urls()`/`_summary_total_text()` added; reuses the CSV-export path unchanged; Caucus's lump-sum-only Expenditures are logged, not written as a row; Statement of Organization remains the one skipped type) |
+| Scraper | 2026-08-20 (Contributions/Expenditures now prefer apps.sc.gov's own `DisplayCsv.aspx` CSV export over the HTML table -- `_csv_button_url()`/`_noncand_csv_rows()`, confirmed live across Non-Candidate, Caucus, State Party, and Ballot Measure; Loans/Repayments unaffected, that export doesn't exist for them) |
 | Scraper | 2026-08-03 (added `--party-caucus` and `--ballot-measure`; added time-based staleness re-check for `--party-caucus`'s manifest; fixed a `_form_action` redirect bug affecting itemized-tab URLs) |
+| Parser | 2026-08-21 (no code change needed -- Operating Disclosure's itemized rows land in the same `filing["contributions"]`/`["expenditures"]` keys and CSV column names the existing parser already handles) |
+| Parser | 2026-08-20 (`_noncand_city_state_zip()` prefers the CSV export's pre-split City/State/Zip over `_noncand_address()`'s two-line parse when present; `pick()` calls extended with the CSV's own column names so both raw-JSON shapes keep parsing) |
 | Parser | 2026-08-03 (added `parse_party_caucus()` and `parse_ballot_measure()`; fixed `_noncand_dedupe_filings()` cross-filing duplication affecting `--pacs`, `--party-caucus`, and `--ballot-measure`) |
+| Docs | 2026-08-21 (documented the Operating Disclosure build -- corrects an earlier "legislative-caucus-specific" claim: State Political Party committees file it too) |
+| Docs | 2026-08-20 (documented the DisplayCsv.aspx CSV export rebuild -- corrects an earlier wrong claim in this same doc that apps.sc.gov had no export button anywhere) |
 | Docs | 2026-08-03 (corrected "two report types" to three; added Ballot Measure Committees section — all six apps.sc.gov committee types now covered) |

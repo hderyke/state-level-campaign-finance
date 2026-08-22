@@ -3,8 +3,8 @@ src/main.py — Single entry point for the campaign finance pipeline.
 
   Pipeline commands          stages run
   ─────────────────────────────────────────────────────────────────
-  sync <states>              scrape → parse → validate → tabulate → aggregate
-  reparse <states>           parse → validate → tabulate → aggregate  (skip scrape)
+  sync <states>              scrape → parse → enrich → validate → tabulate → aggregate
+  reparse <states>           parse → enrich → validate → tabulate → aggregate  (skip scrape)
 
   Data commands
   ─────────────────────────────────────────────────────────────────
@@ -95,10 +95,24 @@ def _cloud_s3():
 DATA_COMMANDS     = {"push", "pull"}
 ALL_COMMANDS      = PIPELINE_COMMANDS | DATA_COMMANDS
 
-# Flags forwarded to the scraper subprocess via orc
+# Flags forwarded to the scraper subprocess via orc. Not every state's
+# scraper accepts every flag here -- each scraper's own argparse just
+# ignores (via parse_known_args) whatever it doesn't define, per the
+# module docstring's "unsupported flags are silently ignored" note. So
+# it's safe -- and expected -- to add a state-specific boolean flag here
+# once that state's scraper defines it, rather than routing it around
+# main.py's parser.
+#
+# --pacs/--party-caucus/--ballot-measure are South Carolina's opt-in
+# non-candidate-committee sources (see docs/states/south_carolina.md).
+# Before these were added here, main.py's parser didn't recognize them at
+# all: they fell through to `clean_args` and were treated as state
+# abbreviations, so `sync SC --pacs` failed with "Unknown state
+# abbreviation: --PACS" instead of reaching the scraper.
 SCRAPER_FLAGS     = {"--force", "--transactions", "--entities",
                      "--contributions", "--expenditures",
-                     "--candidates", "--committees"}
+                     "--candidates", "--committees",
+                     "--pacs", "--party-caucus", "--ballot-measure"}
 YEAR_FLAGS        = {"--start-year", "--end-year"}
 
 # Set True to automatically generate an HTML report after every run.

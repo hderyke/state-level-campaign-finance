@@ -8,3 +8,4 @@ python-dotenv==1.2.2
 requests==2.33.1
 tqdm==4.67.1
 xlrd==2.0.1
+nicknames==1.0.1

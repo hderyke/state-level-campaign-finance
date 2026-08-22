@@ -129,6 +129,7 @@ CAVEATS
 import csv
 import glob
 import hashlib
+import io
 import itertools
 import json
 import os
@@ -251,6 +252,14 @@ NONCAND_TABS = {
     "loans":         ("ViewLoans.aspx",         None),   # no reliable $0 signal on the summary page -- always fetched
     "loan_payments": ("ViewRepayments.aspx",    None),
 }
+
+# Which of the four NONCAND_TABS labels have a real CSV export
+# (DisplayCsv.aspx) to prefer over the HTML table -- confirmed live
+# (2026-08-20) that only Contributions/Expenditures ever carry the
+# "Download CSV File" button; Loans/Repayments never do, even with real
+# itemized loan data on the page. See _csv_button_url's docstring for the
+# full confirmation writeup.
+_CSV_EXPORT_TABS = {"contributions", "expenditures"}
 
 # SC Election Commission election history (tier-2 backfill)
 ELECTION_HISTORY_URL  = "https://sc.elstats.civera.com/api/download_search.csv"
@@ -596,8 +605,22 @@ def sweep_noncand_registry(log, force: bool = False, limit: int | None = None) -
 def _find_noncand_committee(session, name: str):
     """Land on `name`'s exact result row via 'Begins With'. Returns
     (results_html, form_action_url, button_name, button_value) or
-    (None, None, None, None) if the exact name can't be relocated -- e.g. it
-    was truncated differently between registry-save and this run."""
+    (None, None, None, None) if the name can't be relocated -- e.g. it was
+    truncated differently between registry-save and this run.
+
+    Compared case-insensitively (after the same whitespace collapse), not
+    just whitespace-normalized: this site has shown the same committee's
+    name rendered with different casing between the page it was originally
+    discovered on (the brute-force sweep's results list) and this page (a
+    fresh 'Begins With' results list) -- e.g. "Citizens and business for
+    Lancaster County" during a --ballot-measure run and "SC EMS PAC FUND,
+    INC." during --pacs both failed a case-sensitive match against their own
+    registry-recorded name despite clearly being the same committee. A
+    case-sensitive compare here silently drops that committee's entire
+    filing history every run, forever, with no retry path -- case-folding
+    the comparison (not the name that gets returned/stored downstream,
+    which still comes from the caller's own registry entry) fixes the whole
+    class of mismatch, not just these two names."""
     tokens = _aspnet_tokens(session.get(NONCAND_SEARCH_URL, timeout=30).text)
     r = _postback(session, NONCAND_SEARCH_URL, tokens, {
         "ctl00$ContentPlaceHolder1$txtName": name[:80],
@@ -605,11 +628,14 @@ def _find_noncand_committee(session, name: str):
         "ctl00$ContentPlaceHolder1$btnNext": "Next",
     })
     soup = BeautifulSoup(r.text, "html.parser")
+    want = re.sub(r"\s+", " ", name).strip().casefold()
+    seen = []
     for tag in soup.find_all("input", {"class": "link"}):
         val = re.sub(r"\s+", " ", tag.get("value", "")).strip()
-        if val == name:
-            return r.text, _form_action(r.text, NONCAND_SEARCH_URL), tag["name"], tag.get("value", "")
-    return None, None, None, None
+        seen.append(val)
+        if val.casefold() == want:
+            return r.text, _form_action(r.text, NONCAND_SEARCH_URL), tag["name"], tag.get("value", ""), None
+    return None, None, None, None, seen
 
 
 def _noncand_report_rows(html: str) -> list[dict]:
@@ -664,18 +690,29 @@ def _noncand_demographics(html: str) -> dict:
 
 
 def _noncand_filer_name(html: str) -> str:
-    """The filer name off a Campaign Disclosure summary page (lblName) --
-    needed for the dropdown-driven Caucus/Party walkers, which don't know
-    the committee's exact filed name upfront the way a Non-Candidate name
-    search does. Confirmed this is the authoritative name, not just the
-    dropdown label re-displayed: County of Richland's Democratic Party
-    dropdown selection is county="Richland" + party="Democratic", but
-    lblName on the resulting page reads 'County of Richland Democratic
-    Party' -- a real difference in word order/phrasing that only the site
-    itself can give you."""
+    """The filer name off a filing summary page -- needed for the
+    dropdown-driven Caucus/Party walkers, which don't know the committee's
+    exact filed name upfront the way a Non-Candidate name search does.
+    Confirmed this is the authoritative name, not just the dropdown label
+    re-displayed: County of Richland's Democratic Party dropdown selection
+    is county="Richland" + party="Democratic", but lblName on the
+    resulting page reads 'County of Richland Democratic Party' -- a real
+    difference in word order/phrasing that only the site itself can give
+    you.
+
+    Tries two ids: `lblName` (Campaign Disclosure's ViewReport.aspx) and
+    `lbl_OPDISC_FILER_NAME` (Operating Disclosure's differently-shaped
+    ReviewSummary.aspx, confirmed live 2026-08-21). In practice a
+    committee's Campaign Disclosure filings always resolve this before an
+    Operating Disclosure one is reached (report_rows interleaves both, and
+    every OD-filing committee also files Campaign Disclosure), so this
+    second id mostly matters for robustness, not routine use."""
     soup = BeautifulSoup(html, "html.parser")
-    tag = soup.find(id=re.compile(re.escape("lblName") + "$"))
-    return tag.get_text(strip=True) if tag else ""
+    for span_id in ("lblName", "lbl_OPDISC_FILER_NAME"):
+        tag = soup.find(id=re.compile(re.escape(span_id) + "$"))
+        if tag:
+            return tag.get_text(strip=True)
+    return ""
 
 
 def _noncand_summary_nonzero(html: str, span_id: str) -> bool:
@@ -699,7 +736,14 @@ def _noncand_itemized_rows(html: str) -> list[dict]:
     """Every itemized row off a ViewContributions/Expenditures/Loans/
     Repayments.aspx tab, keyed by its own column headers -- the four tabs
     don't share a column layout, so the parser reads whichever headers are
-    actually present rather than assuming Contributions' shape."""
+    actually present rather than assuming Contributions' shape.
+
+    Superseded for Contributions/Expenditures by the CSV export (see
+    _csv_button_url/_noncand_csv_rows below) wherever that export is
+    available -- this HTML-table parse remains the only path for Loans/
+    Repayments (confirmed live, 2026-08-20: those two tabs never carry a
+    CSV button, with or without itemized data) and the fallback if a
+    Contributions/Expenditures tab is ever missing its button unexpectedly."""
     soup  = BeautifulSoup(html, "html.parser")
     table = soup.find("table", class_="tableTabs")
     if not table:
@@ -717,6 +761,114 @@ def _noncand_itemized_rows(html: str) -> list[dict]:
             row[h] = td.get_text("\n", strip=True)
         out.append(row)
     return out
+
+
+def _csv_button_url(html: str, base_url: str) -> str | None:
+    """Absolute URL for a Contributions/Expenditures tab's own "Download CSV
+    File" button (a real server-rendered export at
+    apps.sc.gov/PublicReporting/DisplayCsv.aspx, confirmed live 2026-08-20 --
+    not scraped from any preview, an actual `<a class="csvButton">` on the
+    tab page itself), or None if the tab has no such button.
+
+    Confirmed live across all four committee families this pipeline pulls
+    from apps.sc.gov (Non-Candidate, Caucus, State Party, Ballot Measure --
+    County/City Party share the exact same page code as State Party so are
+    trusted by construction, not separately reconfirmed) that the button:
+      - IS present on Contributions/Expenditures whenever that tab actually
+        has itemized rows to show;
+      - is ABSENT on Contributions/Expenditures whenever the tab reports
+        "*** No X Reported ***" (i.e. absence tracks real zero-itemized-rows,
+        not a bug -- so a missing button here is never a sign of lost data);
+      - is NEVER present on Loans or Loan Payments, even for a filing with
+        real itemized loan activity (confirmed against Charleston Metro
+        Chamber of Commerce PAC's actual Loan and Loan Payment rows) -- SC
+        just doesn't offer this export for those two tabs, so callers must
+        keep using _noncand_itemized_rows() for them.
+
+    The href itself is a *relative* path whose ../ depth varies with how
+    many folders deep the tab page is nested -- 2 levels for Non-Candidate
+    and Ballot Measure ("../../DisplayCsv.aspx"), 3 for Caucus/State/County/
+    City Party ("../../../DisplayCsv.aspx", since those land one folder
+    deeper under e.g. .../LegCaucus/NONCAND/). Hardcoding either depth
+    404s the other family -- confirmed live: "../../" resolves to the wrong
+    URL for a Caucus committee's Expenditures tab. Resolving the href
+    against the tab page's own final URL (base_url -- pass requests'
+    `.url`, which reflects any server-side redirect, not the URL that was
+    requested) handles both depths correctly with no per-source branching."""
+    soup = BeautifulSoup(html, "html.parser")
+    btn = soup.find("a", class_="csvButton")
+    if not btn or not btn.get("href"):
+        return None
+    return urljoin(base_url, btn["href"])
+
+
+def _noncand_csv_rows(session, csv_url: str) -> list[dict]:
+    """Itemized rows off a tab's DisplayCsv.aspx export, keyed by the CSV's
+    own column headers -- confirmed live (2026-08-20) identical across every
+    source that offers it:
+      Contributions: CONTRIBUTOR, ADDRESS, CITY, STATE, ZIP, OCCUPATION,
+                     AMOUNT, CONTRIBUTION_DATE
+      Expenditures:  VENDOR, ADDRESS, CITY, STATE, ZIP, EXPENDITURE_DESC,
+                     EXPENDITURE_AMOUNT, DATE
+    City/State/Zip arrive pre-split, unlike the HTML table's single
+    <br>-joined Address cell (see _noncand_itemized_rows) -- real data-
+    quality win, no regex address-tail parsing needed for these two
+    categories once this path is used.
+
+    Every export observed carries one extra trailing empty column (the
+    header line itself ends in a trailing comma, e.g.
+    "...,CONTRIBUTION_DATE,\\r\\n") -- csv.DictReader surfaces that as a ''
+    key holding '' for every row; dropped here rather than passed through."""
+    r = session.get(csv_url, timeout=30)
+    r.raise_for_status()
+    reader = csv.DictReader(io.StringIO(r.text))
+    out = []
+    for row in reader:
+        row.pop("", None)
+        out.append({k: (v or "").strip() for k, v in row.items() if k})
+    return out
+
+
+def _od_tab_urls(summary_html: str, summary_url: str) -> dict[str, str | None]:
+    """{"contributions": url_or_None, "expenditures": url_or_None} for an
+    Operating Disclosure filing's summary page (ReviewSummary.aspx, under
+    an OPDISC folder -- a different report subsystem from Campaign
+    Disclosure's ViewReport.aspx/NONCAND, confirmed live 2026-08-21).
+
+    Read off the page's own tab links rather than assumed by filename: the
+    Expenditures href is NOT the same file for every source -- Caucus
+    committees link to ReviewCaucusExpenditures.aspx (which, confirmed
+    live, never itemizes -- lump-sum total only), State/County/City Party
+    to ReviewExpenditures.aspx (which does itemize). Hardcoding either
+    would silently mishandle the other family.
+
+    Hrefs are filtered to ones ending in ".aspx", not just matched by link
+    text: this same page's top navbar carries its own "Contributions"/
+    "Expenditures" links pointing at ethicsfiling.sc.gov -- an absolute URL
+    to a completely different site -- and a bare text-match pick grabbed
+    that wrong link during initial exploration of this exact page shape."""
+    soup = BeautifulSoup(summary_html, "html.parser")
+    out: dict[str, str | None] = {}
+    for label, link_text in (("contributions", "Contributions"),
+                             ("expenditures", "Expenditures")):
+        url = None
+        for a in soup.find_all("a"):
+            href = a.get("href", "")
+            if a.get_text(strip=True) == link_text and href.endswith(".aspx"):
+                url = urljoin(summary_url, href)
+                break
+        out[label] = url
+    return out
+
+
+def _summary_total_text(html: str, span_id: str) -> str:
+    """Raw display text (e.g. '$79,534.14') of a summary page's `span_id`
+    total, or '' if the span isn't present -- used only for a log message,
+    not a parsed value, so no numeric coercion here (see
+    _noncand_summary_nonzero for the parsed/boolean version)."""
+    soup = BeautifulSoup(html, "html.parser")
+    tag = soup.find(id=re.compile(re.escape(span_id) + "$"))
+    return tag.get_text(strip=True) if tag else ""
 
 
 def _load_noncand_done() -> dict:
@@ -738,7 +890,8 @@ def _append_noncand_done(committee: str, n_filings: int):
 
 def _walk_report_index(log, session, source_label: str, committee_name: str | None,
                        index_html: str, index_action: str,
-                       report_types: set[str] | None = None) -> dict:
+                       report_types: set[str] | None = None,
+                       fallback_label: str | None = None) -> dict:
     """Shared inner loop for walking a committee's report index once you're
     already positioned on it -- every filing's summary, and the itemized
     tabs whose summary total isn't a known zero. Used by both
@@ -753,14 +906,28 @@ def _walk_report_index(log, session, source_label: str, committee_name: str | No
     and is the default so this never silently drops rows for a caller that
     doesn't pass the argument.
 
+    fallback_label is display-only, for the skip-log message below -- it
+    must NOT feed committee_name itself. The dropdown-driven callers (see
+    _walk_dropdown_committee) don't know the site's own name for a committee
+    until a filing's summary page is scraped further down this function, so
+    committee_name arrives here as None and the skip-log line -- which runs
+    before that scrape -- used to print the useless "(unnamed)" for every
+    single Caucus/Party committee. But the caller already has a decent
+    constructed label at this point (e.g. "Aiken Republican", built from the
+    dropdown selection itself) and was silently discarding it. Threading it
+    through as fallback_label (not as committee_name) fixes the log message
+    while leaving the actual precedence untouched: the site's own scraped
+    name still wins once found, and this constructed label is still only
+    the last-resort value written to the record if lblName is never seen.
+
     source_label is just for warning messages ("noncand", "caucus", etc.)."""
     report_rows = _noncand_report_rows(index_html)
     if report_types is not None:
         skipped = [r for r in report_rows if r["report_type"] not in report_types]
         report_rows = [r for r in report_rows if r["report_type"] in report_types]
         if skipped:
-            log.info(f"  [{source_label}] {committee_name or '(unnamed)'}: skipping "
-                     f"{len(skipped)} filing(s) of report type(s) "
+            log.info(f"  [{source_label}] {committee_name or fallback_label or '(unnamed)'}: "
+                     f"skipping {len(skipped)} filing(s) of report type(s) "
                      f"{sorted(set(r['report_type'] for r in skipped))} -- not yet parsed")
 
     filings = []
@@ -791,29 +958,118 @@ def _walk_report_index(log, session, source_label: str, committee_name: str | No
             if fname:
                 committee_name = fname
 
+        # Operating Disclosure's summary page (ReviewSummary.aspx, under an
+        # OPDISC folder) carries city/state/zip as one combined lblCity span
+        # ("Columbia, SC 29211"), not the three separate spans
+        # _noncand_demographics() expects -- pulling from one would silently
+        # corrupt city/state/zip with the whole combined string. Every
+        # OD-filing committee also files Campaign Disclosure (confirmed
+        # live, 2026-08-21: no committee was found filing OD without it),
+        # so demographics are only ever pulled from a Campaign Disclosure
+        # summary -- OD pages are skipped for this purpose, not treated as a
+        # source with nothing useful.
+        #
         # Keep the first filing's address block that actually has one --
         # reports don't arrive in a guaranteed chronological order, and the
         # committee's registered address rarely changes filing to filing.
-        if not demographics.get("address"):
+        if row["report_type"] == "Campaign Disclosure" and not demographics.get("address"):
             demo = _noncand_demographics(r_summary.text)
             if demo.get("address"):
                 demographics = demo
 
         tabs = {}
-        for label, (path, span_id) in NONCAND_TABS.items():
-            if not _noncand_summary_nonzero(r_summary.text, span_id):
-                continue
-            tab_url = urljoin(summary_url, path)
-            try:
-                r_tab = session.get(tab_url, timeout=30)
-                r_tab.raise_for_status()
-            except requests.RequestException as e:
-                log.warning(f"  [{source_label}] {committee_name} / "
-                            f"{row['date_filed']} / {label}: {e}")
-                continue
-            rows = _noncand_itemized_rows(r_tab.text)
-            if rows:
-                tabs[label] = rows
+        if row["report_type"] == "Operating Disclosure":
+            # Operating Disclosure is a different report subsystem
+            # (ReviewSummary.aspx/OPDISC) with only two tabs -- no Loans or
+            # Loan Payments tab exists here at all (confirmed live,
+            # 2026-08-21) -- and Expenditures' filename varies by source
+            # (see _od_tab_urls), so this can't reuse NONCAND_TABS' fixed
+            # path table.
+            od_urls = _od_tab_urls(r_summary.text, summary_url)
+            od_spans = {"contributions": "TOTAL_CONTRIBUTION_PERIOD",
+                       "expenditures":  "TOTAL_EXPENDITURE_PERIOD"}
+            for label, tab_url in od_urls.items():
+                span_id = od_spans[label]
+                if tab_url is None or not _noncand_summary_nonzero(r_summary.text, span_id):
+                    continue
+                try:
+                    r_tab = session.get(tab_url, timeout=30)
+                    r_tab.raise_for_status()
+                except requests.RequestException as e:
+                    log.warning(f"  [{source_label}] {committee_name} / "
+                                f"{row['date_filed']} / operating disclosure "
+                                f"{label}: {e}")
+                    continue
+                csv_url = _csv_button_url(r_tab.text, r_tab.url)
+                if csv_url:
+                    try:
+                        rows = _noncand_csv_rows(session, csv_url)
+                    except requests.RequestException as e:
+                        log.warning(f"  [{source_label}] {committee_name} / "
+                                    f"{row['date_filed']} / operating "
+                                    f"disclosure {label}: CSV export failed "
+                                    f"({e}) -- falling back to the HTML table")
+                        csv_url = None
+                if not csv_url:
+                    rows = _noncand_itemized_rows(r_tab.text)
+                    if not rows and label == "expenditures":
+                        # Caucus committees' Operating Disclosure
+                        # Expenditures page (ReviewCaucusExpenditures.aspx)
+                        # never itemizes -- confirmed live, 2026-08-21: a
+                        # real nonzero total with no line-item table or CSV
+                        # button anywhere on the page, across every filing
+                        # checked. Nothing on the site distinguishes
+                        # individual transactions here, so there's no real
+                        # row to write -- logged (with the actual total, so
+                        # it's auditable) rather than silently dropped, but
+                        # not written as a synthetic row, which would look
+                        # like a real itemized transaction to every
+                        # consumer of expenditures.csv.gz.
+                        total = _summary_total_text(r_summary.text, span_id)
+                        log.warning(f"  [{source_label}] {committee_name} / "
+                                    f"{row['date_filed']}: Operating "
+                                    f"Disclosure Expenditures total "
+                                    f"{total or '(unknown)'} has no itemized "
+                                    f"line items on this site (Caucus-only "
+                                    f"lump sum) -- not written")
+                if rows:
+                    tabs[label] = rows
+        else:
+            for label, (path, span_id) in NONCAND_TABS.items():
+                if not _noncand_summary_nonzero(r_summary.text, span_id):
+                    continue
+                tab_url = urljoin(summary_url, path)
+                try:
+                    r_tab = session.get(tab_url, timeout=30)
+                    r_tab.raise_for_status()
+                except requests.RequestException as e:
+                    log.warning(f"  [{source_label}] {committee_name} / "
+                                f"{row['date_filed']} / {label}: {e}")
+                    continue
+
+                # Contributions/Expenditures have a real CSV export
+                # (DisplayCsv.aspx) with cleaner data than the HTML table --
+                # pre-split City/State/Zip instead of one <br>-joined
+                # Address cell. See _csv_button_url/_noncand_csv_rows.
+                # Loans/Repayments never carry this button (confirmed live
+                # even with real loan data), so they always fall through to
+                # the HTML-table parse.
+                rows = None
+                if label in _CSV_EXPORT_TABS:
+                    csv_url = _csv_button_url(r_tab.text, r_tab.url)
+                    if csv_url:
+                        try:
+                            rows = _noncand_csv_rows(session, csv_url)
+                        except requests.RequestException as e:
+                            log.warning(f"  [{source_label}] {committee_name} / "
+                                        f"{row['date_filed']} / {label}: CSV "
+                                        f"export failed ({e}) -- falling back "
+                                        f"to the HTML table")
+                            rows = None
+                if rows is None:
+                    rows = _noncand_itemized_rows(r_tab.text)
+                if rows:
+                    tabs[label] = rows
 
         filings.append({
             "period":     row["period"],
@@ -831,9 +1087,10 @@ def walk_noncand_committee(log, session, name: str) -> dict | None:
     filing's summary, and the itemized tabs whose summary total isn't a
     known zero. Returns the full record (written by the caller) or None if
     the committee couldn't be relocated by exact name."""
-    results_html, action, btn_name, btn_val = _find_noncand_committee(session, name)
+    results_html, action, btn_name, btn_val, seen = _find_noncand_committee(session, name)
     if action is None:
-        log.warning(f"  [noncand] could not relocate '{name}' by exact name -- skipping")
+        near = f" -- results page had: {seen!r}" if seen else " -- results page had no candidates at all"
+        log.warning(f"  [noncand] could not relocate '{name}' by exact name{near}")
         return None
 
     tokens = _aspnet_tokens(results_html)
@@ -910,20 +1167,23 @@ def run_noncand_pacs(log, force: bool = False, sweep_limit: int | None = None,
 # Non-Candidate committees use, strongly suggesting this whole reporting
 # subsystem is shared code on the SC side.
 #
-# ONE GENUINE DIFFERENCE: Caucus and Party committees each file two
-# different report types under that one table -- "Campaign Disclosure"
-# (identical shape to everything else here) and "Operating Disclosure" (a
-# legislative-caucus-specific administrative-expense report with different
+# ONE GENUINE DIFFERENCE: Caucus and Party committees each file up to three
+# report types under that one table -- "Campaign Disclosure" (identical
+# shape to everything else here), "Operating Disclosure" (a
+# legislative-caucus/party administrative-expense report with different
 # fields, landing on a differently-shaped ReviewSummary.aspx rather than
-# ViewReport.aspx -- confirmed by inspecting both directly). This build
-# covers Campaign Disclosure only, matching Non-Candidate's scope --
-# Operating Disclosure rows are detected and logged as skipped
-# (REPORT_TYPES_BUILT, consumed by _walk_report_index's report_types
-# filter), never silently dropped. Operating Disclosure support is a
-# separate, not-yet-started effort.
+# ViewReport.aspx -- confirmed by inspecting both directly), and "Statement
+# of Organization" (a registration filing, not transactional). Both
+# Campaign Disclosure and Operating Disclosure are built -- Operating
+# Disclosure reuses the same CSV export as Campaign Disclosure
+# (_csv_button_url/_noncand_csv_rows), just via _od_tab_urls() to find its
+# differently-named tabs. Statement of Organization rows are detected and
+# logged as skipped (REPORT_TYPES_BUILT, consumed by _walk_report_index's
+# report_types filter), never silently dropped -- there's genuinely no
+# financial data on a registration filing to extract.
 
 DROPDOWN_BTN_NEXT = "ctl00$ContentPlaceHolder1$btnNext"
-REPORT_TYPES_BUILT = {"Campaign Disclosure"}
+REPORT_TYPES_BUILT = {"Campaign Disclosure", "Operating Disclosure"}
 
 PARTY_CAUCUS_DIR         = RAW_DIR / "party_caucus"
 PARTY_CAUCUS_FILINGS_DIR = PARTY_CAUCUS_DIR / "filings"
@@ -1040,13 +1300,15 @@ def _walk_dropdown_committee(log, session, source: str, url: str, fields: dict,
 
     index_action = _form_action(r_index.text, url)
     record = _walk_report_index(log, session, source, None, r_index.text,
-                                index_action, report_types=REPORT_TYPES_BUILT)
+                                index_action, report_types=REPORT_TYPES_BUILT,
+                                fallback_label=fallback_name)
     if record["committee"] is None:
-        # lblName was never seen -- either every filing on this combo was
-        # Operating Disclosure (filtered out above) or it genuinely has zero
-        # Campaign Disclosure filings. Nothing to write either way, but fall
-        # back to a constructed label so a caller with filings-but-no-name
-        # (shouldn't happen, but see _walk_report_index) doesn't lose data.
+        # lblName/lbl_OPDISC_FILER_NAME was never seen -- either every
+        # filing on this combo was Statement of Organization (filtered out
+        # above) or it genuinely has zero Campaign/Operating Disclosure
+        # filings. Nothing to write either way, but fall back to a
+        # constructed label so a caller with filings-but-no-name (shouldn't
+        # happen, but see _walk_report_index) doesn't lose data.
         if not record["filings"]:
             return None
         record["committee"] = fallback_name
@@ -1154,7 +1416,8 @@ def run_party_caucus(log, force: bool = False, sweep_limit: int | None = None,
     """Discover and pull filing history for all four dropdown-driven
     committee types: Caucus, State/County/City Political Party. See
     docs/states/south_carolina.md 'Caucus & Party Committees'. Campaign
-    Disclosure filings only -- see REPORT_TYPES_BUILT.
+    Disclosure and Operating Disclosure filings -- see REPORT_TYPES_BUILT
+    (Statement of Organization is the one type still skipped).
 
     Combos older than `refresh_days` are rechecked automatically -- see
     PARTY_REFRESH_DAYS and run_party_source's docstring. --force still
@@ -1192,12 +1455,12 @@ def run_party_caucus(log, force: bool = False, sweep_limit: int | None = None,
 # committees also file "Statement of Organization" filings alongside
 # "Campaign Disclosure" under the same report-index table -- confirmed live
 # by sampling several real filers found via a "com" search (NRA Ballot
-# Measure Committee among them). This build covers Campaign Disclosure
-# only, via the same REPORT_TYPES_BUILT whitelist Caucus/Party uses --
-# Statement of Organization rows are detected and logged as skipped, never
-# silently dropped. No "Operating Disclosure" was observed here (that
-# report type appears to be legislative-caucus-specific, not general to
-# every apps.sc.gov committee type).
+# Measure Committee among them). Statement of Organization rows are
+# detected and logged as skipped via the same REPORT_TYPES_BUILT whitelist
+# Caucus/Party uses, never silently dropped. No "Operating Disclosure" was
+# observed here (confirmed live, 2026-08-21, across several Ballot Measure
+# committees) -- that report type is filed by Caucus and Political Party
+# committees, not by every apps.sc.gov committee type.
 
 BALLOT_SEARCH_URL     = f"{NONCAND_SITE}/Ballot/SearchBallot.aspx"
 BALLOT_DIR            = RAW_DIR / "ballot_measure"
@@ -1305,9 +1568,13 @@ def sweep_ballot_registry(log, force: bool = False, limit: int | None = None) ->
 
 def _find_ballot_committee(session, name: str):
     """Land on `name`'s exact result row via 'Begins With' -- same approach
-    as _find_noncand_committee(). Returns (results_html, form_action_url,
-    button_name, button_value) or (None, None, None, None) if the exact
-    name can't be relocated."""
+    as _find_noncand_committee(), including the case-insensitive compare
+    (see that function's docstring: this site can render the same
+    committee's name with different casing on different pages, and a
+    case-sensitive match silently drops the committee's filing history on
+    every run, forever). Returns (results_html, form_action_url,
+    button_name, button_value) or (None, None, None, None) if the name
+    can't be relocated at all."""
     tokens = _aspnet_tokens(session.get(BALLOT_SEARCH_URL, timeout=30).text)
     r = _postback(session, BALLOT_SEARCH_URL, tokens, {
         "ctl00$ContentPlaceHolder1$txtName": name[:80],
@@ -1315,23 +1582,29 @@ def _find_ballot_committee(session, name: str):
         "ctl00$ContentPlaceHolder1$btnNext": "Next",
     })
     soup = BeautifulSoup(r.text, "html.parser")
+    want = re.sub(r"\s+", " ", name).strip().casefold()
+    seen = []
     for tag in soup.find_all("input", {"class": "link"}):
         val = re.sub(r"\s+", " ", tag.get("value", "")).strip()
-        if val == name:
-            return r.text, _form_action(r.text, BALLOT_SEARCH_URL), tag["name"], tag.get("value", "")
-    return None, None, None, None
+        seen.append(val)
+        if val.casefold() == want:
+            return r.text, _form_action(r.text, BALLOT_SEARCH_URL), tag["name"], tag.get("value", ""), None
+    return None, None, None, None, seen
 
 
 def walk_ballot_committee(log, session, name: str) -> dict | None:
-    """Pull every Campaign Disclosure filing for one Ballot Measure
-    committee -- report index, each filing's summary, and the itemized tabs
-    whose summary total isn't a known zero. Statement of Organization
-    filings are skipped (REPORT_TYPES_BUILT), same as Caucus/Party. Returns
-    the full record (written by the caller) or None if the committee
-    couldn't be relocated by exact name."""
-    results_html, action, btn_name, btn_val = _find_ballot_committee(session, name)
+    """Pull every filing for one Ballot Measure committee -- report index,
+    each filing's summary, and the itemized tabs whose summary total isn't
+    a known zero. Statement of Organization filings are skipped
+    (REPORT_TYPES_BUILT), same as Caucus/Party -- Ballot Measure never
+    files Operating Disclosure in practice (confirmed live, 2026-08-21), so
+    this whitelist entry is simply a no-op here, not disabled separately.
+    Returns the full record (written by the caller) or None if the
+    committee couldn't be relocated by exact name."""
+    results_html, action, btn_name, btn_val, seen = _find_ballot_committee(session, name)
     if action is None:
-        log.warning(f"  [ballot] could not relocate '{name}' by exact name -- skipping")
+        near = f" -- results page had: {seen!r}" if seen else " -- results page had no candidates at all"
+        log.warning(f"  [ballot] could not relocate '{name}' by exact name{near}")
         return None
 
     tokens = _aspnet_tokens(results_html)
@@ -2861,10 +3134,10 @@ if __name__ == "__main__":
                          "instead of name search. NOT part of the default "
                          "(no-flag) run: County/City Party is a ~3,200-combo "
                          "sweep (46 counties + 269 cities, each x 11 parties). "
-                         "Campaign Disclosure filings only — Operating Disclosure "
-                         "is a different report format, not yet parsed anywhere "
-                         "in this pipeline. Plain requests, no Chrome needed. "
-                         "Ask for it explicitly")
+                         "Campaign Disclosure and Operating Disclosure filings "
+                         "— Statement of Organization is a registration filing, "
+                         "not parsed (no financial data to extract). Plain "
+                         "requests, no Chrome needed. Ask for it explicitly")
     ap.add_argument("--party-refresh-days", type=int, metavar="N",
                     default=PARTY_REFRESH_DAYS,
                     help=f"--party-caucus: recheck a combo once its manifest "
