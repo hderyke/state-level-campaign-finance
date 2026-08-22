@@ -285,6 +285,15 @@ NH,Loan Forgiven,Loan
 # has one of the two," no blanks to fall back on ""Contribution"" in practice).",
 WA,Cash,Monetary
 WA,In-kind,In-Kind
+# == South Carolina ==============================================================
+# SC's contributions search returns no transaction-type field — the grid has no
+# such column and no in-kind/refund distinction is published. transaction_type is
+# therefore empty for every SC contribution and transaction_category resolves to
+# NULL via the ELSE branch. The rows below only fire if the portal starts
+# emitting a type; they are not exercised by current data.
+SC,Contribution,Monetary
+SC,In-Kind,In-Kind
+SC,Refund,Refund
 # == Tennessee ===================================================================,,
 "# TN's contributions.transaction_type is TNCAMP's Type column, with the",,
 # Adjustment column appended when it's set (see parsers/tennessee.py _txn_type).,,
