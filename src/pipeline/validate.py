@@ -156,6 +156,29 @@ TIER1_OPTIONAL_BY_STATE = {
         # TN's expenditure schedule. See docs/states/tennessee.md.
         "expenditures": {"date"},
     },
+    "utah": {
+        # Utah's entity ids exist only in the AdvancedSearch results grid,
+        # which lists entities that are *currently* listed. The per-year bulk
+        # transaction exports still contain filers that have since been purged
+        # from that grid, so a committee can have real historical transactions
+        # and no roster row to take an id from — no amount of re-sweeping
+        # recovers it.
+        #
+        # Measured on a full real corpus (4,463 roster entities, 1,293,527
+        # transaction rows): filer resolution tops out at 97.8%, with the
+        # residue being 28,740 rows across just 106 named entities ("Life
+        # Elevated", "Weber County Democrats", "Libertarian Party of Utah"...).
+        # That is a source-shaped ceiling below the 99% tier-1 bar, not a
+        # parser or staleness problem, so it is a tier-2 warning here.
+        #
+        # The parser still reports its own resolution rate and warns below
+        # 95% — comfortably under the ~98% ceiling, so it fires only when the
+        # roster really is stale or partial, which a re-run of
+        # `scrapers/utah.py --entities` fixes. That is the number to watch;
+        # this exemption is not a licence to ignore a collapsing fill rate.
+        "committees": {"state_filer_id"},
+        "candidates": {"state_filer_id"},
+    },
 }
 
 # Tables that have amount fields

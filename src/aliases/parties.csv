@@ -89,3 +89,26 @@ LIBERTY UNION,LIBERTY UNION
 PEACE AND JUSTICE,PEACE AND JUSTICE
 GREEN MOUNTAIN,GREEN MOUNTAIN
 UNAFFILIATED,INDEPENDENT
+# --- Utah ballot lines ---
+# scrapers/utah.py expands Utah's ballot abbreviations to these long forms
+# before they reach here, precisely because two of its codes collide with
+# other states' parties in this (national, non-state-keyed) table: Utah's
+# "CON" is the Constitution Party, not New York's Conservative Party. Only
+# the long forms are listed, so a raw "CON" from some other state's data
+# still resolves to CONSERVATIVE above.
+INDEPENDENT AMERICAN,INDEPENDENT AMERICAN
+IAP,INDEPENDENT AMERICAN
+UNITED UTAH,UNITED UTAH
+UUP,UNITED UTAH
+CONSTITUTION PARTY,CONSTITUTION
+# Parties seen on Utah canvasses that no other state's data has claimed.
+# "Justice" is Rocky Anderson's Justice Party (Utah ballots 2012-2016); the
+# other two are minor presidential lines on the 2008 canvass.
+JUSTICE,JUSTICE
+JUSTICE PARTY,JUSTICE
+PEACE AND FREEDOM,PEACE AND FREEDOM
+SOCIALISM AND LIBERATION,SOCIALISM AND LIBERATION
+PARTY FOR SOCIALISM AND LIBERATION,SOCIALISM AND LIBERATION
+# Forward Party — one Utah candidacy on the 2020+ canvasses.
+FORWARD,FORWARD
+FORWARD PARTY,FORWARD

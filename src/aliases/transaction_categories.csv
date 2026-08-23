@@ -503,3 +503,8 @@ NJ,N/SUBMITTED,
 NJ,ESCHEATS NJ,
 NJ,EXEMPT,
 NJ,SCHEDULE 1D,
+# == Utah =====================================================================
+# Contributions carry no type of their own; parsers/utah.py derives these two
+# values from the INKIND flag ("X" or blank).
+UT,Contribution,Monetary
+UT,In-Kind Contribution,In-Kind
