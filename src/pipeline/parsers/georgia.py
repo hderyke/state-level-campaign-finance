@@ -5,8 +5,10 @@ Input:  data/Georgia/raw/
   contributions_{year}.csv  — TCON transactions from Peachfile API (2025–present)
   expenditures_{year}.csv   — TEXP transactions from Peachfile API (2025–present)
   candidates.csv            — all filer registrations from GetCandidateDetails
-  committees.csv            — non-candidate rows from GetCandidateDetails (always empty in
-                              practice; see public_committees.csv)
+  committees.csv            — non-candidate rows from GetCandidateDetails. Normally ABSENT:
+                              that endpoint returns candidate registrations only, so the
+                              scraper writes no file. Parsed if present (the scraper warns
+                              when it appears); real committees are in public_committees.csv
   public_committees.csv     — PACs/party/leadership/independent/ballot-question committees
                               from GetCommitteeDetails, deduped against candidates.csv
 
@@ -25,13 +27,16 @@ Notes
   • Contributor name: organizations have only Contributor Last Name set;
     individuals have both Last and First populated.
   • Expenditure CSV headers have trailing spaces on some columns — stripped.
-  • Independent Expenditure rows that name multiple candidates/measures are
-    split across repeated Transaction ID rows: one "parent" row carries the
-    Transaction Amount (target column empty), and one "target" row per
-    candidate/measure (with Stance) carries no amount of its own. We drop the
-    parent row and replicate its amount onto each target row, overriding
-    candidate_name with the target and appending the stance to purpose — see
-    load_ie_breakdown().
+  • Independent Expenditure rows that name candidates/measures are split across
+    repeated Transaction ID rows: one "parent" row carries the Transaction
+    Amount (target column empty), and one "target" row per candidate/measure
+    (with Stance) carries no amount of its own. We keep the PARENT row — it
+    holds the money — drop the target rows, and fold their names into
+    affiliated_candidate_name ("; "-joined when several) with support_oppose
+    set only where every target shares a stance. See load_ie_targets().
+    The amount is never divided: Georgia doesn't disclose how a buy splits
+    across the candidates it names. candidate_name stays the SPENDER
+    throughout, per columns.py.
   • All 1,266 candidates.csv rows have candidateLastName set, i.e. every row is a
     candidate registration; filerStatusCode distinguishes active (FACT) from
     terminated (TERMN) registrations. ~934 of these rows also carry a
@@ -85,6 +90,82 @@ MAX_VALID_YEAR = date.today().year + 2
 
 def clean(val) -> str:
     return (val or "").strip()
+
+
+def amended_flag(val) -> str:
+    """Normalize Peachfile's Y/N amendment flag to the schema's 0/1.
+
+    columns.py types `amended` as a boolean int, and validate.py's
+    BOOL_INT_FIELDS checks it accepts only "0", "1" or "". Georgia was passing
+    the source's raw "N"/"Y" straight through, so the check failed on nearly
+    every row it saw — 416,167 contributions and 80,523 expenditures — which
+    buried any real warning under noise that could never be actioned.
+
+    Matches the amended_flag() helpers in the Arkansas, Colorado, New Mexico
+    and West Virginia parsers. Unrecognized values return "" (unknown) rather
+    than guessing a boolean.
+    """
+    v = (val or "").strip().upper()
+    if v in ("Y", "YES", "1", "TRUE"):
+        return "1"
+    if v in ("N", "NO", "0", "FALSE"):
+        return "0"
+    return ""
+
+
+def nul_free(lines):
+    """Yield lines with NUL bytes removed.
+
+    contributions_2026.csv contains a stray NUL. Python's csv module refuses it
+    outright (`_csv.Error: line contains NUL`), so any reader that touches that
+    file dies on it. The contributions block currently survives only because of
+    how it happens to read the file; that's luck, not design, and a NUL is never
+    meaningful data in a disclosure CSV. Strip it at the door for every reader.
+    """
+    for line in lines:
+        yield line.replace("\x00", "") if "\x00" in line else line
+
+
+# Columns that sit after the free-text description in Peachfile's transaction
+# CSVs. An unbalanced quote in that description shifts every later column one
+# place right (see strip_keys), so when a row overflows the header these values
+# are misaligned and must not be trusted. Blanked rather than written through:
+# "" says "unknown", whereas a shifted value claims to be something it isn't.
+UNRELIABLE_AFTER_OVERFLOW = (
+    "Amended", "Timed Report Name", "Timed Report Filed Date",
+    "Report Name", "Report Filed Date",
+)
+
+
+def strip_keys(row: dict) -> tuple[dict, list | None]:
+    """Normalize a csv.DictReader row's keys, tolerating over-long rows.
+
+    Two separate problems with Peachfile's transaction CSVs are handled here:
+
+    1. Some expenditure header names carry trailing spaces ("Filing Entity Name "),
+       so every key is stripped.
+    2. A source row with MORE fields than the header puts the overflow under
+       DictReader's `restkey`, which defaults to None. `None.strip()` then raises
+       `AttributeError: 'NoneType' object has no attribute 'strip'`, and because
+       this runs inside the parse's try/except, ONE bad row aborted the entire
+       Georgia parse — every expenditure, candidate and committee after it was
+       silently skipped.
+
+    Real example, transaction 398177 in expenditures_2026.csv: the filer typed a
+    stray double-quote into the free-text description ('...Democrats Defending
+    Democary" via the actblue link...'). That unbalanced quote splits the
+    description in two and shifts every later column one place right, pushing
+    "Report Filed Date" past the end of the header.
+
+    Only the tail is corrupted — Filing Entity, Transaction ID/Type, Payee,
+    Transaction Date, Amount and Election Year all sit BEFORE the break and stay
+    correct — so the row is kept rather than dropped; discarding it would lose a
+    real $2,880 expenditure. The shifted tail lands in `amended`, which is a
+    passthrough field. The overflow itself is unrecoverable and returned to the
+    caller so it can be counted and reported instead of vanishing.
+    """
+    overflow = row.get(None)
+    return {k.strip(): v for k, v in row.items() if k is not None}, overflow
 
 
 def clean_zip(val: str) -> str:
@@ -307,38 +388,53 @@ def raw_files(pattern: str) -> list[Path]:
     )
 
 
-def load_ie_breakdown(path: Path) -> tuple[dict[str, str], set[str]]:
+def load_ie_targets(path: Path) -> dict[str, list[tuple[str, str]]]:
     """
-    Pre-scan an expenditures CSV for Independent Expenditure rows.
+    Pre-scan an expenditures CSV, collecting each Independent Expenditure's targets.
 
-    When an IE names multiple candidates/measures, Georgia repeats the same
-    Transaction ID across multiple rows: one "parent" row carries the
-    Transaction Amount (with IE_TARGET_COL empty), and one "target" row per
-    candidate/measure mentioned (IE_TARGET_COL + Stance set) carries no
-    amount of its own.
+    When an IE names candidates/measures, Georgia repeats the same Transaction ID
+    across several rows: one "parent" row carries the Transaction Amount (with
+    IE_TARGET_COL empty), and one "target" row per candidate/measure mentioned
+    (IE_TARGET_COL + Stance set) carrying no amount of its own.
 
-    Returns:
-      ie_amount_by_txid:    Transaction ID -> amount (parsed) from the parent row
-      ie_txids_with_targets: Transaction IDs that have at least one target row
+    The parser keeps the PARENT row — it holds the money — and folds the targets
+    into it via affiliated_candidate_name/support_oppose (see the expenditures
+    block). The target rows themselves are dropped.
+
+    This replaces an earlier approach that dropped the parent and copied its
+    amount onto every target row. That multiplied each IE by its target count:
+    one $2,981,816 buy naming 21 candidates became $62,618,136, and Georgia's
+    2026 expenditures overstated by $118,337,800 in total. The amount must
+    appear exactly once, and columns.py's affiliated_candidate_name /
+    support_oppose exist precisely to carry the targeting alongside it.
+
+    Returns: Transaction ID -> [(target name, raw stance), ...] in file order.
     """
-    amounts: dict[str, str] = {}
-    with_targets: set[str] = set()
+    targets: dict[str, list[tuple[str, str]]] = defaultdict(list)
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
-        reader = csv.DictReader(f)
+        reader = csv.DictReader(nul_free(f))
         reader.fieldnames = [k.strip() for k in (reader.fieldnames or [])]
         for row in reader:
-            row = {k.strip(): v for k, v in row.items()}
+            row, _ = strip_keys(row)   # malformed rows reported by the main pass
             if clean(row.get("Transaction Type")) != "Independent Expenditure":
                 continue
             txid = clean(row.get("Transaction ID"))
-            if not txid:
-                continue
-            amt = parse_amount(row.get("Transaction Amount"))
-            if amt:
-                amounts[txid] = amt
-            if clean(row.get(IE_TARGET_COL)):
-                with_targets.add(txid)
-    return amounts, with_targets
+            target = clean(row.get(IE_TARGET_COL))
+            if txid and target:
+                targets[txid].append((target, clean(row.get("Stance"))))
+    return dict(targets)
+
+
+def ie_stance_code(stances: list[str]) -> str:
+    """Collapse an IE's per-target stances into one "S"/"O" code.
+
+    Only returned when every target shares the same stance. Georgia does file
+    mixed transactions — a single buy supporting one candidate while opposing
+    another (28 of 97 multi-target IEs) — and no single code is honest for
+    those, so they get "" rather than a forced value.
+    """
+    codes = {s[:1].upper() for s in stances if s}
+    return codes.pop() if len(codes) == 1 and codes <= {"S", "O"} else ""
 
 
 def open_writer(filename: str, fieldnames: list):
@@ -522,7 +618,7 @@ def run():
                         "date":           parse_date(row.get("Transaction Date")),
                         "transaction_type": f"{tx_type}" + (f" – {sub_type}" if sub_type else ""),
                         "election_year":  clean(row.get("Election Year")),
-                        "amended":        clean(row.get("Amended")),
+                        "amended":        amended_flag(row.get("Amended")),
                         "filing_id":      clean(row.get("Transaction Id")),
                         "raw_file":       path.name,
                         "row_num":        row_num,
@@ -678,16 +774,31 @@ def run():
             ft = time.perf_counter()
             file_rows = 0
             file_skipped = 0
+            file_malformed = 0
 
-            ie_amount_by_txid, ie_txids_with_targets = load_ie_breakdown(path)
+            ie_targets_by_txid = load_ie_targets(path)
 
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.DictReader(f)
+                reader = csv.DictReader(nul_free(f))
                 # Strip trailing spaces from header keys (present in expenditure CSVs)
                 reader.fieldnames = [k.strip() for k in (reader.fieldnames or [])]
 
                 for row_num, row in enumerate(reader, start=2):
-                    row = {k.strip(): v for k, v in row.items()}
+                    row, overflow = strip_keys(row)
+                    if overflow is not None:
+                        file_malformed += 1
+                        # Everything after the misquote is shifted — drop it
+                        # rather than record a value that claims to be a field
+                        # it isn't. See UNRELIABLE_AFTER_OVERFLOW.
+                        for col in UNRELIABLE_AFTER_OVERFLOW:
+                            row[col] = ""
+                        if file_malformed <= 3:      # cap the noise
+                            log.warning(
+                                f"  {path.name} row {row_num} (txn "
+                                f"{clean(row.get('Transaction ID')) or '?'}): "
+                                f"{len(overflow)} field(s) past the header — "
+                                f"misquoted source row, trailing columns dropped"
+                            )
                     tx_type  = clean(row.get("Transaction Type"))
                     sub_type = clean(row.get("Transaction Sub Type"))
                     entity_id = clean(row.get("Filing Entity Id"))
@@ -697,41 +808,42 @@ def run():
                         continue
 
                     txid = clean(row.get("Transaction ID"))
-                    ie_target = ""
-                    ie_stance = ""
+                    ie_affiliated = ""
+                    ie_support_oppose = ""
                     if tx_type == "Independent Expenditure":
-                        ie_target = clean(row.get(IE_TARGET_COL))
-                        ie_stance = clean(row.get("Stance"))
-                        if not ie_target and txid in ie_txids_with_targets:
-                            # "Parent" row for an IE that names one or more
-                            # candidates/measures — its amount and other
-                            # details get replicated onto each target row
-                            # below, so skip it here to avoid an empty-amount
-                            # duplicate.
+                        if clean(row.get(IE_TARGET_COL)):
+                            # "Target" row: carries a candidate/measure but no
+                            # money of its own. The parent row below holds the
+                            # amount and absorbs these names, so drop it here —
+                            # writing it would duplicate the expenditure.
                             file_skipped += 1
                             continue
+
+                        # "Parent" row — the one with the money. Fold in every
+                        # target this transaction named. Multi-target IEs get a
+                        # "; "-joined list (longest observed: 594 chars); the
+                        # amount stays whole and is never divided, because
+                        # Georgia does not disclose how a buy splits across the
+                        # candidates it mentions.
+                        pairs = ie_targets_by_txid.get(txid, [])
+                        ie_affiliated = "; ".join(
+                            utils.clean_name(t) for t, _ in pairs)
+                        ie_support_oppose = ie_stance_code([s for _, s in pairs])
 
                     # Reimbursement and Credit Card rows often have a blank
                     # Transaction Amount — fall back to End Recipient Transaction Amount.
                     amount = (parse_amount(row.get("Transaction Amount"))
                               or parse_amount(row.get("End Recipient Transaction Amount")))
-                    if not amount and ie_target:
-                        # "Target" row — the dollar amount lives on the parent
-                        # row that shares this Transaction ID.
-                        amount = ie_amount_by_txid.get(txid, "")
 
                     purpose = clean(row.get("Purpose"))
-                    if ie_stance:
-                        purpose = f"{purpose} ({ie_stance})" if purpose else ie_stance
 
+                    # Always the SPENDER, never the target — an IE committee
+                    # spending on a candidate is not that candidate. The target
+                    # belongs in affiliated_candidate_name (see columns.py).
                     candidate_name = utils.clean_name(
                         reg.get("filerName", "")
                         or clean(row.get("Filing Entity Name"))
                     )
-                    if ie_target:
-                        # For IE target rows, candidate_name identifies who/what
-                        # the expenditure supports or opposes, not the spender.
-                        candidate_name = utils.clean_name(ie_target)
 
                     expn_committee_nm = (clean(row.get("Campaign Committee Name"))
                                         or clean(row.get("Filing Entity Name")))
@@ -750,19 +862,26 @@ def run():
                         "payee_state":      clean(row.get("Payee Address State")),
                         "payee_zip":        clean_zip(row.get("Payee Address Zip Code", "")),
                         "election_year":    clean(row.get("Election Year")),
-                        "amended":          clean(row.get("Amended")),
+                        "amended":          amended_flag(row.get("Amended")),
                         "filing_id":        txid,
                         "raw_file":         path.name,
                         "row_num":          row_num,
                         "candidate_name":   candidate_name,
                         "office":           clean(reg.get("office")),
+                        "affiliated_candidate_name": ie_affiliated,
+                        "support_oppose":            ie_support_oppose,
                     })
                     total_expenditures += 1
                     file_rows += 1
                     _index_row(expn_index, expn_date_str, amount, expn_payee_nm, expn_committee_nm)
 
+            if file_malformed > 3:
+                log.warning(f"  {path.name}: {file_malformed:,} malformed rows total "
+                            f"(first 3 shown)")
+
             log.file_parsed(path.name, "expenditures", file_rows,
                             skipped=file_skipped,
+                            malformed=file_malformed,
                             duration_s=round(time.perf_counter() - ft, 2),
                             bytes=path.stat().st_size)
 
@@ -1017,6 +1136,58 @@ def run():
                             candidates_written + committees_written,
                             duration_s=round(time.perf_counter() - ft, 2),
                             bytes=cand_path.stat().st_size)
+
+        # ---------------------------------------------------------------- #
+        # committees.csv — non-candidate rows from GetCandidateDetails      #
+        # ---------------------------------------------------------------- #
+        # Normally absent: GetCandidateDetails returns candidate registrations
+        # only, so the scraper's split yields nothing and writes no file (it
+        # logs a warning if it ever does — see scrapers/georgia.py
+        # download_entities). Handled here so that if Georgia's API does start
+        # returning non-candidate rows, they reach committees.csv.gz instead of
+        # being silently dropped. Same ENTITY_FIELDS shape as candidates.csv,
+        # hence candidateMailing* for the address.
+        cmte_raw_path = RAW_DIR / "committees.csv"
+        if cmte_raw_path.exists():
+            ft = time.perf_counter()
+            raw_cmte_written = 0
+            with open(cmte_raw_path, newline="", encoding="utf-8") as f:
+                for row_num, row in enumerate(csv.DictReader(f), start=2):
+                    committee_name = (clean(row.get("committeeName"))
+                                      or clean(row.get("filerName")))
+                    if not committee_name:
+                        continue
+
+                    treasurer = ""
+                    t_first = clean(row.get("treasurerFirstName"))
+                    t_last  = clean(row.get("treasurerLastName"))
+                    if t_last:
+                        treasurer = f"{t_last}, {t_first}".strip(", ")
+
+                    cmte_w.writerow({
+                        "state":          STATE,
+                        "committee_name": utils.clean_name(committee_name),
+                        # No filerType on this endpoint; these are by definition
+                        # the rows that carry no candidate, so PAC is the safe
+                        # generic. Never "Candidate Committee" — that label is
+                        # reserved for the candidates.csv rows above.
+                        "committee_type": "PAC",
+                        "election_year":  (clean(row.get("electionCycleName")) or "")[:4] or "",
+                        "candidate_name": "",
+                        "treasurer_name": treasurer,
+                        "city":           clean(row.get("candidateMailingCity")),
+                        "zip":            clean(row.get("candidateMailingZipCode")),
+                        "active":         "1" if clean(row.get("filerStatusCode")) == "FACT" else "0",
+                        "state_filer_id": clean(row.get("filerRegistrationId")),
+                        "raw_file":       cmte_raw_path.name,
+                        "row_num":        row_num,
+                    })
+                    raw_cmte_written += 1
+                    committees_written += 1
+
+            log.file_parsed(cmte_raw_path.name, "committees", raw_cmte_written,
+                            duration_s=round(time.perf_counter() - ft, 2),
+                            bytes=cmte_raw_path.stat().st_size)
 
         # ---------------------------------------------------------------- #
         # public (non-candidate) committees — GetCommitteeDetails           #
