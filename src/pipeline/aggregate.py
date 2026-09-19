@@ -74,6 +74,27 @@ CANDIDATE_COMMITTEE_TYPES = {
     "Other Political Subdivision Candidate",
 }
 
+# LIKE-based fallbacks for states that embed district info in the office field
+# (e.g. GA "State Representative District: 15" → "State Representative").
+# Not expressible in office_type_mappings()/office_types.csv, which only
+# supports exact (state, raw) → canonical lookups, not pattern matching —
+# so this stays a hardcoded Python list rather than a CSV like the other
+# alias mappings. If this list outgrows GA/SC, that's the trigger to add
+# real pattern-match support to the alias-CSV mechanism instead of growing
+# this further.
+# SC patterns are uppercase because the SC parser normalizes office through
+# utils.clean_name; LIKE is case-sensitive.
+OFFICE_LIKE_FALLBACKS = [
+    ("GA", "State Representative%", "State Representative"),
+    ("GA", "State Senate%",         "State Senator"),
+    ("SC", "SC SENATE%",            "State Senator"),
+    ("SC", "SC HOUSE%",             "State Representative"),
+    ("SC", "SCHOOL BOARD TRUSTEE%", "School Board Trustee"),
+    ("SC", "COUNTY COUNCIL%",       "County Council"),
+    ("SC", "%SHERIFF",              "County Sheriff"),
+    ("SC", "%CORONER",              "County Coroner"),
+]
+
 # committees must come before contributions — the contributor backfill joins against it
 COL_MAP = {
     "committees":    C.COMMITTEES_AGG,
@@ -83,7 +104,7 @@ COL_MAP = {
 }
 
 # Full-text search indexes built into the final db — power fast contributor/
-# committee name search in client-facing/api/routers/contributions.py instead
+# committee name search in web/search/api/routers/contributions.py instead
 # of an ILIKE '%...%' scan across the whole contributions table (that timed
 # out the API Lambda's 29s cap on an unconstrained search, e.g. "Jim Walton"
 # with no state filter, 2026-07-19).
@@ -108,7 +129,7 @@ COL_MAP = {
 # clobber the first index (confirmed empirically: match_bm25 started
 # returning multi-row garbage on the first index after the second call).
 # Queried via fts_main_<docs_table>.match_bm25(rowid, ...) in
-# client-facing/api/routers/contributions.py.
+# web/search/api/routers/contributions.py.
 FTS_INDEXES = [
     ("contributor_name_docs", "contributions", "contributor_name"),
     ("committee_name_docs",   "contributions", "committee_name"),
@@ -157,14 +178,6 @@ def find_state_dbs() -> list[tuple[str, Path]]:
     return found
 
 
-def _cast(col: str, existing: set[str]) -> str:
-    """ Enforces types across the state dbs"""
-    cast_type = C.COLUMN_TYPES.get(col, "VARCHAR")
-    if col not in existing:
-        return f'CAST(NULL AS {cast_type}) AS "{col}"'
-    return f'CAST(t."{col}" AS {cast_type}) AS "{col}"'
-
-
 def _case_expr(
     mapping: dict[tuple[str, str], str | None],
     state_col: str,
@@ -194,6 +207,97 @@ def _case_expr(
     if not whens:
         return resolved_else
     return "CASE\n            " + "\n            ".join(whens) + f"\n            ELSE {resolved_else} END"
+
+
+def _cast(col: str, existing: set[str]) -> str:
+    """ Enforces types across the state dbs"""
+    cast_type = C.COLUMN_TYPES.get(col, "VARCHAR")
+    if col not in existing:
+        return f'CAST(NULL AS {cast_type}) AS "{col}"'
+    return f'CAST(t."{col}" AS {cast_type}) AS "{col}"'
+
+
+def _scope_candidate_name(con, table: str, log) -> None:
+    """Blank candidate_name on rows whose committee isn't confirmed to be that
+    candidate's own committee — see CANDIDATE_COMMITTEE_TYPES above. Shared by
+    contributions and expenditures, which apply the exact same scoping.
+    """
+    blanked_before = con.execute(
+        f"SELECT COUNT(*) FROM {table} WHERE candidate_name IS NOT NULL AND candidate_name != ''"
+    ).fetchone()[0]
+    types_sql = ", ".join(f"'{t}'" for t in CANDIDATE_COMMITTEE_TYPES)
+    con.execute(f"""
+        UPDATE {table}
+        SET candidate_name = NULL
+        WHERE candidate_name IS NOT NULL AND candidate_name != ''
+        AND NOT EXISTS (
+            SELECT 1 FROM committees c
+            WHERE c.state = {table}.state
+              AND c.committee_name = {table}.committee_name
+              AND c.committee_type IN ({types_sql})
+        )
+    """)
+    blanked_after = con.execute(
+        f"SELECT COUNT(*) FROM {table} WHERE candidate_name IS NOT NULL AND candidate_name != ''"
+    ).fetchone()[0]
+    print(f"    candidate_name: blanked {blanked_before - blanked_after:,} of {blanked_before:,} "
+          f"non-candidate-committee rows")
+    log._emit("candidate_name_scoped", table=table,
+              blanked=blanked_before - blanked_after, kept=blanked_after)
+
+
+def _normalize_contributions(con, ctype_case: str, tcat_case: str, log) -> None:
+    """Post-load normalization for the contributions table: canonicalize
+    contributor_type, derive transaction_category, backfill contributor_type
+    from committees where the source left it blank, then scope candidate_name
+    (see _scope_candidate_name).
+    """
+    # contributor_type → canonical (keep raw for unmapped values)
+    con.execute(f"""
+        UPDATE contributions
+        SET contributor_type = {ctype_case}
+        WHERE contributor_type IS NOT NULL
+    """)
+    # transaction_category → derived from transaction_type
+    con.execute(f"""
+        UPDATE contributions
+        SET transaction_category = {tcat_case}
+    """)
+    # contributor_type backfill — join against committees for rows
+    # where contributor_type is still NULL (e.g. Alaska, Arizona).
+    # committees has already been normalized so values are canonical.
+    null_before = con.execute(
+        "SELECT COUNT(*) FROM contributions WHERE contributor_type IS NULL"
+    ).fetchone()[0]
+    print(f"    backfilling contributor_type from committees...", end=" ", flush=True)
+    con.execute("""
+        UPDATE contributions
+        SET contributor_type = (
+            SELECT committee_type
+            FROM committees
+            WHERE committees.state        = contributions.state
+            AND   committees.committee_name = contributions.contributor_name
+            LIMIT 1
+        )
+        WHERE contributor_type IS NULL
+        AND   contributor_name IS NOT NULL
+    """)
+    null_after = con.execute(
+        "SELECT COUNT(*) FROM contributions WHERE contributor_type IS NULL"
+    ).fetchone()[0]
+    backfilled = null_before - null_after
+    print(f"{backfilled:,} rows filled")
+    log._emit("contributor_backfill", backfilled=backfilled,
+              still_null=null_after)
+
+    # candidate_name is only trustworthy when the receiving committee
+    # is confirmed to be that candidate's own committee — see
+    # CANDIDATE_COMMITTEE_TYPES comment above. Blank it everywhere else
+    # (PACs, independent expenditure committees, party/ballot-measure
+    # committees, and any committee_name that doesn't match a known
+    # committee at all) so a PAC's opposition spending can't masquerade
+    # as support for the named candidate.
+    _scope_candidate_name(con, "contributions", log)
 
 
 def run():
@@ -231,7 +335,7 @@ def run():
         'state', 'committee_type',
         else_expr='committee_type',     # unknown → keep raw
     )
-    ecat_case    = _case_expr(
+    expn_tcat_case = _case_expr(
         expenditure_category_mappings(),
         'state', 'transaction_type',
         else_expr='NULL',               # unknown → NULL (don't invent categories)
@@ -268,16 +372,15 @@ def run():
         con = duckdb.connect(str(tmp_db))
 
         # The new physical ORDER BY on contributions/expenditures (see
-        # TABLE_SORT_KEYS) is a real external sort over 100M+ rows and can
+        # SECONDARY_SORT_KEYS) is a real external sort over 100M+ rows and can
         # need to spill to disk. DuckDB's default temp_directory is wherever
         # tmp_db landed (Python's tempfile default, usually a small /tmp
-        # partition — same issue the TMPDIR env var workaround elsewhere in
-        # this file's docs addresses for disk space, not memory). Without an
-        # explicit spill location DuckDB can hit its memory_limit and error
-        # out instead of spilling, rather than just running slower — confirmed
-        # via a sandboxed reproduction (2-state, 12M-row subset OOM'd with the
-        # default temp dir, succeeded once pointed at DATA_DIR, which is on
-        # the same large disk as the state DBs themselves).
+        # partition). Without an explicit spill location DuckDB can hit its
+        # memory_limit and error out instead of spilling, rather than just
+        # running slower — confirmed via a sandboxed reproduction (2-state,
+        # 12M-row subset OOM'd with the default temp dir, succeeded once
+        # pointed at DATA_DIR, which is on the same large disk as the state
+        # DBs themselves).
         tmp_spill_dir = DATA_DIR / ".aggregate_tmp"
         tmp_spill_dir.mkdir(exist_ok=True)
         con.execute(f"PRAGMA temp_directory='{tmp_spill_dir}'")
@@ -322,7 +425,7 @@ def run():
                     exprs = []
                     for c in cols:
                         if c == "transaction_category":
-                            exprs.append(f'{ecat_case} AS "transaction_category"')
+                            exprs.append(f'{expn_tcat_case} AS "transaction_category"')
                         else:
                             exprs.append(_cast(c, existing))
                     select_cols = ", ".join(exprs)
@@ -366,20 +469,9 @@ def run():
                         SET canonical_office = {ofc_case}
                         WHERE office IS NOT NULL
                     """)
-                    # LIKE-based fallbacks for states that embed district info in the office field
-                    # (e.g. GA "State Representative District: 15" → "State Representative")
-                    # SC patterns are uppercase because the SC parser normalizes
-                    # office through utils.clean_name; LIKE is case-sensitive.
-                    for like_state, like_pattern, canon in [
-                        ("GA", "State Representative%", "State Representative"),
-                        ("GA", "State Senate%",         "State Senator"),
-                        ("SC", "SC SENATE%",            "State Senator"),
-                        ("SC", "SC HOUSE%",             "State Representative"),
-                        ("SC", "SCHOOL BOARD TRUSTEE%", "School Board Trustee"),
-                        ("SC", "COUNTY COUNCIL%",       "County Council"),
-                        ("SC", "%SHERIFF",              "County Sheriff"),
-                        ("SC", "%CORONER",              "County Coroner"),
-                    ]:
+                    # LIKE-based fallbacks — see OFFICE_LIKE_FALLBACKS above for why
+                    # these are hardcoded here instead of a CSV.
+                    for like_state, like_pattern, canon in OFFICE_LIKE_FALLBACKS:
                         con.execute(f"""
                             UPDATE candidates
                             SET canonical_office = '{canon}'
@@ -389,100 +481,13 @@ def run():
                         """)
 
                 if table == "contributions":
-                    # contributor_type → canonical (keep raw for unmapped values)
-                    con.execute(f"""
-                        UPDATE contributions
-                        SET contributor_type = {ctype_case}
-                        WHERE contributor_type IS NOT NULL
-                    """)
-                    # transaction_category → derived from transaction_type
-                    con.execute(f"""
-                        UPDATE contributions
-                        SET transaction_category = {tcat_case}
-                    """)
-                    # contributor_type backfill — join against committees for rows
-                    # where contributor_type is still NULL (e.g. Alaska, Arizona).
-                    # committees has already been normalized so values are canonical.
-                    null_before = con.execute(
-                        "SELECT COUNT(*) FROM contributions WHERE contributor_type IS NULL"
-                    ).fetchone()[0]
-                    print(f"    backfilling contributor_type from committees...", end=" ", flush=True)
-                    con.execute("""
-                        UPDATE contributions
-                        SET contributor_type = (
-                            SELECT committee_type
-                            FROM committees
-                            WHERE committees.state        = contributions.state
-                            AND   committees.committee_name = contributions.contributor_name
-                            LIMIT 1
-                        )
-                        WHERE contributor_type IS NULL
-                        AND   contributor_name IS NOT NULL
-                    """)
-                    null_after = con.execute(
-                        "SELECT COUNT(*) FROM contributions WHERE contributor_type IS NULL"
-                    ).fetchone()[0]
-                    backfilled = null_before - null_after
-                    print(f"{backfilled:,} rows filled")
-                    log._emit("contributor_backfill", backfilled=backfilled,
-                              still_null=null_after)
-
-                    # candidate_name is only trustworthy when the receiving committee
-                    # is confirmed to be that candidate's own committee — see
-                    # CANDIDATE_COMMITTEE_TYPES comment above. Blank it everywhere else
-                    # (PACs, independent expenditure committees, party/ballot-measure
-                    # committees, and any committee_name that doesn't match a known
-                    # committee at all) so a PAC's opposition spending can't masquerade
-                    # as support for the named candidate.
-                    blanked_before = con.execute(
-                        "SELECT COUNT(*) FROM contributions WHERE candidate_name IS NOT NULL AND candidate_name != ''"
-                    ).fetchone()[0]
-                    types_sql = ", ".join(f"'{t}'" for t in CANDIDATE_COMMITTEE_TYPES)
-                    con.execute(f"""
-                        UPDATE contributions
-                        SET candidate_name = NULL
-                        WHERE candidate_name IS NOT NULL AND candidate_name != ''
-                        AND NOT EXISTS (
-                            SELECT 1 FROM committees c
-                            WHERE c.state = contributions.state
-                              AND c.committee_name = contributions.committee_name
-                              AND c.committee_type IN ({types_sql})
-                        )
-                    """)
-                    blanked_after = con.execute(
-                        "SELECT COUNT(*) FROM contributions WHERE candidate_name IS NOT NULL AND candidate_name != ''"
-                    ).fetchone()[0]
-                    print(f"    candidate_name: blanked {blanked_before - blanked_after:,} of {blanked_before:,} "
-                          f"non-candidate-committee rows")
-                    log._emit("candidate_name_scoped", table="contributions",
-                              blanked=blanked_before - blanked_after, kept=blanked_after)
+                    _normalize_contributions(con, ctype_case, tcat_case, log)
 
                 if table == "expenditures":
                     # transaction_category is handled inline above (computed per-row
                     # from transaction_type before this block runs). Same candidate_name
                     # scoping as contributions — see CANDIDATE_COMMITTEE_TYPES comment.
-                    blanked_before = con.execute(
-                        "SELECT COUNT(*) FROM expenditures WHERE candidate_name IS NOT NULL AND candidate_name != ''"
-                    ).fetchone()[0]
-                    types_sql = ", ".join(f"'{t}'" for t in CANDIDATE_COMMITTEE_TYPES)
-                    con.execute(f"""
-                        UPDATE expenditures
-                        SET candidate_name = NULL
-                        WHERE candidate_name IS NOT NULL AND candidate_name != ''
-                        AND NOT EXISTS (
-                            SELECT 1 FROM committees c
-                            WHERE c.state = expenditures.state
-                              AND c.committee_name = expenditures.committee_name
-                              AND c.committee_type IN ({types_sql})
-                        )
-                    """)
-                    blanked_after = con.execute(
-                        "SELECT COUNT(*) FROM expenditures WHERE candidate_name IS NOT NULL AND candidate_name != ''"
-                    ).fetchone()[0]
-                    print(f"    candidate_name: blanked {blanked_before - blanked_after:,} of {blanked_before:,} "
-                          f"non-candidate-committee rows")
-                    log._emit("candidate_name_scoped", table="expenditures",
-                              blanked=blanked_before - blanked_after, kept=blanked_after)
+                    _scope_candidate_name(con, "expenditures", log)
 
                 n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 duration = round(time.perf_counter() - ft, 2)

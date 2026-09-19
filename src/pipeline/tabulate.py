@@ -8,7 +8,6 @@ bloat from incremental updates.
 """
 
 import argparse
-import re
 import sys
 import time
 from pathlib import Path
@@ -18,9 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[0]))
 from src.reporting.logger import get_logger
 import columns as C
+from utils import find_clean_dir, find_table_csv
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TABLES       = ["contributions", "expenditures", "committees", "candidates"]
 OPTS         = "null_padding=true, ignore_errors=true, parallel=false"
 
@@ -33,36 +32,13 @@ OPTS         = "null_padding=true, ignore_errors=true, parallel=false"
 _TYPES_STR = "{" + ", ".join(f"'{k}': '{v}'" for k, v in C.COLUMN_TYPES.items()) + "}"
 
 
-def _state_key(name: str) -> str:
-    """Normalize a state name for directory matching: lowercase, _ -> space.
-
-    Multi-word states are referred to both ways — "west virginia" from orc.py
-    and "west_virginia" from the module/docs naming — and the data directory
-    may be spelled either way. Comparing normalized keys means all of
-    "West Virginia", "west_virginia" and "West_Virginia" resolve to the same
-    directory instead of exiting "No data directory found".
-    """
-    return re.sub(r"[\s_]+", " ", (name or "").strip().lower())
-
-
 def tabulate(state: str):
-    # Case-insensitive match against data/ subdirectories. Underscores and
-    # spaces are treated as equivalent so a multi-word state resolves whether
-    # it's given as orc.py passes it ("new mexico", from states.csv) or as the
-    # scraper/parser module is named ("new_mexico"), which is what a human
-    # hand-running this stage will reach for.
-    want    = state.lower().replace("_", " ")
-    matches = [d for d in (PROJECT_ROOT / "data").iterdir()
-               if d.is_dir() and d.name.lower().replace("_", " ") == want]
-    if not matches:
+    clean_dir = find_clean_dir(state)
+    if clean_dir is None:
         print(f"[!] No data directory found for '{state}'")
         sys.exit(1)
 
-    state_dir = matches[0]
-    clean_dir = state_dir / "cleaned"
-    if not clean_dir.exists():
-        print(f"[!] No cleaned/ directory at {clean_dir}")
-        sys.exit(1)
+    state_dir = clean_dir.parent
 
     log = get_logger(state.lower(), "tabulate")
     t0  = time.perf_counter()
@@ -79,12 +55,7 @@ def tabulate(state: str):
 
     try:
         for table in TABLES:
-            # prefer .csv.gz; fall back to uncompressed .csv
-            csv_path = next(
-                (clean_dir / f"{table}{ext}" for ext in (".csv.gz", ".csv")
-                 if (clean_dir / f"{table}{ext}").exists()),
-                None,
-            )
+            csv_path = find_table_csv(clean_dir, table)
             if csv_path is None:
                 print(f"  {table}: not found — skipping")
                 log._emit("table_skipped", table=table, reason="file not found")

@@ -102,9 +102,9 @@ python3 src/main.py reparse AL                            # re-parse AL without 
 python3 src/main.py --daemon sync all                     # full run, silent mode
 ```
 
-### S3 Data Sync
+### R2 Data Sync
 
-The `push` and `pull` commands sync state data and the master database to and from S3. A `push db` also regenerates the downloads manifest (`metadata/manifest.csv`, the list of available states the client-facing downloads page reads) from the master database and uploads it alongside — so the site's state list stays current on every db push without a separate deploy step. **They depend on `cloud/s3.py`, a personal AWS backend that is not included in this repo** — running `push`/`pull` on a fresh clone exits with a "bring your own bucket" message. To use them you'll need your own S3 bucket and a compatible `cloud/s3.py` implementation. See [docs/pipeline.md](docs/pipeline.md) for the expected interface. The core pipeline (`sync`/`reparse`) works fully without any of this.
+State data and the master database sync to and from Cloudflare R2 — not through `src/main.py` (which only runs the pipeline commands, `sync`/`reparse`), but via [`ops/daemon.py`](ops/daemon.py) as part of a scheduled run, or standalone via `cloud/r2/r2.py`'s own CLI (`python3 cloud/r2/r2.py AL`, `python3 cloud/r2/r2.py db`, etc.). A db push also regenerates the downloads manifest (`metadata/manifest.csv`, the list of available states the client-facing downloads page reads) from the master database and uploads it alongside — so the site's state list stays current on every db push without a separate deploy step. **This depends on `cloud/r2/r2.py`, a personal Cloudflare backend that is not included in this repo** — see that module's own `push_state`/`push_all`/`push_db`/`pull_state`/`pull_all`/`pull_db` functions for the expected interface if you're bringing your own (2026-09-19: this used to point at `cloud/dispatch.py`'s `PushPullBackend` protocol for that shape; `dispatch.py` has since been retired, each backend module documents its own shape directly now). The core pipeline (`sync`/`reparse`) works fully without any of this.
 
 ### Output
 

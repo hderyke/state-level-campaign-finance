@@ -16,13 +16,12 @@ from pathlib import Path
 import duckdb
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[0]))
+from utils import find_clean_dir
 
 W_NAME  = 42
 W_TXNS  =  7
 W_MONEY = 14
-W_TYPE  = 28
-W_PARTY = 12
-W_OFF   = 26
 
 
 def find_db(state: str) -> Path:
@@ -32,19 +31,14 @@ def find_db(state: str) -> Path:
             print("[!] state-level-cf.db not found. Run aggregate.py first.")
             sys.exit(1)
         return db_path
-    # Underscores and spaces are equivalent here, so a multi-word state resolves
-    # whether it's given as orc.py passes it ("new mexico") or as the module is
-    # named ("new_mexico") — see the same normalization in tabulate.py.
-    want    = state.lower().replace("_", " ")
-    matches = [d for d in (PROJECT_ROOT / "data").iterdir()
-               if d.is_dir() and d.name.lower().replace("_", " ") == want]
-    if not matches:
+    clean_dir = find_clean_dir(state)
+    if clean_dir is None:
         print(f"[!] No data directory found for '{state}'")
         sys.exit(1)
     # Name the db off the matched directory, not the argument — tabulate.py
     # builds it as f"{state_dir.name.lower()}.db", so "new_mexico" would
     # otherwise look for new_mexico.db next to the "new mexico.db" that exists.
-    db_path = matches[0] / "cleaned" / f"{matches[0].name.lower()}.db"
+    db_path = clean_dir / f"{clean_dir.parent.name.lower()}.db"
     if not db_path.exists():
         print(f"[!] No .db file at {db_path}. Run tabulate.py first.")
         sys.exit(1)
@@ -67,6 +61,66 @@ def section(title, state):
     print(f"\n{line}")
     print(f"  {title}  [{state.upper()}]")
     print(line)
+
+
+def _cell_text(value, width):
+    """Left-aligned truncated text; trunc() already blanks a missing value."""
+    return trunc(value, width)
+
+
+def _cell_text_or_dash(value, width):
+    """Left-aligned truncated text; em-dash stands in for a missing value."""
+    return trunc(value or "—", width)
+
+
+def _cell_int(value, width):
+    """Comma-grouped integer."""
+    return f"{value:,}"
+
+
+def _cell_money(value, width):
+    """Dollar amount via fmt_money (fmt_money owns its own fixed width)."""
+    return fmt_money(value)
+
+
+def _cell_pct(value, width):
+    """Percentage, padded to width before the trailing '%' is appended."""
+    return f"{value:>{width}.1f}%"
+
+
+def _cell_raw(value, width):
+    """Plain string; blank for a missing value (dates, years)."""
+    return str(value or "")
+
+
+def print_table(columns, rows):
+    """Print a header line, a '-' separator, and one line per row.
+
+    columns: [(label, width, align, formatter)], where align is '<' or '>'
+    and formatter(value, width) returns the cell's display string.
+    """
+    header = "  ".join(f"{label:{align}{width}}" for label, width, align, _ in columns)
+    sep    = "  ".join("-" * width for _, width, _, _ in columns)
+    print(f"  {header}")
+    print(f"  {sep}")
+    for row in rows:
+        cells = "  ".join(
+            f"{fmt(value, width):{align}{width}}"
+            for value, (_, width, align, fmt) in zip(row, columns)
+        )
+        print(f"  {cells}")
+
+
+def _state_checks(state: str, con) -> list[tuple[str, bool, str]]:
+    """Return [(label, passed, detail)] for state-specific integrity checks.
+
+    No state currently defines any. (A former FL-only check asserting three
+    specific candidate names existed was removed 2026-08 -- it had gone stale
+    as the underlying data window rolled to 2026-only records and was failing
+    unconditionally. If a future state needs a check, a small per-state
+    dict/registry is the natural next step; not worth building for a single
+    hypothetical case.)"""
+    return []
 
 
 def run(state: str):
@@ -97,11 +151,13 @@ def run(state: str):
         ORDER BY d.total DESC LIMIT 20
     """).fetchall()
 
-    c1, c2, c3, c4, c5 = W_NAME, W_TXNS, W_MONEY, W_NAME, W_MONEY
-    print(f"  {'Contributor':<{c1}}  {'Txns':>{c2}}  {'Total Donated':>{c3}}  {'Top Recipient':<{c4}}  {'To Top':>{c5}}")
-    print(f"  {'-'*c1}  {'-'*c2}  {'-'*c3}  {'-'*c4}  {'-'*c5}")
-    for r in rows:
-        print(f"  {trunc(r[0],c1):<{c1}}  {r[1]:>{c2},}  {fmt_money(r[2]):>{c3}}  {trunc(r[3] or '—',c4):<{c4}}  {fmt_money(r[4]):>{c5}}")
+    print_table([
+        ("Contributor",   W_NAME,  "<", _cell_text),
+        ("Txns",          W_TXNS,  ">", _cell_int),
+        ("Total Donated", W_MONEY, ">", _cell_money),
+        ("Top Recipient", W_NAME,  "<", _cell_text_or_dash),
+        ("To Top",        W_MONEY, ">", _cell_money),
+    ], rows)
 
     # ── 2. Top 20 recipient candidates ───────────────────────────────────────
     # Join via candidate_name (contributions no longer carries state_filer_id).
@@ -111,7 +167,7 @@ def run(state: str):
             -- One row per (state, candidate_name): person_id is per-office in
             -- the "committee" model (AZ, AL, CA), so grouping by person_id would
             -- fan-out for candidates who ran for multiple offices.  Deduping by
-            -- name instead ensures each contributor_name matches exactly once.
+            -- name instead ensures each candidate_name matches exactly once.
             -- Pick the most-recent election_year so the displayed office is current.
             SELECT DISTINCT ON (state, LOWER(TRIM(candidate_name)))
                 person_id, candidate_name, state, office, party
@@ -131,12 +187,14 @@ def run(state: str):
         ORDER BY total DESC LIMIT 20
     """).fetchall()
 
-    W_ST = 4
-    c1, c2, c3, c4, c5, c6 = W_NAME, W_ST, W_OFF, W_PARTY, W_TXNS, W_MONEY
-    print(f"  {'Candidate':<{c1}}  {'St':<{c2}}  {'Office':<{c3}}  {'Party':<{c4}}  {'Txns':>{c5}}  {'Total Received':>{c6}}")
-    print(f"  {'-'*c1}  {'-'*c2}  {'-'*c3}  {'-'*c4}  {'-'*c5}  {'-'*c6}")
-    for r in rows:
-        print(f"  {trunc(r[0],c1):<{c1}}  {trunc(r[1] or '',c2):<{c2}}  {trunc(r[2] or '',c3):<{c3}}  {trunc(r[3] or '',c4):<{c4}}  {r[4]:>{c5},}  {fmt_money(r[5]):>{c6}}")
+    print_table([
+        ("Candidate",      W_NAME,  "<", _cell_text),
+        ("St",             4,       "<", _cell_text),
+        ("Office",         26,      "<", _cell_text),
+        ("Party",          12,      "<", _cell_text),
+        ("Txns",           W_TXNS,  ">", _cell_int),
+        ("Total Received", W_MONEY, ">", _cell_money),
+    ], rows)
 
     # ── 3. Top 20 non-candidate committees ───────────────────────────────────
     # Excludes committees whose name matches a known candidate_name, AND
@@ -184,12 +242,13 @@ def run(state: str):
         ORDER BY total DESC LIMIT 20
     """).fetchall()
 
-    W_ST = 4
-    c1, c2, c3, c4, c5 = W_ST, W_NAME, W_TYPE, W_TXNS, W_MONEY
-    print(f"  {'St':<{c1}}  {'Committee':<{c2}}  {'Type':<{c3}}  {'Txns':>{c4}}  {'Total Received':>{c5}}")
-    print(f"  {'-'*c1}  {'-'*c2}  {'-'*c3}  {'-'*c4}  {'-'*c5}")
-    for r in rows:
-        print(f"  {trunc(r[0] or '',c1):<{c1}}  {trunc(r[1],c2):<{c2}}  {trunc(r[2] or '',c3):<{c3}}  {r[3]:>{c4},}  {fmt_money(r[4]):>{c5}}")
+    print_table([
+        ("St",             4,       "<", _cell_text),
+        ("Committee",      W_NAME,  "<", _cell_text),
+        ("Type",           28,      "<", _cell_text),
+        ("Txns",           W_TXNS,  ">", _cell_int),
+        ("Total Received", W_MONEY, ">", _cell_money),
+    ], rows)
 
     # ── 4. Top 10 expenditure recipients ─────────────────────────────────────
     section("TOP 10 EXPENDITURE RECIPIENTS — total paid & largest client", state)
@@ -228,11 +287,13 @@ def run(state: str):
         ORDER BY p.total DESC LIMIT 10
     """).fetchall()
 
-    c1, c2, c3, c4, c5 = W_NAME, W_TXNS, W_MONEY, W_NAME, W_MONEY
-    print(f"  {'Payee':<{c1}}  {'Txns':>{c2}}  {'Total Received':>{c3}}  {'Largest Client':<{c4}}  {'From Client':>{c5}}")
-    print(f"  {'-'*c1}  {'-'*c2}  {'-'*c3}  {'-'*c4}  {'-'*c5}")
-    for r in rows:
-        print(f"  {trunc(r[0],c1):<{c1}}  {r[1]:>{c2},}  {fmt_money(r[2]):>{c3}}  {trunc(r[3] or '—',c4):<{c4}}  {fmt_money(r[4]):>{c5}}")
+    print_table([
+        ("Payee",          W_NAME,  "<", _cell_text),
+        ("Txns",           W_TXNS,  ">", _cell_int),
+        ("Total Received", W_MONEY, ">", _cell_money),
+        ("Largest Client", W_NAME,  "<", _cell_text_or_dash),
+        ("From Client",    W_MONEY, ">", _cell_money),
+    ], rows)
 
     # ── 5. Contributions & expenditures by year ──────────────────────────────
     section("ACTIVITY BY YEAR — contribution and expenditure row counts and totals", state)
@@ -262,12 +323,17 @@ def run(state: str):
         ORDER BY year
     """).fetchall()
 
-    W_YR = 6; W_N = 10; W_T = 16
-    print(f"  {'Year':>{W_YR}}  {'Cont N':>{W_N}}  {'Cont Total':>{W_T}}  {'Expn N':>{W_N}}  {'Expn Total':>{W_T}}")
-    print(f"  {'-'*W_YR}  {'-'*W_N}  {'-'*W_T}  {'-'*W_N}  {'-'*W_T}")
-    for r in rows:
-        yr, cn, ct, en, et = r
-        print(f"  {str(yr):>{W_YR}}  {cn:>{W_N},}  {fmt_money(ct):>{W_T}}  {en:>{W_N},}  {fmt_money(et):>{W_T}}")
+    # W_N and W_T (row-count / dollar-total column widths) carry through
+    # blocks 6-8 below unchanged — they're the same two columns repeated
+    # for contributor type, contributor state, and expenditure type.
+    W_N = 10; W_T = 16
+    print_table([
+        ("Year",       6,   ">", _cell_raw),
+        ("Cont N",     W_N, ">", _cell_int),
+        ("Cont Total", W_T, ">", _cell_money),
+        ("Expn N",     W_N, ">", _cell_int),
+        ("Expn Total", W_T, ">", _cell_money),
+    ], rows)
 
     # ── 6. Contributor type breakdown ─────────────────────────────────────────
     section("CONTRIBUTOR TYPE BREAKDOWN — raw codes, counts, and share of total", state)
@@ -283,12 +349,16 @@ def run(state: str):
         ORDER BY n DESC
     """).fetchall()
 
-    W_CT = 30; W_N2 = 10; W_T2 = 16; W_P = 8
-    print(f"  {'Contributor Type':<{W_CT}}  {'N':>{W_N2}}  {'Total':>{W_T2}}  {'% rows':>{W_P}}")
-    print(f"  {'-'*W_CT}  {'-'*W_N2}  {'-'*W_T2}  {'-'*W_P}")
-    for r in rows:
-        ct, n, total, pct = r
-        print(f"  {trunc(ct, W_CT):<{W_CT}}  {n:>{W_N2},}  {fmt_money(total):>{W_T2}}  {pct:>{W_P}.1f}%")
+    # W_CAT (category-label width) and W_P (percent width) also carry
+    # through blocks 7-8 — block 8 reuses W_CAT for "Transaction Type",
+    # not just contributor type, hence the generic name.
+    W_CAT = 30; W_P = 8
+    print_table([
+        ("Contributor Type", W_CAT, "<", _cell_text),
+        ("N",                W_N,   ">", _cell_int),
+        ("Total",            W_T,   ">", _cell_money),
+        ("% rows",           W_P,   ">", _cell_pct),
+    ], rows)
 
     # ── 7. Top 10 contributor states ──────────────────────────────────────────
     section("TOP 10 CONTRIBUTOR STATES — where the money comes from", state)
@@ -305,12 +375,12 @@ def run(state: str):
         LIMIT 10
     """).fetchall()
 
-    W_ST2 = 18
-    print(f"  {'State':<{W_ST2}}  {'N':>{W_N2}}  {'Total':>{W_T2}}  {'% rows':>{W_P}}")
-    print(f"  {'-'*W_ST2}  {'-'*W_N2}  {'-'*W_T2}  {'-'*W_P}")
-    for r in rows:
-        st2, n, total, pct = r
-        print(f"  {trunc(st2, W_ST2):<{W_ST2}}  {n:>{W_N2},}  {fmt_money(total):>{W_T2}}  {pct:>{W_P}.1f}%")
+    print_table([
+        ("State",  18,  "<", _cell_text),
+        ("N",      W_N, ">", _cell_int),
+        ("Total",  W_T, ">", _cell_money),
+        ("% rows", W_P, ">", _cell_pct),
+    ], rows)
 
     # ── 8. Expenditure transaction type breakdown ─────────────────────────────
     # Per-state DBs expose transaction_type; the aggregate DB drops it in favour
@@ -330,11 +400,12 @@ def run(state: str):
         ORDER BY n DESC
     """).fetchall()
 
-    print(f"  {'Transaction Type':<{W_CT}}  {'N':>{W_N2}}  {'Total':>{W_T2}}  {'% rows':>{W_P}}")
-    print(f"  {'-'*W_CT}  {'-'*W_N2}  {'-'*W_T2}  {'-'*W_P}")
-    for r in rows:
-        tt, n, total, pct = r
-        print(f"  {trunc(tt, W_CT):<{W_CT}}  {n:>{W_N2},}  {fmt_money(total):>{W_T2}}  {pct:>{W_P}.1f}%")
+    print_table([
+        ("Transaction Type", W_CAT, "<", _cell_text),
+        ("N",                W_N,   ">", _cell_int),
+        ("Total",            W_T,   ">", _cell_money),
+        ("% rows",           W_P,   ">", _cell_pct),
+    ], rows)
 
     # ── 9. 10 largest single contributions ────────────────────────────────────
     section("10 LARGEST SINGLE CONTRIBUTIONS — outlier and transfer check", state)
@@ -347,14 +418,15 @@ def run(state: str):
         LIMIT 10
     """).fetchall()
 
-    W_DT = 12; W_CN = 34; W_CT3 = 6; W_CMT = 36; W_AM = 16
-    print(f"  {'Date':<{W_DT}}  {'Contributor':<{W_CN}}  {'Type':<{W_CT3}}  {'Committee':<{W_CMT}}  {'Amount':>{W_AM}}")
-    print(f"  {'-'*W_DT}  {'-'*W_CN}  {'-'*W_CT3}  {'-'*W_CMT}  {'-'*W_AM}")
-    for r in rows:
-        dt, cn, ct3, cmt, amt = r
-        print(f"  {str(dt or ''):<{W_DT}}  {trunc(cn or '',W_CN):<{W_CN}}  {trunc(ct3 or '',W_CT3):<{W_CT3}}  {trunc(cmt or '',W_CMT):<{W_CMT}}  {fmt_money(amt):>{W_AM}}")
+    print_table([
+        ("Date",        12, "<", _cell_raw),
+        ("Contributor", 34, "<", _cell_text),
+        ("Type",        6,  "<", _cell_text),
+        ("Committee",   36, "<", _cell_text),
+        ("Amount",      16, ">", _cell_money),
+    ], rows)
 
-    # ── 9. 10 random contribution rows ────────────────────────────────────────
+    # ── 10. 10 random contribution rows ───────────────────────────────────────
     section("10 RANDOM CONTRIBUTION ROWS — raw data spot check", state)
     rows = con.execute("""
         SELECT date, contributor_name, contributor_type,
@@ -366,15 +438,19 @@ def run(state: str):
         ORDER BY date
     """).fetchall()
 
-    W_DT2 = 12; W_CN2 = 28; W_CT4 = 5; W_AM2 = 12
-    W_CMT2 = 30; W_CITY = 18; W_ST3 = 4; W_EMP = 22; W_OCC = 20
-    print(f"  {'Date':<{W_DT2}}  {'Contributor':<{W_CN2}}  {'T':<{W_CT4}}  {'Amount':>{W_AM2}}  {'Committee':<{W_CMT2}}  {'City':<{W_CITY}}  {'St':<{W_ST3}}  {'Employer':<{W_EMP}}  {'Occupation':<{W_OCC}}")
-    print(f"  {'-'*W_DT2}  {'-'*W_CN2}  {'-'*W_CT4}  {'-'*W_AM2}  {'-'*W_CMT2}  {'-'*W_CITY}  {'-'*W_ST3}  {'-'*W_EMP}  {'-'*W_OCC}")
-    for r in rows:
-        dt, cn, ct4, amt, cmt, city, st3, emp, occ = r
-        print(f"  {str(dt or ''):<{W_DT2}}  {trunc(cn or '',W_CN2):<{W_CN2}}  {trunc(ct4 or '',W_CT4):<{W_CT4}}  {fmt_money(amt):>{W_AM2}}  {trunc(cmt or '',W_CMT2):<{W_CMT2}}  {trunc(city or '',W_CITY):<{W_CITY}}  {trunc(st3 or '',W_ST3):<{W_ST3}}  {trunc(emp or '',W_EMP):<{W_EMP}}  {trunc(occ or '',W_OCC):<{W_OCC}}")
+    print_table([
+        ("Date",       12, "<", _cell_raw),
+        ("Contributor",28, "<", _cell_text),
+        ("T",          5,  "<", _cell_text),
+        ("Amount",     12, ">", _cell_money),
+        ("Committee",  30, "<", _cell_text),
+        ("City",       18, "<", _cell_text),
+        ("St",         4,  "<", _cell_text),
+        ("Employer",   22, "<", _cell_text),
+        ("Occupation", 20, "<", _cell_text),
+    ], rows)
 
-    # ── 10. 10 most recent contributions ─────────────────────────────────────
+    # ── 11. 10 most recent contributions ─────────────────────────────────────
     section("10 MOST RECENT CONTRIBUTIONS — data freshness check", state)
     rows = con.execute("""
         SELECT date, contributor_name, contributor_type,
@@ -386,14 +462,15 @@ def run(state: str):
         LIMIT 10
     """).fetchall()
 
-    W_DT3 = 12; W_CN3 = 32; W_CT5 = 6; W_AM3 = 14; W_CMT3 = 34
-    print(f"  {'Date':<{W_DT3}}  {'Contributor':<{W_CN3}}  {'Type':<{W_CT5}}  {'Amount':>{W_AM3}}  {'Committee':<{W_CMT3}}")
-    print(f"  {'-'*W_DT3}  {'-'*W_CN3}  {'-'*W_CT5}  {'-'*W_AM3}  {'-'*W_CMT3}")
-    for r in rows:
-        dt, cn, ct, amt, cmt = r
-        print(f"  {str(dt or ''):<{W_DT3}}  {trunc(cn or '',W_CN3):<{W_CN3}}  {trunc(ct or '',W_CT5):<{W_CT5}}  {fmt_money(amt):>{W_AM3}}  {trunc(cmt or '',W_CMT3):<{W_CMT3}}")
+    print_table([
+        ("Date",        12, "<", _cell_raw),
+        ("Contributor", 32, "<", _cell_text),
+        ("Type",        6,  "<", _cell_text),
+        ("Amount",      14, ">", _cell_money),
+        ("Committee",   34, "<", _cell_text),
+    ], rows)
 
-    # ── 11. 10 most recent expenditures ──────────────────────────────────────
+    # ── 12. 10 most recent expenditures ──────────────────────────────────────
     section("10 MOST RECENT EXPENDITURES — data freshness check", state)
     rows = con.execute(f"""
         SELECT date, payee_name,
@@ -406,12 +483,13 @@ def run(state: str):
         LIMIT 10
     """).fetchall()
 
-    W_DT4 = 12; W_PN = 32; W_AM4 = 14; W_CMT4 = 28; W_TX = 22
-    print(f"  {'Date':<{W_DT4}}  {'Payee':<{W_PN}}  {'Amount':>{W_AM4}}  {'Committee':<{W_CMT4}}  {'Type':<{W_TX}}")
-    print(f"  {'-'*W_DT4}  {'-'*W_PN}  {'-'*W_AM4}  {'-'*W_CMT4}  {'-'*W_TX}")
-    for r in rows:
-        dt, pn, amt, cmt, tx = r
-        print(f"  {str(dt or ''):<{W_DT4}}  {trunc(pn or '',W_PN):<{W_PN}}  {fmt_money(amt):>{W_AM4}}  {trunc(cmt or '',W_CMT4):<{W_CMT4}}  {trunc(tx or '',W_TX):<{W_TX}}")
+    print_table([
+        ("Date",      12, "<", _cell_raw),
+        ("Payee",     32, "<", _cell_text),
+        ("Amount",    14, ">", _cell_money),
+        ("Committee", 28, "<", _cell_text),
+        ("Type",      22, "<", _cell_text),
+    ], rows)
 
     # ── State-specific integrity checks ──────────────────────────────────────
     checks = _state_checks(state.upper(), con)
@@ -430,45 +508,6 @@ def run(state: str):
 
     con.close()
     print()
-
-
-def _state_checks(state: str, con) -> list[tuple[str, bool, str]]:
-    """Return [(label, passed, detail)] for state-specific integrity checks."""
-    results = []
-
-    if state == "FL":
-        # Synthesized candidate committees must be present
-        known = ["DESANTIS, RON", "CRIST, CHARLIE", "SCOTT, RICK"]
-        for name in known:
-            row = con.execute("""
-                SELECT committee_name, state_filer_id, election_year
-                FROM committees
-                WHERE state = 'FL'
-                  AND LOWER(committee_name) = LOWER(?)
-                LIMIT 1
-            """, [name]).fetchone()
-            if row:
-                detail = (f"state_filer_id={row[1]}  election_year={row[2]}")
-                results.append((f"FL committees: '{name}' present", True, detail))
-            else:
-                results.append((f"FL committees: '{name}' MISSING — synthesized pass may have failed", False, ""))
-
-        # Synthesized rows should not dominate (sanity: real rows > synthesized)
-        counts = con.execute("""
-            SELECT
-                COUNT(*) FILTER (WHERE raw_file = 'fl_committee_details.csv') AS real,
-                COUNT(*) FILTER (WHERE raw_file LIKE '%synthesized%')          AS synth
-            FROM committees WHERE state = 'FL'
-        """).fetchone()
-        real, synth = counts
-        passed = real > synth
-        results.append((
-            f"FL committees: real ({real:,}) > synthesized ({synth:,})",
-            passed,
-            "" if passed else "More synthesized rows than real ones — check parse_committees logic",
-        ))
-
-    return results
 
 
 if __name__ == "__main__":

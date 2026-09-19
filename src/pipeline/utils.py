@@ -41,6 +41,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.aliases import expand_nickname, fips_code
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 # ========================== Shared helpers ============================
 
@@ -67,6 +69,81 @@ def _open_csv(path: Path, mode: str = "r", **kwargs):
     if path.suffix == ".gz":
         return gzip.open(path, mode + "t", **kwargs)
     return open(path, mode, **kwargs)
+
+
+def _atomic_write_csv(path: Path, fieldnames: list[str], rows: list[dict]) -> None:
+    """Write rows to path via a temp file + shutil.move, so a reader never sees
+    a partially-written CSV if the process dies mid-write.
+
+    Preserves the original suffix chain (.csv.gz or .csv) on the temp file --
+    _open_csv picks plain-text vs. gzip based on the .gz suffix alone, so the
+    temp file has to carry it too, not just the final path.
+    """
+    suffixes = "".join(path.suffixes)
+    tmp = path.with_name(path.name.replace(suffixes, ".tmp" + suffixes))
+    with _open_csv(tmp, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    shutil.move(str(tmp), str(path))
+
+
+def find_clean_dir(state: str) -> Path | None:
+    """Locate data/<State>/cleaned/ for a state name, matching case- and
+    separator-insensitively (spaces, underscores, and hyphens are all
+    treated as equivalent).
+
+    A state name reaches pipeline stages under several different spellings
+    -- the CLI/module form ("south_carolina"), the states.csv form ("South
+    Carolina"), and whatever a human typed by hand -- and the data/
+    directory itself may be spelled in yet another one of these forms.
+    Consolidated here 2026-08-28: enrich.py, validate.py, tabulate.py, and
+    queries.py each independently re-implemented this same scan, and had
+    already started to drift (some sys.exit directly on a miss, others
+    return None and let the caller decide) -- one shared implementation so
+    a fix to the matching logic only has to be made once.
+
+    The two literal attempts below cover the common single-word-state case
+    cheaply, without a directory listing. Multi-word states (New York, New
+    Hampshire, ...) need the scan below them: str.capitalize() lowercases
+    every letter after the first, so "new york".capitalize() is "New york",
+    which only resolves to the real "New York" directory on a
+    case-insensitive filesystem (macOS/Windows) -- not on Linux (CI,
+    containers, the daemon host), where a correctly-parsed state used to
+    exit with a false "cleaned dir not found".
+
+    Returns None if no data/ subdirectory with a cleaned/ folder matches --
+    callers decide whether that's a hard exit or a soft no-op.
+    """
+    def _norm(name: str) -> str:
+        return " ".join((name or "").replace("_", " ").replace("-", " ").lower().split())
+
+    data_dir = PROJECT_ROOT / "data"
+    for candidate in (data_dir / state.lower(), data_dir / state.capitalize()):
+        if candidate.joinpath("cleaned").exists():
+            return candidate / "cleaned"
+
+    if not data_dir.exists():
+        return None
+    want = _norm(state)
+    for d in sorted(data_dir.iterdir()):
+        if d.is_dir() and _norm(d.name) == want and (d / "cleaned").exists():
+            return d / "cleaned"
+    return None
+
+
+def find_table_csv(clean_dir: Path, table: str) -> Path | None:
+    """Resolve <clean_dir>/<table>.csv(.gz), preferring the compressed form.
+
+    Returns None if neither exists -- callers decide whether that's a hard
+    failure or a soft skip. Shared by validate.py and tabulate.py, which
+    each used to carry their own copy of this same scan.
+    """
+    return next(
+        (clean_dir / f"{table}{ext}" for ext in (".csv.gz", ".csv")
+         if (clean_dir / f"{table}{ext}").exists()),
+        None,
+    )
 
 
 def clean_name(val: str) -> str:
@@ -237,15 +314,7 @@ def assign_person_ids(candidates_path: Path, id_model: str = "committee") -> int
     if "person_id" not in fieldnames:
         fieldnames = ["person_id"] + fieldnames
 
-    # Preserve the original suffix chain (.csv.gz or .csv) for the temp file
-    suffixes = "".join(candidates_path.suffixes)          # e.g. ".csv.gz" or ".csv"
-    tmp = candidates_path.with_name(candidates_path.name.replace(suffixes, ".tmp" + suffixes))
-    with _open_csv(tmp, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-
-    shutil.move(str(tmp), str(candidates_path))
+    _atomic_write_csv(candidates_path, fieldnames, rows)
     return len(rows)
 
 
@@ -336,12 +405,5 @@ def assign_committee_person_ids(committees_path: Path, candidates_path: Path) ->
     if "person_id" not in fieldnames:
         fieldnames = ["person_id"] + fieldnames
 
-    suffixes = "".join(committees_path.suffixes)
-    tmp = committees_path.with_name(committees_path.name.replace(suffixes, ".tmp" + suffixes))
-    with _open_csv(tmp, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-
-    shutil.move(str(tmp), str(committees_path))
+    _atomic_write_csv(committees_path, fieldnames, rows)
     return matched
