@@ -550,3 +550,10 @@ NJ,PRIOR ELECTION TRANSFER,,
 NJ,INTEREST,,
 NJ,NOT PROVIDED,,
 NJ,MISC/ OTHER,,
+# FL's transaction export has no contributor-type field at all — the parser
+# classifies every contributor_name via a Naive Bayes model (see
+# src/pipeline/contributor_type_nb.py) which already outputs the canonical
+# labels directly, so these are pass-through entries, not a raw-vocabulary
+# mapping.
+FL,Individual,Individual,
+FL,Organization,Organization,
