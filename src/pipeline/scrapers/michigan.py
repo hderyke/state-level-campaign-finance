@@ -154,10 +154,51 @@ def _fetch_file_list(session: requests.Session) -> list[dict]:
     return resp.json()["data"]["list"]
 
 
+def _decode(raw: bytes) -> str:
+    """Decode one extracted part — MiTN delivers UTF-8; handle BOM variants."""
+    if raw[:3] == b"\xef\xbb\xbf":
+        return raw[3:].decode("utf-8", errors="replace")
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16")
+    if len(raw) > 1 and raw[1] == 0:
+        return raw.decode("utf-16-le", errors="replace")
+    return raw.decode("utf-8", errors="replace")
+
+
+def _part_sort_key(name: str) -> tuple:
+    """Order ZIP members by their trailing part number, numerically.
+
+    Members are named like `2024_mi_cfr_contributions1.txt`. A plain
+    lexicographic sort would put part 10 before part 2, silently scrambling
+    row order once a year needs ten or more parts.
+    """
+    m = re.search(r"(\d+)\.txt$", name, re.IGNORECASE)
+    return (0, int(m.group(1))) if m else (1, 0, name)
+
+
 def _download_zip(session: requests.Session, file_id: int, out_path: Path) -> int:
     """
-    Download the ZIP for file_id, extract the inner tab-delimited .txt, write to out_path.
-    Returns row count (lines minus header).
+    Download the ZIP for file_id, extract EVERY inner tab-delimited .txt, and
+    concatenate them into out_path. Returns row count (lines minus header).
+
+    MiTN splits large exports into ~500,000-row parts inside a single ZIP:
+
+        2024_mi_cfr_contributions1.txt   (500,000 rows)
+        2024_mi_cfr_contributions2.txt
+        2024_mi_cfr_contributions3.txt
+
+    This function previously read `zf.namelist()[0]` — the first part only — so
+    every year whose contributions exceeded 500,000 was silently truncated to
+    exactly that number. 2004 through 2026 all reported precisely 500,000 rows,
+    which is what exposed it: real counts never land on a round number twice,
+    let alone 23 years running. 2024 alone holds ~1.27M contributions, so ~61%
+    of that year was being dropped, and the loss was invisible because the
+    truncated file is perfectly well-formed.
+
+    Every part carries its own header row (verified against the live export),
+    so the header is kept from the first part and stripped from the rest.
+    Parts are written as they are decoded rather than joined in memory — a
+    single year can exceed 300 MB uncompressed.
     """
     resp = session.get(
         LIST_URL,
@@ -171,24 +212,35 @@ def _download_zip(session: requests.Session, file_id: int, out_path: Path) -> in
     resp.raise_for_status()
     content = resp.content
 
+    rows = 0
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
-            raw = zf.read(zf.namelist()[0])
+            names = sorted(
+                (n for n in zf.namelist() if not n.endswith("/")),
+                key=_part_sort_key,
+            )
+            with open(out_path, "w", encoding="utf-8", newline="") as out:
+                for idx, name in enumerate(names):
+                    text = _decode(zf.read(name))
+                    if idx:
+                        # Drop this part's repeated header line.
+                        nl = text.find("\n")
+                        text = text[nl + 1:] if nl != -1 else ""
+                        if not text:
+                            continue
+                    else:
+                        rows -= 1          # header of part 1
+                    if not text.endswith("\n"):
+                        text += "\n"
+                    rows += text.count("\n")
+                    out.write(text)
+                    del text
     except zipfile.BadZipFile:
-        raw = content
+        text = _decode(content)
+        out_path.write_text(text, encoding="utf-8")
+        return max(text.count("\n") - 1, 0)
 
-    # Decode — MiTN delivers UTF-8; handle BOM variants just in case
-    if raw[:3] == b"\xef\xbb\xbf":
-        text = raw[3:].decode("utf-8", errors="replace")
-    elif raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        text = raw.decode("utf-16")
-    elif len(raw) > 1 and raw[1] == 0:
-        text = raw.decode("utf-16-le", errors="replace")
-    else:
-        text = raw.decode("utf-8", errors="replace")
-
-    out_path.write_text(text, encoding="utf-8")
-    return max(text.count("\n") - 1, 0)
+    return max(rows, 0)
 
 
 def run_transactions(
