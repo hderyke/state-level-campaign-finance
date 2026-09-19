@@ -110,6 +110,153 @@ Lists all three File Transfer Page tabs (Candidate/PAC/Party), classifies each r
 
 ---
 
+## FEC Nonfederal-IE Enrichment (opt-in, `--fec-ie`)
+
+Ohio's own File Transfer Page data has **no independent-expenditure
+signal** — no `SUPPORT`/`OPPOSE` field, nothing structurally tying a
+transaction to a specific race (the free-text `PURPOSE` column
+occasionally carries it, inconsistently — see below). This enrichment
+adds that signal by joining Ohio's own expenditure rows against the FEC's
+Schedule B filings for the same committee.
+
+**What it is:** `src/pipeline/fec_ie.py` runs a broad, cross-committee
+full-text search against the FEC's `schedules/schedule_b/` API
+(`disbursement_description` — fuzzy/token matched, not exact substring;
+confirmed empirically) for the phrase `"nonfederal candidate"`, then keeps
+only rows whose description mentions Ohio (`OH` or `OHIO` as a real word,
+not a substring). Scraper writes matches to
+`data/Ohio/raw/fec_nonfederal_ie_{year}.csv`.
+
+**IMPORTANT — this is a join/enrichment, NOT a second copy of the data.**
+The parser does NOT insert these as new expenditure rows by default.
+Initial testing assumed a federally-registered Super PAC's nonfederal-IE
+spending would be invisible to Ohio's own data entirely — **this assumption
+was checked and found wrong** for the one committee seen so far: "V-PAC:
+Victors, Not Victims" (FEC ID `C00892919`) also files directly with Ohio
+under its own `MASTER_KEY` (`16182`, `COM_NAME` "V-PAC VICTORS NOT VICTIMS
+(SUPER PAC)"), under Ohio's own `31-U Ind Exp by committee` code. Comparing
+all 30 of its FEC-tagged 2024–2026 rows against Ohio's own PAC expenditure
+files by (date, amount): **29 of 30 matched exactly** (same day, same
+dollar amount, already present in `expenditures_pacs_*.csv` before this
+enrichment was ever added). Blindly inserting all 30 as new rows would
+have overstated this committee's Ohio spending by roughly $5M (double
+counting the $14.06M already there).
+
+So the parser instead: for every state-sourced expenditure row, looks up
+`(state_filer_id, date, amount)` against the FEC data (only for committee
+IDs with a known `state_filer_id` mapping in `src/aliases/fec_ie_patterns.csv`)
+and, on a match, fills `affiliated_candidate_name`/`support_oppose` onto
+**that existing row** — no new row, no added dollar amount. Only two
+categories become new rows: (1) an FEC-tagged disbursement for a
+known-mapped committee that has **no** matching Ohio row at all — a
+genuine gap, not a text-completeness difference (one confirmed case: a
+$150,000 charge on 2026-02-02, tagged `SUPPORT-RAMASWAMY`, present in FEC's
+filing but absent from Ohio's), and (2) any committee with no known
+`state_filer_id` at all (never observed to dual-file — nothing to join
+against, so there's no way to tell whether Ohio already has it).
+
+**Verified end-to-end (2026-09-05):** of V-PAC's 30 FEC-tagged rows, 29
+matched and enriched an existing Ohio row in place, 1 was written as a new
+row (the confirmed gap above). Resulting `expenditures.csv` has 31 V-PAC
+rows totaling $14,207,771.16 (not 60 rows / ~$19M, which is what the
+naive "always insert" version produced before this was caught) — 30 of
+31 have `affiliated_candidate_name`/`support_oppose` populated (26
+`RAMASWAMY`/`S`, 4 `AMY ACTON`/`O`; the one unpopulated row is a $500
+processing-fee-looking charge with no matching FEC row and no `PURPOSE`
+text on Ohio's side either).
+
+**Candidate name + support/oppose stance is committee-specific free text
+with no fixed vocabulary** — confirmed by the same broad search turning up
+totally different phrasings for other states (`"MAILER ON NONFEDERAL
+WYOMING CANDIDATE - BROWN"`, `"NONFEDERAL EXPENDITURE: TEXT MESSAGES..."`
+with no candidate name anywhere). One generic regex cannot parse this.
+`affiliated_candidate_name`/`support_oppose` are populated **only** for
+committee IDs with a working pattern in `src/aliases/fec_ie_patterns.csv`
+(currently just `C00892919`, with `state_filer_id=16182` for the join
+above — validated against all 30 rows pulled so far, 100% regex match
+rate). Add a row to that CSV as new filers/phrasings are found (leave
+`state_filer_id` blank for a committee confirmed federal-only, i.e.
+observed to have no matching Ohio filing at all); no code change needed.
+
+**Note on Ohio's own `PURPOSE` field:** for this same committee, Ohio's
+own `PURPOSE` column already carries the identical free text
+(`"SUPPORT-RAMASWAMY-DIGITAL"`, no `I.E./` prefix, no spaces) on 19 of
+the 30 rows — but is blank on the other 11, including *all* of the
+`OPPOSE-AMY ACTON` rows and several of the largest `SUPPORT-RAMASWAMY`
+buys. FEC's version of the same disbursement was fully described on
+30/30. This enrichment currently relies on FEC's text as the sole source
+rather than also parsing Ohio's own `PURPOSE` field directly — a
+same-source parser would reduce the FEC dependency for the 19/30 rows
+where Ohio's own data already has it, but wasn't built this pass (out of
+scope; flagging as a possible future improvement).
+
+**Known limitations (by design, not bugs):**
+- **Not comprehensive.** Only catches committees that happen to write
+  something matching "nonfederal candidate" *and* name Ohio in the same
+  free-text field. A committee that phrases this differently, or never
+  states the state, is invisible to this search — there is no structured
+  field to fall back on (Schedule E, the FEC's structured IE schedule,
+  only covers *federal* candidates).
+- **The join key is (state_filer_id, date, amount) — not a transaction
+  ID.** In the one confirmed case this was exact for 29/30 rows, but a
+  coincidental same-day-same-amount collision for the *same* committee
+  (two ads bought for the same dollar amount on the same day) would merge
+  onto whichever FEC row is read last, since the dict key would just be
+  overwritten. Not observed in the data seen so far, but worth knowing if
+  a future committee's spending pattern includes exact repeats.
+- **Freshness:** FEC filings get amended well after the fact, unlike a
+  same-day state filing, so the scraper always re-fetches the current and
+  prior year regardless of manifest state (see scraper docstring) rather
+  than relying on a single "current year" rule.
+
+**Schedule A (committee receipts) — added 2026-09-06.** Who funds a
+committee already confirmed (via its own Schedule B language above) to be
+doing OH-nonfederal IE spending — e.g. Elon Musk's $5M and William
+Ackman's $1M to V-PAC. Pulled directly by `committee_id`
+(`fetch_committee_receipts()` in `src/pipeline/fec_ie.py`), for every
+`committee_id` already in `src/aliases/fec_ie_patterns.csv` — unlike the
+Schedule B side, this is exact and committee-scoped, not a free-text
+search, since we already know which committees matter.
+
+**These rows are deliberately never attributed to one candidate or one
+side of a race.** A committee's receipts fund its whole account, not one
+specific race — V-PAC's own filings show it both supporting Ramaswamy and
+opposing Acton with money from the same pool, so there is no honest way to
+say a given contribution was "for" one side. Receipt rows get
+`candidate_name`/`office` left blank, `committee_name` resolved to Ohio's
+own dual-filed name when known (same MASTER_KEY join as the Schedule B
+side), and are pushed to Supabase with `candidate_id = NULL` — never fanned
+out into per-candidate copies (that alternative was considered and
+rejected: it would need a schema change, a per-copy `source_txn_id`, and
+creates a real double-counting hazard for any future query not scoped to
+one candidate). Instead, `cloud/supabase/rpc_candidate_profile.sql` joins
+these back to a candidate's page purely by `committee_name`, at query
+time, against whichever committees that candidate's own expenditure data
+already shows supporting/opposing them.
+
+**Known consequence: the same real contribution can legitimately appear on
+more than one candidate's page.** If a committee both supports one
+candidate and opposes another (V-PAC does exactly this), the identical
+donor list shows up on both pages — once under "Supporting," once under
+"Opposing." This is correct, not a bug (the money really is fungible
+across both), but it means naively summing contributions across multiple
+candidate pages, or across the whole state, will double-count it. Nothing
+in this codebase currently does that (the only consumer of `contributions`
+today is this one RPC, always scoped to a single `candidate_id`), but a
+future "committee profile" page or race-level rollup would need to dedupe
+by `source_txn_id` rather than just summing rows.
+
+**Election-year note:** these rows' `election_year` is derived from the
+contribution's own date (`YYYY` of `contribution_receipt_date`), not FEC's
+`two_year_transaction_period` cycle label — the two disagree for any
+odd-year transaction (e.g. a 2025-dated gift is labeled cycle "2026" by
+FEC), which silently broke this feature's committee-matching during
+initial testing until fixed. Same fix applied to the one genuine "new row"
+case on the Schedule B side (`_load_fec_ie_index`'s gap-row path) for
+consistency, though no live case has hit that particular edge yet.
+
+---
+
 ## Data Notes
 
 - **Bare `\r` line endings.** Every Ohio bulk CSV uses old Mac-style bare-`\r` line endings, not `\n` or `\r\n`. Confirmed that Python's default universal-newline text mode (i.e. *not* passing `newline=""`) splits these correctly; `newline=""` (the pattern used by most other states' parsers in this repo) does **not** work here and will parse the whole file as one row. This is the one place Ohio's parser deliberately deviates from the repo's usual file-opening convention.
@@ -127,4 +274,5 @@ Lists all three File Transfer Page tabs (Candidate/PAC/Party), classifies each r
 |---|---|
 | Scraper | 2026-07-14 (rewritten around the File Transfer Page after the search-UI approach hit a 10,000-row cap; curl_cffi added earlier the same day to fix TLS-fingerprint 403s) |
 | Parser | 2026-07-14 (rewritten around real `CAC_CON`/`CAC_EXP`/`ACT_CAN_LIST` samples; validated end-to-end — tier 1 pass, plausible spot-check results) |
-| Documentation | 2026-07-14 |
+| FEC nonfederal-IE enrichment (`--fec-ie`) | 2026-09-05 (added after discovering V-PAC/C00892919's Ramaswamy-race spending; validated end-to-end against real FEC data, 30/30 rows pattern-matched); Schedule A committee-receipt enrichment added 2026-09-06 (Musk/Ackman-to-V-PAC donor data, verified live end-to-end through the production Worker API) |
+| Documentation | 2026-09-06 |

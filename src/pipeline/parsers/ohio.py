@@ -302,6 +302,170 @@ def parse_date(val: str) -> str:
     return ""
 
 
+# ========================= FEC nonfederal-IE enrichment ================
+# See src/pipeline/fec_ie.py (scraper side) for what this data is.
+#
+# IMPORTANT: confirmed empirically (2026-09-05) that at least one committee
+# in this feed (C00892919, "V-PAC: Victors Not Victims") dual-files the
+# SAME disbursements with Ohio directly under its own MASTER_KEY (16182) —
+# 29 of its 30 FEC-tagged rows already exist in expenditures_pacs_*.csv,
+# same date/amount. So this data must be JOINED against Ohio's own
+# expenditure rows and used to fill in affiliated_candidate_name/
+# support_oppose on the EXISTING row, not inserted as a second copy of the
+# same dollar amount — see _run() for the join. A new row is written only
+# for an FEC row that has no match in Ohio's own data at all (a real gap —
+# one such row was confirmed: a $150,000 charge on 2026-02-02 present in
+# FEC's filing but absent from Ohio's), or for a committee with no known
+# state_filer_id mapping at all (never observed to dual-file, so nothing to
+# join against).
+
+_FEC_IE_PATTERNS_PATH = PROJECT_ROOT / "src" / "aliases" / "fec_ie_patterns.csv"
+
+
+class _FecIePattern:
+    __slots__ = ("regex", "state_filer_id")
+
+    def __init__(self, regex: re.Pattern, state_filer_id: str):
+        self.regex = regex
+        self.state_filer_id = state_filer_id
+
+
+def _load_fec_ie_patterns() -> dict[str, _FecIePattern]:
+    """committee_id -> _FecIePattern(regex, state_filer_id), from
+    src/aliases/fec_ie_patterns.csv. state_filer_id is "" when a committee
+    is known to have no Ohio filing to join against."""
+    patterns: dict[str, _FecIePattern] = {}
+    if not _FEC_IE_PATTERNS_PATH.exists():
+        return patterns
+    with open(_FEC_IE_PATTERNS_PATH, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            committee_id = (row.get("committee_id") or "").strip()
+            regex        = (row.get("regex") or "").strip()
+            if committee_id and regex:
+                patterns[committee_id] = _FecIePattern(
+                    re.compile(regex), (row.get("state_filer_id") or "").strip())
+    return patterns
+
+
+def _parse_fec_ie_stance(committee_id: str, description: str,
+                          patterns: dict[str, _FecIePattern]) -> tuple[str, str]:
+    """Returns (affiliated_candidate_name, support_oppose) — both "" if this
+    committee has no known pattern, or the pattern doesn't match this
+    particular row's description (never a guess)."""
+    entry = patterns.get(committee_id)
+    if not entry:
+        return "", ""
+    m = entry.regex.search(description or "")
+    if not m:
+        return "", ""
+    stance_raw, candidate = m.group(1), m.group(2)
+    stance = "S" if stance_raw.upper().startswith("SUPP") else (
+              "O" if stance_raw.upper().startswith("OPP") else "")
+    return utils.clean_name(candidate), stance
+
+
+def _fec_amount_key(amount_str: str) -> float:
+    """Round to cents for a stable dict key across the two sources'
+    slightly different float formatting."""
+    try:
+        return round(float(amount_str), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _load_fec_ie_index(patterns: dict[str, _FecIePattern]):
+    """Read every data/Ohio/raw/fec_nonfederal_ie_*.csv row once and split
+    it into:
+      by_filer_key: {(state_filer_id, date, amount) -> row_info}, for
+          committees with a known Ohio MASTER_KEY — these get matched
+          against Ohio's own expenditure rows in _run() and popped from
+          this dict as they're consumed; whatever remains at the end is
+          a genuine gap (an FEC-reported disbursement with no Ohio-side
+          match) and gets written as a new row.
+      unmatched: [row_info, ...], for committees with NO known
+          state_filer_id — nothing to join against, so these are always
+          written as new rows.
+    row_info carries everything needed to write either an enrichment
+    (affiliated_candidate_name/support_oppose only) or a standalone new
+    expenditures row.
+    """
+    by_filer_key: dict[tuple[str, str, float], dict] = {}
+    unmatched: list[dict] = []
+
+    for raw_file in sorted(RAW_DIR.glob("fec_nonfederal_ie_*.csv")):
+        with open(raw_file, newline="", encoding="utf-8") as f:
+            for i, row in enumerate(csv.DictReader(f)):
+                committee_id = (row.get("committee_id") or "").strip()
+                committee_name = utils.clean_name(row.get("committee_name", ""))
+                if not committee_name:
+                    continue
+                amount = parse_amount(row.get("disbursement_amount", ""))
+                dt     = parse_date(row.get("disbursement_date", ""))
+                if not amount or not dt:
+                    continue
+
+                description = row.get("disbursement_description", "")
+                affiliated_candidate_name, support_oppose = _parse_fec_ie_stance(
+                    committee_id, description, patterns)
+
+                state_filer_id = patterns.get(committee_id, _FecIePattern(None, "")).state_filer_id
+
+                row_info = {
+                    "committee_name": committee_name,
+                    # 2026-09-07: carry state_filer_id through onto row_info
+                    # itself (not just as the by_filer_key dict key) so a
+                    # genuine-gap standalone row (section 3b in _run()) can
+                    # still resolve Ohio's OWN dual-filed spelling of this
+                    # committee's name for display, instead of stamping the
+                    # FEC's own self-reported spelling -- see that section's
+                    # comment for why (confirmed live: V-PAC's one unmatched
+                    # $150,000 row showed as "V-PAC: VICTORS, NOT VICTIMS"
+                    # while its other 25 matched/enriched rows correctly show
+                    # Ohio's own "V-PAC VICTORS NOT VICTIMS (SUPER PAC)" --
+                    # same real committee, two source spellings, cosmetically
+                    # looked like two different PACs on candidate pages).
+                    "state_filer_id": state_filer_id,
+                    "amount": amount,
+                    "date": dt,
+                    "payee_name": utils.clean_name(row.get("recipient_name", "")),
+                    "purpose": description,
+                    "payee_city": _clean(row.get("recipient_city", "")),
+                    "payee_state": _clean(row.get("recipient_state", "")),
+                    "payee_zip": utils.clean_zip(row.get("recipient_zip", "")),
+                    # Derived from the actual transaction date, NOT FEC's
+                    # two_year_transaction_period -- that field is a cycle
+                    # LABEL (e.g. a 2025-dated disbursement in the 2025-2026
+                    # cycle is labeled "2026"), which doesn't line up with
+                    # how Ohio's own election_year works elsewhere in this
+                    # pipeline (actual reporting/calendar year -- see
+                    # rpt_year usage throughout this file). Confirmed this
+                    # matters live (2026-09-06): using the cycle label broke
+                    # tracked_ie_committees threading in cloud/supabase/
+                    # transform.py's filter_state() for any row whose actual
+                    # date and cycle label landed in different years.
+                    "election_year": dt[:4],
+                    "affiliated_candidate_name": affiliated_candidate_name,
+                    "support_oppose": support_oppose,
+                    # Ohio's own expenditure rows never populate "amended" (see
+                    # the main loop's hardcoded ""), so leave it blank here too
+                    # rather than introducing FEC's A/N convention for just
+                    # this one field on the rare new-row case -- inconsistent
+                    # values here would just be noise, not signal.
+                    "amended": "",
+                    "filing_id": _clean(row.get("file_number", "")),
+                    "raw_file": raw_file.name,
+                    "row_num": i + 2,   # +1 header, +1 to 1-index
+                }
+
+                if state_filer_id:
+                    key = (state_filer_id, dt, _fec_amount_key(amount))
+                    by_filer_key[key] = row_info
+                else:
+                    unmatched.append(row_info)
+
+    return by_filer_key, unmatched
+
+
 # ========================= entities (candidates/committees) ============
 
 def parse_candidates_active(log) -> tuple[list[dict], list[dict]]:
@@ -564,6 +728,10 @@ def _run(log, t0: float):
     expend_path = CLEAN_DIR / "expenditures.csv.gz"
     expend_count = 0
 
+    fec_ie_patterns = _load_fec_ie_patterns()
+    fec_by_filer_key, fec_unmatched = _load_fec_ie_index(fec_ie_patterns)
+    fec_enriched_count = 0
+
     with gzip.open(expend_path, "wt", newline="", encoding="utf-8") as out_f:
         w = csv.DictWriter(out_f, fieldnames=C.EXPENDITURES, extrasaction="ignore", restval="")
         w.writeheader()
@@ -622,6 +790,22 @@ def _run(log, t0: float):
                                 "raw_file": raw_file.name, "row_num": rows_in + 1,
                             })
 
+                        # FEC nonfederal-IE join: a committee that dual-files its
+                        # independent expenditures with both the FEC and Ohio
+                        # directly (confirmed for MASTER_KEY 16182 -- see the
+                        # module docstring above _load_fec_ie_index) already
+                        # has this exact dollar amount right here, from Ohio's
+                        # own filing. Match by (state_filer_id, date, amount)
+                        # and pop the FEC row so it's consumed -- never
+                        # written again as a second, duplicate row below.
+                        affiliated_candidate_name = support_oppose = ""
+                        fec_key = (filer_id, dt, _fec_amount_key(amount))
+                        fec_match = fec_by_filer_key.pop(fec_key, None) if filer_id else None
+                        if fec_match:
+                            affiliated_candidate_name = fec_match["affiliated_candidate_name"]
+                            support_oppose = fec_match["support_oppose"]
+                            fec_enriched_count += 1
+
                         expend_count += 1
                         rows_out += 1
                         w.writerow({
@@ -641,6 +825,8 @@ def _run(log, t0: float):
                                 _get(row, resolved, "candidate_last"))),
                             "office": _clean(_get(row, resolved, "office")),
                             "election_year": _clean(_get(row, resolved, "rpt_year")),
+                            "affiliated_candidate_name": affiliated_candidate_name,
+                            "support_oppose": support_oppose,
                             "amended": "",
                             "filing_id": _clean(_get(row, resolved, "report_key")),
                             "raw_file": raw_file.name,
@@ -649,7 +835,176 @@ def _run(log, t0: float):
 
                 log.file_parsed(raw_file.name, "expenditures", rows_out, skipped=rows_in - rows_out)
 
+        # ── 3b. FEC nonfederal-IE: genuine gaps only ──────────────────────
+        # Everything that matched an Ohio-filed row above was already
+        # written as part of that row's enrichment (see the join in the
+        # loop above) — writing it again here would double the dollar
+        # amount. Only two categories are left to add as NEW rows:
+        #   1. fec_by_filer_key remainder — a known dual-filing committee's
+        #      FEC-reported disbursement that had NO matching Ohio row at
+        #      all (a real gap in Ohio's own filing, not a text-completeness
+        #      difference — e.g. the confirmed $150,000 2026-02-02 case).
+        #   2. fec_unmatched — committees with no known Ohio state_filer_id,
+        #      i.e. never observed to dual-file, so there's nothing to
+        #      join against and no way to tell if Ohio already has it.
+        fec_new_rows = list(fec_by_filer_key.values()) + fec_unmatched
+        if fec_new_rows:
+            # 2026-09-07: same "resolve to Ohio's own dual-filed spelling
+            # when we know the state_filer_id" join already used below in
+            # section 3c for committee receipts -- built here too so a
+            # genuine-gap standalone row (no OH-side match, but we DO know
+            # this FEC committee_id's Ohio state_filer_id from
+            # fec_ie_patterns.csv) uses the SAME committee_name string as
+            # every other row for that same real committee, rather than the
+            # FEC's own self-reported spelling. Not a guess -- the
+            # committee_id -> state_filer_id link is already curated and
+            # certain (fec_ie_patterns.csv), this just makes the display
+            # name consistent once that identity is already established.
+            # Falls back to the FEC's own name when state_filer_id is
+            # unknown (fec_unmatched -- a committee never observed to
+            # dual-file with Ohio at all, nothing to resolve against).
+            filer_id_to_committee_name_3b = {r["state_filer_id"]: r["committee_name"]
+                                              for r in comm_rows if r["state_filer_id"]}
+            rows_out = 0
+            for row_info in fec_new_rows:
+                expend_count += 1
+                rows_out += 1
+                resolved_committee_name = (
+                    filer_id_to_committee_name_3b.get(row_info.get("state_filer_id") or "")
+                    or row_info["committee_name"]
+                )
+                w.writerow({
+                    "state": STATE,
+                    "committee_name": resolved_committee_name,
+                    "amount": row_info["amount"],
+                    "date": row_info["date"],
+                    "transaction_type": "FEC_NONFEDERAL_IE",
+                    "payee_name": row_info["payee_name"],
+                    "purpose": row_info["purpose"],
+                    "category": "FEC_NONFEDERAL_IE",
+                    "payee_city": row_info["payee_city"],
+                    "payee_state": row_info["payee_state"],
+                    "payee_zip": row_info["payee_zip"],
+                    "candidate_name": "",
+                    "office": "",
+                    "election_year": row_info["election_year"],
+                    "affiliated_candidate_name": row_info["affiliated_candidate_name"],
+                    "support_oppose": row_info["support_oppose"],
+                    "amended": row_info["amended"],
+                    "filing_id": row_info["filing_id"],
+                    "raw_file": row_info["raw_file"],
+                    "row_num": row_info["row_num"],
+                })
+            log.info(f"    FEC nonfederal-IE: {fec_enriched_count} rows matched to an "
+                    f"existing OH filing (enriched in place), {rows_out} written as new "
+                    f"rows (no OH-side match found)")
+
     log.info(f"    -> {expend_count:,} expenditures total")
+
+    # ── 3c. FEC nonfederal-IE: committee receipts (Schedule A donors) ────
+    # See src/pipeline/fec_ie.py's fetch_committee_receipts() (scraper
+    # side) for what this is: who actually funds a committee already known
+    # (from its own disbursement language, matched above) to be doing
+    # OH-nonfederal IE spending. Fundamentally different from the
+    # disbursement side: a receipt carries NO signal at all about which
+    # candidate/race it's "for" (the committee's money is fungible across
+    # its whole account, not earmarked per contribution), so these rows
+    # get NO candidate_name/office -- leaving both blank is the honest
+    # answer here, not a gap to fill in later. Never fanned out or
+    # attributed to a specific candidate_id; see cloud/supabase/
+    # rpc_candidate_profile.sql for how a candidate page still surfaces
+    # "who funds this committee" without inventing a per-dollar link this
+    # source doesn't support.
+    #
+    # committee_name is resolved to Ohio's OWN dual-filed name when this
+    # committee has a known state_filer_id (same MASTER_KEY join used
+    # above for expenditures), so these rows line up with whichever name
+    # string the expenditure rows actually use -- falling back to the raw
+    # FEC committee name only for a committee never observed to dual-file
+    # directly with Ohio (see _load_fec_ie_index's docstring).
+    #
+    # Rewrites contributions.csv.gz from scratch (read the rows just
+    # written, append these, write once) rather than reopening it in gzip
+    # append mode -- concatenated/multi-member gzip is valid per spec, but
+    # not every downstream reader (e.g. DuckDB's CSV reader) is guaranteed
+    # to decompress past the first member, so a single clean gzip stream
+    # is the safer choice here even though Python's own gzip module would
+    # have handled either form fine.
+    receipt_files = sorted(RAW_DIR.glob("fec_nonfederal_ie_receipts_*.csv"))
+    if receipt_files:
+        log.info("  Parsing FEC nonfederal-IE committee receipts…")
+        filer_id_to_committee_name = {r["state_filer_id"]: r["committee_name"]
+                                       for r in comm_rows if r["state_filer_id"]}
+        with gzip.open(contrib_path, "rt", newline="", encoding="utf-8") as f:
+            existing_contrib_rows = list(csv.DictReader(f))
+
+        receipt_rows = []
+        for raw_file in receipt_files:
+            rows_in = rows_out = 0
+            with open(raw_file, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for i, row in enumerate(reader):
+                    rows_in += 1
+                    committee_id = (row.get("committee_id") or "").strip()
+                    amount = parse_amount(row.get("contribution_receipt_amount", ""))
+                    dt     = parse_date(row.get("contribution_receipt_date", ""))
+                    if not amount or not dt:
+                        continue
+                    contributor_name = utils.clean_name(row.get("contributor_name", ""))
+                    if not contributor_name:
+                        continue
+
+                    entity_type = (row.get("entity_type") or "").strip().upper()
+                    contributor_type = "Individual" if entity_type == "IND" else "Non-Individual"
+
+                    state_filer_id = fec_ie_patterns.get(
+                        committee_id, _FecIePattern(None, "")).state_filer_id
+                    committee_name = (
+                        (filer_id_to_committee_name.get(state_filer_id) if state_filer_id else None)
+                        or utils.clean_name(row.get("committee_name", ""))
+                    )
+                    if not committee_name:
+                        continue
+
+                    rows_out += 1
+                    receipt_rows.append({
+                        "state": STATE,
+                        "committee_name": committee_name,
+                        "amount": amount,
+                        "date": dt,
+                        "transaction_type": "FEC_NONFEDERAL_IE_RECEIPT",
+                        "contributor_name": contributor_name,
+                        "contributor_type": contributor_type,
+                        "contributor_city": _clean(row.get("contributor_city", "")),
+                        "contributor_state": _clean(row.get("contributor_state", "")),
+                        "contributor_zip": utils.clean_zip(row.get("contributor_zip", "")),
+                        "employer": utils.clean_name(row.get("contributor_employer", "")),
+                        "occupation": _clean(row.get("contributor_occupation", "")),
+                        "candidate_name": "",
+                        "office": "",
+                        # Derived from the actual contribution date, NOT
+                        # FEC's two_year_transaction_period -- see the
+                        # matching comment in _load_fec_ie_index() above for
+                        # why (cycle label vs. actual year mismatch broke
+                        # tracked_ie_committees matching, confirmed live).
+                        "election_year": dt[:4],
+                        "amended": "",
+                        "filing_id": _clean(row.get("file_number", "")),
+                        "raw_file": raw_file.name,
+                        "row_num": i + 2,
+                    })
+            log.file_parsed(raw_file.name, "contributions", rows_out, skipped=rows_in - rows_out)
+
+        with gzip.open(contrib_path, "wt", newline="", encoding="utf-8") as out_f:
+            w = csv.DictWriter(out_f, fieldnames=C.CONTRIBUTIONS, extrasaction="ignore", restval="")
+            w.writeheader()
+            for r in existing_contrib_rows:
+                w.writerow(r)
+            for r in receipt_rows:
+                w.writerow(r)
+        contrib_count += len(receipt_rows)
+        log.info(f"    FEC nonfederal-IE receipts: {len(receipt_rows):,} committee-level "
+                 f"contribution rows added (no candidate_name/office -- see comment above)")
 
     # ── 4. Write candidates/committees (now includes harvested rows) ────
     cand_path = CLEAN_DIR / "candidates.csv.gz"
