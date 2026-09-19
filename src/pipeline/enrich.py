@@ -2,82 +2,36 @@
 src/pipeline/enrich.py — Committee-candidate affiliation enrichment.
 
 Pipeline stage 2.5 (scrape -> parse -> enrich -> validate -> tabulate ->
-aggregate), invoked as a subprocess by orc.py right after the parser and
-before validate. Runs unconditionally for every state, but is a no-op
-unless that state has a registry file — most states won't for a while.
+aggregate), run as a subprocess by orc.py after the parser, before
+validate. No-op unless the state has a registry file.
 
-What it does
-------------
-Reads src/registries/committees/{abbr}.csv (hand-reviewed, git-tracked) and
-writes two columns onto that state's committees.csv: affiliated_candidate_name
-and support_oppose. These identify which candidate a PAC/CCE/ECO is tied to
-but legally separate from -- distinct from the existing candidate_name column,
-which is only populated for a candidate's OWN committee.
+Reads src/registries/committees/{abbr}.csv (hand-reviewed, git-tracked)
+and writes affiliated_candidate_name / support_oppose onto that state's
+committees.csv -- which candidate a PAC/CCE/ECO is tied to but legally
+separate from. This is the "2b" (hand-made registry) fallback; the "2a"
+(automated, per-parser) path leaves these columns already populated, so
+registry lookups here just find nothing blank to overwrite.
 
-This is the "2b" (hand-made registry) fallback path. The "2a" (automated —
-parser extracts the affiliation directly from source disclosure data, e.g.
-FL's Statement of Organization Section 7) path is a separate, per-parser
-effort tracked independently; when a parser does that extraction itself, its
-committees.csv rows will already have affiliated_candidate_name/support_oppose
-populated and this stage's registry lookups simply won't find a matching
-(still-blank) row to overwrite -- the two paths don't conflict.
+Why name-based, not person_id-based: person_id was retired from the
+aggregate DB (2026-07-10) as unreliable across offices/cycles; a registry
+resolving to a synthetic person_id would inherit that. It specifies
+(candidate_name, office, election_year) directly instead, validated
+(existence only) against the state's own candidates.csv.
 
-Why name-based, not person_id-based: see columns.py's note on COMMITTEES.
-person_id was retired from the aggregate DB (2026-07-10) because the
-id_model split (person/committee/name_hash) makes it an unreliable identity
-for the same person across different offices/cycles. A hand-maintained
-registry resolving to a synthetic person_id would inherit that same
-unreliability. Instead the registry specifies (candidate_name, office,
-election_year) directly, and this stage validates that triple against the
-state's own candidates.csv (existence check only -- it never derives or
-writes an ID) before copying candidate_name across.
+committee_name alone is NOT a reliable key -- states reuse a closed
+committee's exact name for an unrelated new registrant. Discovered
+2026-07-26: a name-only match for "FLORIDA FIRST PAC" tagged both the
+real 2026 committee and an unrelated closed 2008-era one the same way.
+See _resolve_committee_rows for the two-tier resolution this drove.
 
-Matching is by normalized (uppercase + whitespace-collapsed) committee_name,
-optionally narrowed when the registry row specifies state_filer_id and/or
-the secondary fields treasurer_name / registration_year. committee_name is
-NOT a reliable unique key on its own -- FL (and likely other states) reuse
-a closed/defunct committee's exact name for a new, unrelated registrant
-years later. Discovered 2026-07-26: a plain name-only match for "FLORIDA
-FIRST PAC" silently tagged both the real 2026 committee (filer_id 89604,
-active, backing James Fishback) AND an unrelated closed 2008-era committee
-of the same name (filer_id 46391) as Fishback-affiliated.
+Never a hard failure: an unmatched registry row just warns -- this is
+hand-maintained data, a typo shouldn't halt the pipeline.
 
-When committee_name matches more than one committees.csv row, resolution
-falls through two tiers before giving up:
-  1. state_filer_id, if given on the registry row -- exact and decisive
-     on its own, no other field consulted. Always include this when the
-     state has real filer IDs (most do); it's normally already on hand
-     from confirming the committee in the first place.
-  2. Otherwise, AND together whichever of treasurer_name / registration_year
-     are filled in on the registry row, normalized-matched against the
-     corresponding committees.csv fields (treasurer_name, election_year).
-     This is the fallback for states with no filer IDs at all (id_model
-     "name_hash" states like AK), or the rare case someone didn't have the
-     filer ID handy. registration_year is deliberately a separate column
-     from election_year (which means the CANDIDATE's cycle, used for the
-     candidates.csv check above) -- a committee's own registration year and
-     the candidate cycle it currently backs are different things and can
-     differ (a PAC registered in 2024 backing a 2026 candidate).
-If neither tier narrows the match down to exactly one row, this stage WARNS
-and does NOT write the affiliation to any of them -- never guesses across
-multiple real committees.
-
-A registry row that doesn't match any committee in committees.csv, or whose
-candidate_name/office/election_year triple doesn't exist in candidates.csv,
-is reported as a warning -- never a hard failure. This is hand-maintained
-data; a typo shouldn't halt the pipeline, but it should be visible in the
-run log and terminal output.
-
-Usage:
-    python src/pipeline/enrich.py florida
-    python src/pipeline/enrich.py Alaska
-
-Exit codes:
-    0 — always, unless the state has no cleaned dir at all (structural error)
+Usage: python src/pipeline/enrich.py florida
+Exit codes: 0 -- always, unless the state has no cleaned dir (structural)
 """
 
 import csv
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -86,7 +40,7 @@ csv.field_size_limit(10 * 1024 * 1024)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.reporting.logger import get_logger
-from utils import _open_csv, _normalize_name
+from utils import _open_csv, _normalize_name, find_clean_dir, _atomic_write_csv
 
 PROJECT_ROOT   = Path(__file__).resolve().parents[2]
 REGISTRY_DIR   = PROJECT_ROOT / "src" / "registries" / "committees"
@@ -103,62 +57,30 @@ def _norm(val: str) -> str:
     return _normalize_name(val)
 
 
-def _clean_dir(state: str) -> Path:
-    """Locate data/{State}/cleaned/ regardless of how the directory is cased.
+def _resolve_csv(clean_dir: Path, table: str) -> Path:
+    """Prefer {table}.csv.gz; fall back to {table}.csv.
 
-    The exact-case and .capitalize() attempts below resolve on a case-insensitive
-    filesystem (macOS, Windows) but not on Linux, and .capitalize() can't produce
-    a two-word name like "New Mexico" on any filesystem. The directory scan is
-    the same case-insensitive match tabulate.py already uses, and is what makes
-    multi-word states work off macOS.
+    Doesn't check existence -- "neither exists" means different things to
+    different callers (fatal for committees.csv, degraded-mode for
+    candidates.csv), so that check stays with the caller.
     """
-    state_lower = state.lower().replace("_", " ")
-    d = PROJECT_ROOT / "data" / state_lower / "cleaned"
-    if d.exists():
-        return d
-    d = PROJECT_ROOT / "data" / state.capitalize() / "cleaned"
-    if d.exists():
-        return d
-
-    data_dir = PROJECT_ROOT / "data"
-    if data_dir.is_dir():
-        for sub in data_dir.iterdir():
-            if sub.is_dir() and sub.name.lower().replace("_", " ") == state_lower:
-                return sub / "cleaned"
-    return d
-
-
-# Secondary disambiguators tried (AND'd together) when state_filer_id isn't
-# given and a registry row's committee_name matches multiple committees.csv
-# rows. Maps registry column -> committees.csv column; both sides normalized
-# with _norm before comparing.
-SECONDARY_FIELDS = {
-    "treasurer_name":   "treasurer_name",
-    "registration_year": "election_year",
-}
+    gz = clean_dir / f"{table}.csv.gz"
+    return gz if gz.exists() else clean_dir / f"{table}.csv"
 
 
 def _load_candidate_keys(candidates_path: Path) -> tuple[set[tuple[str, str, str]], set[tuple[str, str]]]:
-    """Returns (full_keys, blank_year_keys).
+    """Returns (full_keys, blank_year_keys) from this state's candidates.csv.
 
-    full_keys: (normalized candidate_name, normalized office, election_year)
-    triples that actually exist in this state's candidates.csv -- the exact
-    match tried first.
+    full_keys: (name, office, election_year) triples, normalized -- the
+    exact match tried first.
 
-    blank_year_keys: (normalized candidate_name, normalized office) pairs
-    for rows where candidates.csv's OWN election_year is blank. Some states'
-    candidates.csv leaves election_year blank on every row (confirmed for
-    MI: 0/7,205 rows populated -- unlike FL, which populates it and where
-    this fallback is simply never needed). Without this, a registry row
-    that correctly records the candidate's cycle (e.g. election_year=2026)
-    can never exact-match a state whose own data structurally can't record
-    a cycle at all, producing a permanent, misleading "candidate not found"
-    warning for a row that's actually correct. Falling back to (name,
-    office) when the state's own data has nothing to compare election_year
-    against is a real degradation in precision (can't tell 2022's John
-    James from 2026's if the office/name repeat across cycles), but it's
-    the best available given what the state discloses -- and it only
-    kicks in when full_keys' exact triple genuinely can't match."""
+    blank_year_keys: (name, office) pairs for rows with a blank
+    election_year. Some states (e.g. MI: 0/7,205 rows populated) never
+    record it at all, so a correct registry row would otherwise never
+    exact-match -- this fallback trades cycle precision (can't tell 2022's
+    John James from 2026's) for not producing a permanent false "candidate
+    not found" warning. Only used when full_keys can't match.
+    """
     full_keys: set[tuple[str, str, str]] = set()
     blank_year_keys: set[tuple[str, str]] = set()
     if not candidates_path.exists():
@@ -174,12 +96,204 @@ def _load_candidate_keys(candidates_path: Path) -> tuple[set[tuple[str, str, str
     return full_keys, blank_year_keys
 
 
+def _validate_candidate_ref(reg: dict, candidate_keys: set[tuple[str, str, str]],
+                             candidate_blank_year_keys: set[tuple[str, str]],
+                             abbr: str, log) -> int:
+    """Warn if a registry row's (candidate_name, office, election_year)
+    doesn't check out against this state's candidates.csv (see
+    _load_candidate_keys for the blank-year fallback). Returns 1 if it
+    warned, 0 if the triple was found.
+    """
+    reg_name   = _norm(reg.get("candidate_name", ""))
+    reg_office = _norm(reg.get("office", ""))
+    key = (reg_name, reg_office, (reg.get("election_year", "") or "").strip())
+    found = key in candidate_keys or (reg_name, reg_office) in candidate_blank_year_keys
+    if found:
+        return 0
+
+    print(f"  [!] enrich/{abbr}: registry row for {reg.get('committee_name')!r} "
+          f"references candidate {reg.get('candidate_name')!r} / {reg.get('office')!r} / "
+          f"{reg.get('election_year')!r}, which was not found in this state's "
+          f"candidates.csv — writing the affiliation anyway, but verify the "
+          f"registry row for typos.")
+    log._emit("enrich_warning", reason="candidate_not_found",
+              committee_name=reg.get("committee_name"),
+              candidate_name=reg.get("candidate_name"),
+              office=reg.get("office"), election_year=reg.get("election_year"))
+    return 1
+
+
+def _load_registry(registry_path: Path, candidate_keys: set[tuple[str, str, str]],
+                    candidate_blank_year_keys: set[tuple[str, str]],
+                    abbr: str, log) -> tuple[dict[str, dict], int]:
+    """Read and validate registry_path. Returns (by_committee, n_warned).
+
+    by_committee: normalized committee_name -> registry row (first match
+    wins; duplicate names in the registry are a data-entry error, warned
+    about here rather than silently overwritten).
+
+    Each row's (candidate_name, office, election_year) is checked against
+    candidate_keys/candidate_blank_year_keys and a mismatch is warned
+    about, but the row is kept either way -- hand-maintained data
+    shouldn't block on a typo.
+    """
+    with open(registry_path, newline="", encoding="utf-8") as f:
+        registry_rows = list(csv.DictReader(f))
+
+    by_committee: dict[str, dict] = {}
+    n_warned = 0
+
+    for reg in registry_rows:
+        cname = _norm(reg.get("committee_name", ""))
+        if not cname:
+            continue
+
+        if cname in by_committee:
+            print(f"  [!] enrich/{abbr}: duplicate registry entry for committee "
+                  f"{reg.get('committee_name')!r} — keeping the first, ignoring the rest")
+            log._emit("enrich_warning", reason="duplicate_committee",
+                      committee_name=reg.get("committee_name"))
+            n_warned += 1
+            continue
+
+        n_warned += _validate_candidate_ref(reg, candidate_keys, candidate_blank_year_keys, abbr, log)
+        by_committee[cname] = reg
+
+    return by_committee, n_warned
+
+
+def _index_by_name(committee_rows: list[dict]) -> dict[str, list[int]]:
+    """normalized committee_name -> list of committees.csv row indices
+    sharing that name (committee_name isn't a unique key -- see module
+    docstring).
+    """
+    rows_by_name: dict[str, list[int]] = {}
+    for i, row in enumerate(committee_rows):
+        rows_by_name.setdefault(_norm(row.get("committee_name", "")), []).append(i)
+    return rows_by_name
+
+
+def _match_by_filer_id(committee_row_idx: list[int], committee_rows: list[dict], filer_id: str) -> list[int]:
+    """Tier 1: rows among committee_row_idx whose state_filer_id matches exactly."""
+    return [i for i in committee_row_idx
+            if (committee_rows[i].get("state_filer_id") or "").strip() == filer_id]
+
+
+# Secondary disambiguators (AND'd together) tried when state_filer_id isn't
+# on the registry row. registry column -> committees.csv column.
+SECONDARY_FIELDS = {
+    "treasurer_name":   "treasurer_name",
+    "registration_year": "election_year",
+}
+
+
+def _match_by_secondary_fields(committee_row_idx: list[int], committee_rows: list[dict],
+                                reg: dict) -> tuple[list[int], list[str]]:
+    """Tier 2: narrow committee_row_idx by AND-ing together whichever of
+    treasurer_name / registration_year are filled in on the registry row.
+    Returns (narrowed indices, which registry columns were actually used).
+    """
+    fields_used = []
+    narrowed = committee_row_idx
+    for reg_col, committee_col in SECONDARY_FIELDS.items():
+        reg_val = _norm(reg.get(reg_col, ""))
+        if not reg_val:
+            continue
+        fields_used.append(reg_col)
+        narrowed = [i for i in narrowed
+                   if _norm(committee_rows[i].get(committee_col, "")) == reg_val]
+    return narrowed, fields_used
+
+
+def _resolve_committee_rows(reg: dict, committee_row_idx: list[int], committee_rows: list[dict],
+                             abbr: str, log) -> tuple[list[int] | None, int]:
+    """Resolve one registry entry's committee_name match down to the exact
+    committees.csv row indices to write the affiliation to.
+
+    committee_row_idx is every row sharing the registry entry's normalized
+    committee_name. 0 or 1 rows: nothing to resolve. More than 1: tries
+    Tier 1 (state_filer_id) then Tier 2 (secondary fields) -- see module
+    docstring. Warns and returns (None, 1) if neither narrows to exactly 1.
+    """
+    if len(committee_row_idx) <= 1:
+        return committee_row_idx, 0
+
+    reg_filer_id = (reg.get("state_filer_id") or "").strip()
+
+    if reg_filer_id:
+        # committees.csv can (rarely) have duplicate rows sharing both name
+        # and filer_id -- treat that like Tier 2's ambiguous case, don't
+        # write the affiliation to all of them.
+        target_row_idx = _match_by_filer_id(committee_row_idx, committee_rows, reg_filer_id)
+        if not target_row_idx:
+            print(f"  [!] enrich/{abbr}: registry row for {reg.get('committee_name')!r} "
+                  f"specifies state_filer_id={reg_filer_id!r}, but none of the "
+                  f"{len(committee_row_idx)} committees named that matched it — "
+                  f"not writing the affiliation, check the filer ID.")
+            log._emit("enrich_warning", reason="filer_id_not_found",
+                      committee_name=reg.get("committee_name"), state_filer_id=reg_filer_id)
+            return None, 1
+        if len(target_row_idx) > 1:
+            print(f"  [!] enrich/{abbr}: registry row for {reg.get('committee_name')!r} "
+                  f"specifies state_filer_id={reg_filer_id!r}, which matched "
+                  f"{len(target_row_idx)} committees.csv rows (not 1) sharing that name "
+                  f"and filer ID — NOT writing the affiliation to any of them. "
+                  f"committees.csv itself has duplicate rows here, not a registry typo.")
+            log._emit("enrich_warning", reason="filer_id_ambiguous",
+                      committee_name=reg.get("committee_name"), state_filer_id=reg_filer_id,
+                      matched_rows=len(target_row_idx))
+            return None, 1
+        return target_row_idx, 0
+
+    # Tier 2: no filer_id -- AND together whichever secondary fields are given.
+    narrowed, fields_used = _match_by_secondary_fields(committee_row_idx, committee_rows, reg)
+    if not fields_used or len(narrowed) != 1:
+        filer_ids = [committee_rows[i].get("state_filer_id") for i in committee_row_idx]
+        if not fields_used:
+            print(f"  [!] enrich/{abbr}: registry row for {reg.get('committee_name')!r} "
+                  f"matches {len(committee_row_idx)} different committees in committees.csv "
+                  f"(state_filer_id={filer_ids}) — NOT writing the affiliation to any of "
+                  f"them. Add state_filer_id (or treasurer_name/registration_year) to "
+                  f"the registry row to disambiguate.")
+        else:
+            print(f"  [!] enrich/{abbr}: registry row for {reg.get('committee_name')!r} "
+                  f"matched {len(committee_row_idx)} committees; narrowing by "
+                  f"{fields_used} left {len(narrowed)} candidate(s), not exactly 1 — "
+                  f"NOT writing the affiliation to any of them "
+                  f"(state_filer_id={filer_ids}).")
+        log._emit("enrich_warning", reason="ambiguous_committee_name",
+                  committee_name=reg.get("committee_name"), state_filer_ids=filer_ids,
+                  secondary_fields_tried=fields_used, narrowed_to=len(narrowed))
+        return None, 1
+
+    print(f"  · enrich/{abbr}: {reg.get('committee_name')!r} disambiguated via "
+          f"{fields_used} (of {len(committee_row_idx)} same-named committees)")
+    return narrowed, 0
+
+
+def _report_unmatched(by_committee: dict[str, dict], matched_names: set[str],
+                       abbr: str, log) -> int:
+    """Warn about registry entries whose committee_name never matched any
+    committees.csv row at all -- as opposed to matching but failing to
+    resolve, which _resolve_committee_rows warns about separately. Returns
+    the number of warnings emitted.
+    """
+    unmatched = [cname for cname in by_committee if cname not in matched_names]
+    for cname in unmatched:
+        reg = by_committee[cname]
+        print(f"  [!] enrich/{abbr}: registry entry for {reg.get('committee_name')!r} "
+              f"didn't match any committee in committees.csv — check spelling/normalization")
+        log._emit("enrich_warning", reason="committee_not_found",
+                  committee_name=reg.get("committee_name"))
+    return len(unmatched)
+
+
 def run(state: str) -> None:
     state_lower = state.lower()
     abbr        = NAME_TO_ABBR.get(state_lower, state.upper())
-    clean_dir   = _clean_dir(state)
+    clean_dir   = find_clean_dir(state)
 
-    if not clean_dir.exists():
+    if clean_dir is None:
         print(f"ERROR: cleaned dir not found for state '{state}'")
         sys.exit(1)
 
@@ -203,176 +317,65 @@ def run(state: str) -> None:
 
 
 def _run(abbr: str, clean_dir: Path, log) -> tuple[int, int]:
-    registry_path = REGISTRY_DIR / f"{abbr.lower()}.csv"
-    committees_path = clean_dir / "committees.csv.gz"
-    if not committees_path.exists():
-        committees_path = clean_dir / "committees.csv"
 
+    registry_path = REGISTRY_DIR / f"{abbr.lower()}.csv"
     if not registry_path.exists():
         print(f"  ↷ No registry for {abbr} — skipping enrich (nothing to do)")
         return 0, 0
 
+    committees_path = _resolve_csv(clean_dir, "committees")
     if not committees_path.exists():
         print(f"  [!] No committees.csv(.gz) found for {abbr} — skipping enrich")
         return 0, 0
 
-    candidates_path = clean_dir / "candidates.csv.gz"
+    candidates_path = _resolve_csv(clean_dir, "candidates")
     if not candidates_path.exists():
-        candidates_path = clean_dir / "candidates.csv"
+        print(f"  [!] No candidates.csv(.gz) found for {abbr} — proceeding without "
+              f"candidate cross-validation (registry rows will warn but still be applied)")
+
     candidate_keys, candidate_blank_year_keys = _load_candidate_keys(candidates_path)
 
-    # ── Load + validate the registry ────────────────────────────────────
-    with open(registry_path, newline="", encoding="utf-8") as f:
-        registry_rows = list(csv.DictReader(f))
+    by_committee, n_warned = _load_registry(
+        registry_path, candidate_keys, candidate_blank_year_keys, abbr, log)
 
-    # normalized committee_name -> registry row (first match wins; duplicate
-    # committee_name entries in a registry file are a data-entry error, warned
-    # about below rather than silently overwritten twice)
-    by_committee: dict[str, dict] = {}
-    n_warned = 0
-
-    for r in registry_rows:
-        cname = _norm(r.get("committee_name", ""))
-        if not cname:
-            continue
-
-        if cname in by_committee:
-            print(f"  [!] enrich/{abbr}: duplicate registry entry for committee "
-                  f"{r.get('committee_name')!r} — keeping the first, ignoring the rest")
-            log._emit("enrich_warning", reason="duplicate_committee",
-                      committee_name=r.get("committee_name"))
-            n_warned += 1
-            continue
-
-        reg_name   = _norm(r.get("candidate_name", ""))
-        reg_office = _norm(r.get("office", ""))
-        key = (reg_name, reg_office, (r.get("election_year", "") or "").strip())
-        # Exact triple first; if that fails, fall back to (name, office) only
-        # when this STATE's own candidates.csv has nothing to compare
-        # election_year against (see _load_candidate_keys docstring) --
-        # never as a general "close enough" fallback for states that do
-        # populate election_year, where a real mismatch should still warn.
-        found = key in candidate_keys or (reg_name, reg_office) in candidate_blank_year_keys
-        if not found:
-            print(f"  [!] enrich/{abbr}: registry row for {r.get('committee_name')!r} "
-                  f"references candidate {r.get('candidate_name')!r} / {r.get('office')!r} / "
-                  f"{r.get('election_year')!r}, which was not found in this state's "
-                  f"candidates.csv — writing the affiliation anyway, but verify the "
-                  f"registry row for typos.")
-            log._emit("enrich_warning", reason="candidate_not_found",
-                      committee_name=r.get("committee_name"),
-                      candidate_name=r.get("candidate_name"),
-                      office=r.get("office"), election_year=r.get("election_year"))
-            n_warned += 1
-
-        by_committee[cname] = r
-
-    # ── Apply to committees.csv ─────────────────────────────────────────
     with _open_csv(committees_path, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+        committee_rows = list(csv.DictReader(f))
 
-    if not rows:
+    if not committee_rows:
         return 0, n_warned
 
-    # normalized committee_name -> list of committees.csv row indices sharing
-    # that name. committee_name alone is not a unique key (see module
-    # docstring) -- this lets us detect the ambiguous case instead of
-    # silently applying a registry row to every same-named committee.
-    rows_by_name: dict[str, list[int]] = {}
-    for i, row in enumerate(rows):
-        rows_by_name.setdefault(_norm(row.get("committee_name", "")), []).append(i)
+    rows_by_name = _index_by_name(committee_rows)
 
     n_matched = 0
     matched_names: set[str] = set()
     for cname, reg in by_committee.items():
-        candidates_idx = rows_by_name.get(cname, [])
-        reg_filer_id = (reg.get("state_filer_id") or "").strip()
+        committee_row_idx = rows_by_name.get(cname, [])
 
-        if not candidates_idx:
+        if not committee_row_idx:
             continue  # reported below as committee_not_found
 
-        target_idx = candidates_idx
-        if len(candidates_idx) > 1:
-            if reg_filer_id:
-                # Tier 1: state_filer_id given -- exact and decisive alone.
-                target_idx = [i for i in candidates_idx
-                              if (rows[i].get("state_filer_id") or "").strip() == reg_filer_id]
-                if not target_idx:
-                    print(f"  [!] enrich/{abbr}: registry row for {reg.get('committee_name')!r} "
-                          f"specifies state_filer_id={reg_filer_id!r}, but none of the "
-                          f"{len(candidates_idx)} committees named that matched it — "
-                          f"not writing the affiliation, check the filer ID.")
-                    log._emit("enrich_warning", reason="filer_id_not_found",
-                              committee_name=reg.get("committee_name"), state_filer_id=reg_filer_id)
-                    n_warned += 1
-                    matched_names.add(cname)
-                    continue
-            else:
-                # Tier 2: no filer_id -- AND together whichever secondary
-                # fields (treasurer_name, registration_year) are filled in.
-                fields_used = []
-                narrowed = candidates_idx
-                for reg_col, committee_col in SECONDARY_FIELDS.items():
-                    reg_val = _norm(reg.get(reg_col, ""))
-                    if not reg_val:
-                        continue
-                    fields_used.append(reg_col)
-                    narrowed = [i for i in narrowed
-                               if _norm(rows[i].get(committee_col, "")) == reg_val]
-
-                if not fields_used or len(narrowed) != 1:
-                    filer_ids = [rows[i].get("state_filer_id") for i in candidates_idx]
-                    if not fields_used:
-                        print(f"  [!] enrich/{abbr}: registry row for {reg.get('committee_name')!r} "
-                              f"matches {len(candidates_idx)} different committees in committees.csv "
-                              f"(state_filer_id={filer_ids}) — NOT writing the affiliation to any of "
-                              f"them. Add state_filer_id (or treasurer_name/registration_year) to "
-                              f"the registry row to disambiguate.")
-                    else:
-                        print(f"  [!] enrich/{abbr}: registry row for {reg.get('committee_name')!r} "
-                              f"matched {len(candidates_idx)} committees; narrowing by "
-                              f"{fields_used} left {len(narrowed)} candidate(s), not exactly 1 — "
-                              f"NOT writing the affiliation to any of them "
-                              f"(state_filer_id={filer_ids}).")
-                    log._emit("enrich_warning", reason="ambiguous_committee_name",
-                              committee_name=reg.get("committee_name"), state_filer_ids=filer_ids,
-                              secondary_fields_tried=fields_used, narrowed_to=len(narrowed))
-                    n_warned += 1
-                    matched_names.add(cname)
-                    continue
-
-                target_idx = narrowed
-                print(f"  · enrich/{abbr}: {reg.get('committee_name')!r} disambiguated via "
-                      f"{fields_used} (of {len(candidates_idx)} same-named committees)")
-
-        for i in target_idx:
-            rows[i]["affiliated_candidate_name"] = reg.get("candidate_name", "")
-            rows[i]["support_oppose"] = reg.get("support_oppose", "")
-            n_matched += 1
+        # Found by name at all -- not reported as committee_not_found below,
+        # even if resolution turns out ambiguous.
         matched_names.add(cname)
 
-    unmatched = [cname for cname in by_committee if cname not in matched_names]
-    for cname in unmatched:
-        r = by_committee[cname]
-        print(f"  [!] enrich/{abbr}: registry entry for {r.get('committee_name')!r} "
-              f"didn't match any committee in committees.csv — check spelling/normalization")
-        log._emit("enrich_warning", reason="committee_not_found",
-                  committee_name=r.get("committee_name"))
-        n_warned += 1
+        target_row_idx, warned = _resolve_committee_rows(reg, committee_row_idx, committee_rows, abbr, log)
+        n_warned += warned
+        if target_row_idx is None:
+            continue
 
-    fieldnames = list(rows[0].keys())
+        for i in target_row_idx:
+            committee_rows[i]["affiliated_candidate_name"] = reg.get("candidate_name", "")
+            committee_rows[i]["support_oppose"] = reg.get("support_oppose", "")
+            n_matched += 1
+
+    n_warned += _report_unmatched(by_committee, matched_names, abbr, log)
+
+    fieldnames = list(committee_rows[0].keys())
     for col in ("affiliated_candidate_name", "support_oppose"):
         if col not in fieldnames:
             fieldnames.append(col)
 
-    suffixes = "".join(committees_path.suffixes)
-    tmp = committees_path.with_name(committees_path.name.replace(suffixes, ".tmp" + suffixes))
-    with _open_csv(tmp, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-
-    shutil.move(str(tmp), str(committees_path))
+    _atomic_write_csv(committees_path, fieldnames, committee_rows)
 
     print(f"  ✓ enrich/{abbr}: {n_matched} committee row(s) enriched from "
           f"{len(by_committee)} registry entries ({n_warned} warning(s))")

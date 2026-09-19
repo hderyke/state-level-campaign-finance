@@ -18,7 +18,15 @@ Input files in data/Michigan/raw/:
                common_name_acronym, cfr_com_id, com_type, exp_desc, purpose,
                payee_f_name, payee_l_name_or_org, payee_address, payee_city,
                payee_state, payee_zip, exp_date, amount, state_loc, supp_opp,
-               candidate, office_dist
+               candidate, office_district, ...
+        supp_opp/candidate: when populated, 'candidate' names the committee
+        this specific expenditure supports or opposes (per supp_opp) — NOT
+        the filing committee's own candidate. Blank on a candidate committee's
+        routine spending on itself. office_district on these rows is NOT
+        reliable (confirmed: a 2026 Governor-race IE carried office_district
+        'Judge of Circuit Court Statewide') — the real office/district is
+        looked up instead by resolving 'candidate' against entities.csv's own
+        committee_name (see build_name_registry()).
     receipt_{year}.txt        — other receipts (in-kind, refunds, transfers)
       Columns: same as contributions with payer_* instead of contributor_*;
                extra receipttype column at end
@@ -53,6 +61,7 @@ import gzip
 import re
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime, date
 from pathlib import Path
 
@@ -221,6 +230,60 @@ def load_entity_registry() -> dict[str, dict]:
     return reg
 
 
+def build_name_registry(reg: dict[str, dict]) -> dict[str, dict]:
+    """
+    Secondary index over the same entities: normalized committee_name ->
+    entity dict (uppercased, whitespace-collapsed key).
+
+    Used to resolve the free-text 'candidate' field on expenditure rows
+    (which, when populated, names the TARGET committee an expenditure
+    supports/opposes -- e.g. an independent-expenditure PAC's row carries
+    "John James for MI" even though the filer is "Mission Michigan") back
+    to that committee's real candidate_name/office_sought/district. This
+    is necessary because Michigan's own office_district column on these
+    rows is not reliable -- confirmed against a live 2026 Governor-race
+    IE row that carried office_district "Judge of Circuit Court
+    Statewide" -- so office/district for the target are looked up from
+    its own registration instead of trusted off the transaction row.
+
+    A name that maps to more than one committee is included only if
+    exactly one of them is Active; otherwise it's left out and callers
+    fall back to the raw candidate text with no office/district. This
+    mirrors the "never guess across multiple real committees" rule used
+    for the same kind of committee-name collision elsewhere in this
+    pipeline (see docs/pipeline.md's enrich.py / committees registry).
+    """
+    by_name = defaultdict(list)
+    for e in reg.values():
+        key = " ".join(e["committee_name"].upper().split())
+        if key:
+            by_name[key].append(e)
+
+    resolved = {}
+    for key, entities in by_name.items():
+        if len(entities) == 1:
+            resolved[key] = entities[0]
+            continue
+        actives = [e for e in entities if "active" in e["committee_status"].lower()]
+        if len(actives) == 1:
+            resolved[key] = actives[0]
+        # else: still ambiguous even after filtering to Active -- skip it,
+        # don't guess.
+    return resolved
+
+
+def stance_from_supp_opp(val: str) -> str:
+    """Michigan's supp_opp column spells out 'Support'/'Oppose'. Map to the
+    pipeline-wide "S"/"O" convention (see columns.py, and the same pattern
+    in parsers/missouri.py)."""
+    v = clean(val).lower()
+    if v.startswith("supp"):
+        return "S"
+    if v.startswith("opp"):
+        return "O"
+    return ""
+
+
 # ================================ run =================================
 
 def run():
@@ -246,6 +309,11 @@ def run():
         # ── Entity registry ────────────────────────────────────────────
         ft  = time.perf_counter()
         reg = load_entity_registry()
+        # Name-indexed view of the same registry -- resolves the raw
+        # 'candidate' field on expenditure rows (the IE/support-oppose
+        # TARGET committee) to its own office/district. See
+        # build_name_registry() for why this join exists.
+        name_reg = build_name_registry(reg)
         log.registry_loaded(
             "entities.csv", len(reg), relation="committees",
             bytes=(RAW_DIR / "entities.csv").stat().st_size
@@ -468,16 +536,39 @@ def run():
                     com_name = clean(row.get("com_legal_name", "")) \
                                or e.get("committee_name", "")
 
-                    # candidate: inline "candidate" field for IE rows;
-                    # otherwise fall back to registry
-                    ie_cand   = clean(row.get("candidate", ""))
-                    cand_name = ie_cand or e.get("candidate_name", "")
+                    # candidate_name is ONLY the filing committee's own
+                    # candidacy (registry lookup by cfr_com_id) -- never the
+                    # raw 'candidate' field below, which names a DIFFERENT
+                    # committee on rows where it's populated. An IE committee
+                    # spending against a candidate never IS that candidate;
+                    # see candidate_name vs affiliated_candidate_name in
+                    # columns.py.
+                    cand_name = e.get("candidate_name", "")
+                    office    = e.get("office_sought", "")
+                    district  = e.get("district", "")
 
-                    # office_dist is a combined "office  district" string for IE rows
-                    office_dist = clean(row.get("office_dist", ""))
-                    # Registry provides cleaner split values
-                    office  = e.get("office_sought", "")
-                    district = e.get("district", "")
+                    # Raw 'candidate' field: populated whenever this specific
+                    # expenditure has a support/oppose target (independent
+                    # expenditures, and some direct/GOTV expenditures against
+                    # a *different* committee) -- blank on a candidate
+                    # committee's routine spending on itself. Resolve it
+                    # against the name registry to recover that target's
+                    # real candidate_name/office/district: Michigan's own
+                    # office_district column on these rows is unreliable
+                    # (see build_name_registry()), so don't use it.
+                    raw_target = clean(row.get("candidate", ""))
+                    affiliated_candidate_name = ""
+                    if raw_target:
+                        target = name_reg.get(" ".join(raw_target.upper().split()))
+                        if target:
+                            affiliated_candidate_name = utils.clean_name(
+                                target["candidate_name"] or raw_target)
+                            office   = office   or target["office_sought"]
+                            district = district or target["district"]
+                        else:
+                            affiliated_candidate_name = utils.clean_name(raw_target)
+
+                    support_oppose = stance_from_supp_opp(row.get("supp_opp", ""))
 
                     doc_year  = clean(row.get("doc_stmnt_year", "")) or file_year
                     payee_f   = clean(row.get("payee_f_name", ""))
@@ -498,6 +589,8 @@ def run():
                         "candidate_name":   utils.clean_name(cand_name),
                         "office":           office,
                         "district":         district,
+                        "affiliated_candidate_name": affiliated_candidate_name,
+                        "support_oppose":   support_oppose,
                         "election_year":    doc_year,
                         "filing_id":        clean(row.get("expense_id", "")),
                         "raw_file":         path.name,
