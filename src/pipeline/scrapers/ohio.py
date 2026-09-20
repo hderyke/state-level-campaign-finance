@@ -121,6 +121,7 @@ from bs4 import BeautifulSoup
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 from src.reporting.logger import get_logger
+from src.pipeline import fec_ie as fec_ie_mod
 
 # =============================== paths ================================
 RAW_DIR  = PROJECT_ROOT / "data" / "Ohio" / "raw"
@@ -134,6 +135,18 @@ MANIFEST_COLS = ["group", "label", "getid", "filename", "date_modified", "rows",
 
 BASE = "https://www6.ohiosos.gov/ords"
 APP  = "CFDISCLOSURE"
+
+# Backs the `sources` table (cloud/supabase/sources_schema.sql) -- the
+# "Sources" section on state/race/candidate-profile.html. Hand-maintained
+# here, pushed by cloud/supabase/push_sources.py, NOT part of the normal
+# scrape/parse pipeline. URL is the public File Transfer Page this
+# module's own docstring already names -- loads fine in a real browser;
+# a plain curl gets a 403 from ohiosos.gov's TLS/HTTP2 fingerprinting
+# (see this file's module docstring), not a sign of a bad URL.
+SOURCES = [
+    {"name": "Ohio Secretary of State — Campaign Finance Disclosure",
+     "url": "https://www6.ohiosos.gov/ords/f?p=CFDISCLOSURE:73"},
+]
 
 FTP_PAGE = 73   # File Transfer Page — lists files
 DL_PAGE  = 72   # Download page — f?p=CFDISCLOSURE:72:::NO::P72_GETID:<id>
@@ -302,6 +315,85 @@ def _download_file(session, url: str, dest: Path) -> int:
     return max(r.content.count(b"\n") + r.content.count(b"\r") - r.content.count(b"\r\n") - 1, 0)
 
 
+# ========================= FEC nonfederal-IE enrichment ================
+# Columns kept in data/Ohio/raw/fec_nonfederal_ie_{year}.csv — a curated
+# subset of schedule_b's ~70 fields (drops the always-null conduit/memo
+# columns for this use case) plus enough provenance to audit any row back
+# to its source filing. See src/pipeline/fec_ie.py for what this data is.
+FEC_IE_FIELDS = [
+    "committee_id", "committee_name",
+    "disbursement_date", "disbursement_amount", "disbursement_description",
+    "disbursement_purpose_category", "category_code_full",
+    "recipient_name", "recipient_city", "recipient_state", "recipient_zip",
+    "recipient_committee_id",
+    "candidate_id", "candidate_name",
+    "two_year_transaction_period", "report_year", "amendment_indicator",
+    "file_number", "sub_id", "transaction_id", "image_number", "pdf_url",
+    "matched_state",
+]
+
+
+def _write_fec_ie_csv(rows: list[dict], dest: Path) -> int:
+    """Write matched FEC rows to `dest` using the fixed FEC_IE_FIELDS header
+    (written even when rows is empty, so downstream globs/parses see a
+    consistent, if empty, file rather than a missing one)."""
+    with open(dest, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=FEC_IE_FIELDS, extrasaction="ignore", restval="")
+        w.writeheader()
+        for row in rows:
+            w.writerow(row)
+    return len(rows)
+
+
+# ==================== FEC nonfederal-IE: committee receipts ==============
+# The OTHER side of the same filers above: who funds them (Schedule A),
+# not what they spend (Schedule B). See src/pipeline/fec_ie.py's
+# fetch_committee_receipts() docstring for why this is committee_id-scoped
+# rather than a free-text state search, and why receipts are never
+# attributed to a candidate/side. Reads committee_ids straight from
+# src/aliases/fec_ie_patterns.csv rather than importing parsers/ohio.py's
+# loader (scraper and parser stay independent, same as everywhere else in
+# this file) -- only committee_ids already reviewed and added there ever
+# get their receipts pulled, so this can't silently expand scope on its
+# own.
+_FEC_IE_PATTERNS_PATH = PROJECT_ROOT / "src" / "aliases" / "fec_ie_patterns.csv"
+
+RECEIPT_FIELDS = [
+    "committee_id", "committee_name",
+    "contribution_receipt_date", "contribution_receipt_amount",
+    "contributor_name", "contributor_city", "contributor_state", "contributor_zip",
+    "contributor_employer", "contributor_occupation", "entity_type",
+    "two_year_transaction_period", "report_year", "amendment_indicator",
+    "file_number", "sub_id", "transaction_id", "image_number", "pdf_url",
+]
+
+
+def _load_fec_ie_committee_ids() -> list[str]:
+    """committee_id column of src/aliases/fec_ie_patterns.csv, in file
+    order -- the closed set of committees already confirmed (by their own
+    disbursement language) to be doing OH nonfederal-IE spending."""
+    ids = []
+    if not _FEC_IE_PATTERNS_PATH.exists():
+        return ids
+    with open(_FEC_IE_PATTERNS_PATH, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            cid = (row.get("committee_id") or "").strip()
+            if cid and cid not in ids:
+                ids.append(cid)
+    return ids
+
+
+def _write_fec_ie_receipts_csv(rows: list[dict], dest: Path) -> int:
+    """Same rationale as _write_fec_ie_csv() -- fixed header, always
+    written even when empty."""
+    with open(dest, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=RECEIPT_FIELDS, extrasaction="ignore", restval="")
+        w.writeheader()
+        for row in rows:
+            w.writerow(row)
+    return len(rows)
+
+
 # ============================== run ====================================
 
 def run(
@@ -314,6 +406,7 @@ def run(
     expenditures: bool = False,
     candidates: bool = False,
     committees: bool = False,
+    fec_ie: bool = False,
 ):
     """
     Download Ohio campaign finance data from the File Transfer Page.
@@ -343,6 +436,18 @@ def run(
     category (entities / contributions / expenditures) is in scope — the
     parser currently ignores Cover Pages files but they're kept on disk in
     case a future totals cross-check wants them.
+
+    fec_ie=True additionally pulls FEC-reported "nonfederal candidate"
+    independent-expenditure disbursements that mention Ohio (see
+    src/pipeline/fec_ie.py for what this is and its limitations) — money
+    spent by FEDERALLY-registered committees on Ohio's own (nonfederal)
+    races, which Ohio's own File Transfer Page data never captures at all.
+    Opt-in and separate from do_all/--transactions/--expenditures since
+    it's a fundamentally different-reliability source (best-effort free-
+    text search, not an official Ohio filing). Always re-fetches the
+    current year and the prior year regardless of manifest state (FEC
+    amendments can land well after the fact); older years are cached like
+    everything else unless --force.
     """
     log = get_logger("ohio", "scrape")
     t0  = time.perf_counter()
@@ -435,6 +540,86 @@ def run(
                     files_err += 1
                 time.sleep(0.3)
 
+        if fec_ie:
+            log.info("  Fetching FEC nonfederal-IE enrichment (Schedule B, all committees)...")
+            fec_start_year = start_year or (current_year - 1)
+            fec_end_year   = end_year or current_year
+            for year in range(fec_start_year, fec_end_year + 1):
+                filename = f"fec_nonfederal_ie_{year}.csv"
+                # FEC filings get amended well after the fact (unlike a same-day
+                # state filing), so — like the current-year rule above but with
+                # a wider buffer — always re-fetch the current and prior year
+                # regardless of manifest state; older, fully-elapsed years are
+                # cached normally.
+                always_refetch = year >= current_year - 1
+                prior = done.get(filename)
+                if not force and prior and not always_refetch:
+                    log.file_download_skip(filename=filename)
+                    files_skip += 1
+                    continue
+
+                log.file_download_start(filename=filename)
+                t_file = time.perf_counter()
+                try:
+                    matches = fec_ie_mod.fetch_state_matches(
+                        "OH", f"{year}-01-01", f"{year}-12-31", state_name="Ohio",
+                    )
+                    dest = RAW_DIR / filename
+                    n_rows = _write_fec_ie_csv(matches, dest)
+                    log.file_download_ok(filename=filename, bytes=dest.stat().st_size,
+                                         rows=n_rows,
+                                         duration_s=round(time.perf_counter() - t_file, 2))
+                    upsert_manifest({
+                        "group": "fec_ie", "label": f"FEC Nonfederal IE - {year}",
+                        "getid": "", "filename": filename, "date_modified": today,
+                        "rows": n_rows, "downloaded_at": today,
+                    }, done)
+                    files_ok += 1
+                except Exception as e:
+                    log.file_download_error(filename=filename, error=str(e))
+                    files_err += 1
+
+            # ── committee receipts (Schedule A) — same year range, nested
+            #    per year so each committee's receipts get the same
+            #    always-refetch-current-and-prior-year treatment as the
+            #    disbursement side above. Only committee_ids already in
+            #    src/aliases/fec_ie_patterns.csv are ever fetched -- see
+            #    _load_fec_ie_committee_ids()'s docstring.
+            log.info("  Fetching FEC nonfederal-IE committee receipts (Schedule A, "
+                     "known committees only)...")
+            committee_ids = _load_fec_ie_committee_ids()
+            for year in range(fec_start_year, fec_end_year + 1):
+                always_refetch = year >= current_year - 1
+                for committee_id in committee_ids:
+                    filename = f"fec_nonfederal_ie_receipts_{committee_id}_{year}.csv"
+                    prior = done.get(filename)
+                    if not force and prior and not always_refetch:
+                        log.file_download_skip(filename=filename)
+                        files_skip += 1
+                        continue
+
+                    log.file_download_start(filename=filename)
+                    t_file = time.perf_counter()
+                    try:
+                        receipts = fec_ie_mod.fetch_committee_receipts(
+                            committee_id, f"{year}-01-01", f"{year}-12-31",
+                        )
+                        dest = RAW_DIR / filename
+                        n_rows = _write_fec_ie_receipts_csv(receipts, dest)
+                        log.file_download_ok(filename=filename, bytes=dest.stat().st_size,
+                                             rows=n_rows,
+                                             duration_s=round(time.perf_counter() - t_file, 2))
+                        upsert_manifest({
+                            "group": "fec_ie_receipts",
+                            "label": f"FEC Nonfederal IE Receipts - {committee_id} - {year}",
+                            "getid": "", "filename": filename, "date_modified": today,
+                            "rows": n_rows, "downloaded_at": today,
+                        }, done)
+                        files_ok += 1
+                    except Exception as e:
+                        log.file_download_error(filename=filename, error=str(e))
+                        files_err += 1
+
         duration = round(time.perf_counter() - t0, 1)
         log.info(f"Done in {duration}s — {files_ok} downloaded, {files_skip} skipped, "
                 f"{files_err} errors")
@@ -481,6 +666,10 @@ if __name__ == "__main__":
     ap.add_argument("--expenditures",  action="store_true")
     ap.add_argument("--candidates",    action="store_true")
     ap.add_argument("--committees",    action="store_true")
+    ap.add_argument("--fec-ie",        action="store_true",
+                    help="also pull FEC-reported 'nonfederal candidate' independent-"
+                         "expenditure disbursements mentioning Ohio (opt-in enrichment "
+                         "from federally-registered committees; see src/pipeline/fec_ie.py)")
 
     args, _ = ap.parse_known_args()
 
@@ -504,6 +693,7 @@ if __name__ == "__main__":
             expenditures=args.expenditures,
             candidates=args.candidates,
             committees=args.committees,
+            fec_ie=args.fec_ie,
         )
     except KeyboardInterrupt:
         sys.exit(130)
