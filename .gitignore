@@ -20,7 +20,7 @@ metadata/
 # personal AWS deployment + operational tooling — not part of the public
 # pipeline; requires your own AWS account/bucket/Lambda/ECS setup to use
 cloud/
-client-facing/
+web/
 ops/
 
 # credentials — never commit

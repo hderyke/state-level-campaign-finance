@@ -14,7 +14,6 @@ import os
 import subprocess
 import sys
 import time
-import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -36,12 +35,13 @@ with open(_STATES_CSV, encoding="utf-8") as _f:
     }
 
 
-
 SCRAPER_DIR = PROJECT_ROOT / "src" / "pipeline" / "scrapers"
 PARSER_DIR  = PROJECT_ROOT / "src" / "pipeline" / "parsers"
 TABULATE    = PROJECT_ROOT / "src" / "pipeline" / "tabulate.py"
 VALIDATE    = PROJECT_ROOT / "src" / "pipeline" / "validate.py"
 ENRICH      = PROJECT_ROOT / "src" / "pipeline" / "enrich.py"
+QUERIES     = PROJECT_ROOT / "src" / "pipeline" / "queries.py"
+QUERIES_DIR = PROJECT_ROOT / "metadata"
 
 PYTHON = sys.executable
 
@@ -49,35 +49,21 @@ PIPELINE_COMMANDS = {"sync", "reparse"}
 
 
 # === Helpers ===========================================
-def _setup_run_id(command: str, state_abbrs: list[str],
-                  extra_flags: list[str] | None = None) -> str:
-    """Build a human-readable run ID and set CF_RUN_ID for all subprocesses."""
-    ts     = datetime.now().strftime("%Y%m%d_%H%M%S")
-    states = ("all" if (len(state_abbrs) == 1 and state_abbrs[0].lower() == "all")
-              else "-".join(a.upper() for a in state_abbrs))
-    # Append --force to the run ID so logs are self-describing
-    suffix = "_force" if extra_flags and "--force" in extra_flags else ""
-    run_id = f"{ts}_{command}{suffix}_{states}"
-    os.environ["CF_RUN_ID"] = run_id
-    return run_id
+def _state_slug(name: str) -> str:
+    """Convert a state name to a valid Python module filename slug.
+    e.g. "New York" → "new_york", "Michigan" → "michigan"
+    """
+    return name.lower().replace(" ", "_")
 
 
-def header(msg: str):
-    bar = "─" * 60
-    print(f"\n{bar}\n  {msg}\n{bar}")
+def scraper_path(name: str) -> Path | None:
+    p = SCRAPER_DIR / f"{_state_slug(name)}.py"
+    return p if p.exists() else None
 
 
-def _summary(results: dict[str, bool]):
-    bar = "=" * 60
-    print(f"\n{bar}\n  SUMMARY\n{bar}")
-    for abbr, ok in results.items():
-        mark = "✓" if ok else "✗"
-        print(f"  {mark}  {abbr}")
-    failed = [k for k, v in results.items() if not v]
-    if failed:
-        print(f"\n  {len(failed)} state(s) failed: {', '.join(failed)}")
-    else:
-        print(f"\n  All {len(results)} state(s) succeeded")
+def parser_path(name: str) -> Path | None:
+    p = PARSER_DIR / f"{_state_slug(name)}.py"
+    return p if p.exists() else None
 
 
 def _subprocess(cmd: list[str], label: str, log=None) -> bool:
@@ -104,8 +90,9 @@ def _subprocess(cmd: list[str], label: str, log=None) -> bool:
     return result.returncode == 0
 
 
-QUERIES     = PROJECT_ROOT / "src" / "pipeline" / "queries.py"
-QUERIES_DIR = PROJECT_ROOT / "metadata"
+def header(msg: str):
+    bar = "─" * 60
+    print(f"\n{bar}\n  {msg}\n{bar}")
 
 
 def _run_queries(name: str, log) -> None:
@@ -126,11 +113,9 @@ def _run_queries(name: str, log) -> None:
             output += "\n" + result.stderr
         duration = round(time.perf_counter() - t0, 1)
 
-        # Always write to metadata/{state}_queries.txt (latest)
         QUERIES_DIR.mkdir(parents=True, exist_ok=True)
         (QUERIES_DIR / f"{name}_queries.txt").write_text(output, encoding="utf-8")
 
-        # Copy to run dir if we're in orc mode
         run_id = os.environ.get("CF_RUN_ID")
         if run_id:
             run_dir = run_dir_for(run_id)
@@ -145,41 +130,6 @@ def _run_queries(name: str, log) -> None:
         print(f"\n  [!] test_queries failed for {name}: {e}")
         log._emit("queries_completed", state=name, status="error",
                   duration_s=round(time.perf_counter() - t0, 1), error=str(e))
-
-
-def _state_slug(state: str) -> str:
-    """Convert a state name to a valid Python module filename slug.
-    e.g. "New York" → "new_york", "Michigan" → "michigan"
-    """
-    return state.lower().replace(" ", "_")
-
-
-def scraper_path(state: str) -> Path | None:
-    p = SCRAPER_DIR / f"{_state_slug(state)}.py"
-    return p if p.exists() else None
-
-
-def parser_path(state: str) -> Path | None:
-    p = PARSER_DIR / f"{_state_slug(state)}.py"
-    return p if p.exists() else None
-
-
-def resolve_states(abbr_list: list[str]) -> list[tuple[str, str]]:
-    """Returns [(abbr, name), ...]. 'all' expands to every known state."""
-    if len(abbr_list) == 1 and abbr_list[0].lower() == "all":
-        return [(abbr, name) for abbr, name in sorted(ABBR_TO_NAME.items())]
-    out = []
-    for abbr in abbr_list:
-        abbr = abbr.upper()
-        name = ABBR_TO_NAME.get(abbr)
-        if not name:
-            print(f"[!] Unknown state abbreviation: {abbr}")
-            sys.exit(1)
-        out.append((abbr, name))
-    return out
-
-
-
 
 
 # ====== Orchestration ========================
@@ -257,6 +207,63 @@ def _run_state(abbr: str, name: str, command: str,
     return True
 
 
+def _setup_run_id(command: str, state_abbrs: list[str],
+                  extra_flags: list[str] | None = None) -> str:
+    """Build a human-readable run ID and set CF_RUN_ID for all subprocesses."""
+    ts     = datetime.now().strftime("%Y%m%d_%H%M%S")
+    states = ("all" if (len(state_abbrs) == 1 and state_abbrs[0].lower() == "all")
+              else "-".join(a.upper() for a in state_abbrs))
+    # Append --force to the run ID so logs are self-describing
+    suffix = "_force" if extra_flags and "--force" in extra_flags else ""
+    run_id = f"{ts}_{command}{suffix}_{states}"
+    os.environ["CF_RUN_ID"] = run_id
+    return run_id
+
+
+def resolve_states(abbr_list: list[str]) -> list[tuple[str, str]]:
+    """Returns [(abbr, name), ...]. 'all' expands to every known state."""
+    if len(abbr_list) == 1 and abbr_list[0].lower() == "all":
+        return [(abbr, name) for abbr, name in sorted(ABBR_TO_NAME.items())]
+    out = []
+    for abbr in abbr_list:
+        abbr = abbr.upper()
+        name = ABBR_TO_NAME.get(abbr)
+        if not name:
+            print(f"[!] Unknown state abbreviation: {abbr}")
+            sys.exit(1)
+        out.append((abbr, name))
+    return out
+
+
+def _summary(results: dict[str, bool]):
+    bar = "=" * 60
+    print(f"\n{bar}\n  SUMMARY\n{bar}")
+    for abbr, ok in results.items():
+        print(f"  {'✓' if ok else '✗'}  {abbr}")
+    failed = [k for k, v in results.items() if not v]
+    if failed:
+        print(f"\n  {len(failed)} state(s) failed: {', '.join(failed)}")
+    else:
+        print(f"\n  All {len(results)} state(s) succeeded")
+
+
+def _finish_run(run_id: str, log, t0: float, results: dict[str, bool],
+               failed: list[str], deferred_aggregate: bool = False) -> None:
+    """Compute run duration, log it, and emit run_completed.
+
+    Shared by main()'s two exit paths (no_aggregate early return and the
+    normal end-of-run), which previously duplicated this block, differing
+    only in the log message suffix and whether aggregate="deferred" is
+    reported.
+    """
+    duration = round(time.perf_counter() - t0, 1)
+    suffix = " (aggregate deferred to caller)" if deferred_aggregate else ""
+    log.info(f"Done in {duration}s{suffix}")
+    log._emit("run_completed", run_id=run_id, status="completed",
+              duration_s=duration, passed=len(results) - len(failed),
+              failed=len(failed),
+              **({"aggregate": "deferred"} if deferred_aggregate else {}))
+
 
 def main(command: str, state_abbrs: list[str],
          extra_flags: list[str] | None = None,
@@ -294,11 +301,7 @@ def main(command: str, state_abbrs: list[str],
         failed = [k for k, v in results.items() if not v]
 
         if no_aggregate:
-            duration = round(time.perf_counter() - t0, 1)
-            log.info(f"Done in {duration}s (aggregate deferred to caller)")
-            log._emit("run_completed", run_id=run_id, status="completed",
-                      duration_s=duration, passed=len(results) - len(failed),
-                      failed=len(failed), aggregate="deferred")
+            _finish_run(run_id, log, t0, results, failed, deferred_aggregate=True)
             return results
 
         # Auto-aggregate if all states passed
@@ -308,11 +311,7 @@ def main(command: str, state_abbrs: list[str],
         else:
             print(f"\n  Skipping aggregate — {len(failed)} state(s) failed")
 
-        duration = round(time.perf_counter() - t0, 1)
-        log.info(f"Done in {duration}s")
-        log._emit("run_completed", run_id=run_id, status="completed",
-                  duration_s=duration, passed=len(results) - len(failed),
-                  failed=len(failed))
+        _finish_run(run_id, log, t0, results, failed)
 
         if failed:
             sys.exit(1)
