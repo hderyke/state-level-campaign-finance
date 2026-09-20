@@ -71,6 +71,17 @@ BASE_URL   = "https://mi-boe.entellitrak.com/etk-mi-boe-prod"
 LIST_URL   = f"{BASE_URL}/page.request.do"
 SEARCH_URL = f"{BASE_URL}/page.request.do"
 
+# Backs the `sources` table (cloud/supabase/sources_schema.sql) -- the
+# "Sources" section on state/race/candidate-profile.html. Hand-maintained
+# here, pushed by cloud/supabase/push_sources.py, NOT part of the normal
+# scrape/parse pipeline. URL is the public committee search page (same
+# entellitrak host the scraper itself hits, confirmed to load as a normal
+# public page, not just an API) -- the referer this module already sends.
+SOURCES = [
+    {"name": "Michigan Bureau of Elections — Campaign Finance Reporting",
+     "url": "https://mi-boe.entellitrak.com/etk-mi-boe-prod/page.request.do?page=page.miboeCommitteePublicSearch"},
+]
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "

@@ -91,6 +91,7 @@ The patterns below are conventions, not strict rules — function matters more t
 - [ ] `scrape_completed` emitted in all exit paths (success, interrupt, error)
 - [ ] `file_download_*` or `page_scrape_*` events used correctly for the acquisition pattern
 - [ ] Module docstring describing the data source and any caveats
+- [ ] `SOURCES` list defined (literal strings only — see [The `SOURCES` list](#the-sources-list))
 
 ### File location
 
@@ -145,6 +146,20 @@ A few notes on the fixed parts:
 - `sys.path.insert(0, str(PROJECT_ROOT))` must come before the logger import so Python can find `src/`.
 - Use the **capitalized** state name in the data path (e.g. `"Arkansas"`, `"Alabama"`) — this is what `tabulate.py` and `aggregate.py` look for.
 - `MANIFEST_COLS` varies by state. At minimum it should include `filename` and enough context to answer "have I already downloaded this?" (commonly `year`, `relation_type`, or similar).
+
+### The `SOURCES` list
+
+Add a `SOURCES` constant to the state-specific constants block:
+
+```python
+SOURCES = [
+    {"name": "{State} Secretary of State — Campaign Finance Disclosure", "url": "https://..."},
+]
+```
+
+This backs the "Sources" section on that state's profile pages (`cloud/supabase/push_sources.py` reads it and pushes it to the `sources` table) — usually just the one page a person would land on to verify the data themselves. Most states only need one entry; add more only if there's a genuinely separate source (e.g. a second disclosure site for a different filing type).
+
+**`SOURCES` must be a fully literal list** — every `"url"` a plain string, never an f-string referencing `BASE_URL` or any other constant from elsewhere in the file. `push_sources.py` extracts this one assignment via a static AST read and `exec()`s just that line, without importing the rest of the module (which would pull in `requests`/`playwright`/etc. that a tiny push script has no reason to depend on) — that only works if the assignment is self-contained. If your scraper's real URL is built from a `BASE_URL` constant, just spell it out again as a literal here; it's fine for the display URL and the scrape URL to be two separate strings that happen to be related.
 
 ### The manifest
 
