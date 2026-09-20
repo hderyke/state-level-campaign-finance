@@ -80,7 +80,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 from src.reporting.logger import get_logger
-from config import USER_AGENT
+from config import USER_AGENT, resolve_tls, tls_adapter
 
 # =============================== paths ================================
 RAW_DIR  = PROJECT_ROOT / "data" / "Georgia" / "raw"
@@ -195,6 +195,25 @@ def append_manifest(record: dict):
 
 # ========================= download helpers ==========================
 
+def _apply_tls(s: requests.Session, probe_url: str) -> None:
+    """Pick the least-invasive TLS config that works on this machine.
+
+    Probed once per process and cached (see config.resolve_tls). On a normal
+    network this settles on stock verification — certifi, with Python 3.13's
+    strict checks left ON. Only a machine behind a TLS-inspecting proxy
+    (Zscaler/Netskope re-signing every response with an internal root CA, which
+    certifi doesn't know about) escalates to the OS trust store, and only as
+    far as it must. Nothing here ever disables verification.
+
+    Without this, ga.gov fails with "unable to get local issuer certificate"
+    while the same URL loads fine in the browser — the tell for interception.
+    """
+    verify, relax_strict = resolve_tls(probe_url)
+    s.verify = verify
+    if relax_strict:
+        s.mount("https://", tls_adapter(verify))
+
+
 def _make_session() -> requests.Session:
     """Create a session with headers required to avoid CORS rejection and WAF blocking."""
     s = requests.Session()
@@ -205,6 +224,7 @@ def _make_session() -> requests.Session:
         "Origin":       "https://peachfile.ethics.ga.gov",
         "Referer":      "https://peachfile.ethics.ga.gov/",
     })
+    _apply_tls(s, "https://peachfile.ethics.ga.gov")
     return s
 
 
@@ -272,10 +292,31 @@ def download_entities(log, session: requests.Session) -> tuple[int, int] | None:
     # Split: rows with a candidateLastName go to candidates; rest to committees.
     # Georgia doesn't have a clean filerTypeCode distinguishing them, so we use
     # the presence of candidateLastName as the heuristic.
+    #
+    # In practice GetCandidateDetails returns candidate registrations only, so
+    # `committees` is always empty and committees.csv is never written (the
+    # non-candidate committees live in public_committees.csv — see
+    # download_public_committees). The split is kept anyway as an assertion:
+    # without it, a non-candidate row would be silently mislabelled as a
+    # candidate, which is far harder to notice than a file that shouldn't exist.
+    # If the split ever fires, the warning below says so and the parser picks
+    # committees.csv up automatically.
     candidates = [r for r in all_items if r.get("candidateLastName")]
     committees = [r for r in all_items if not r.get("candidateLastName")]
 
-    for filename, rows in [("candidates.csv", candidates), ("committees.csv", committees)]:
+    to_write = [("candidates.csv", candidates)]
+    if committees:
+        log.warning(
+            f"  GetCandidateDetails returned {len(committees):,} row(s) with no "
+            f"candidateLastName — previously always zero. Writing committees.csv; "
+            f"check for overlap with public_committees.csv."
+        )
+        to_write.append(("committees.csv", committees))
+    else:
+        # Never leave a stale file from an earlier run behind it.
+        (RAW_DIR / "committees.csv").unlink(missing_ok=True)
+
+    for filename, rows in to_write:
         out_path = RAW_DIR / filename
         with open(out_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=ENTITY_FIELDS, extrasaction="ignore",
@@ -285,9 +326,8 @@ def download_entities(log, session: requests.Session) -> tuple[int, int] | None:
 
     total = len(all_items)
     log.file_download_ok(
-        filename="candidates.csv + committees.csv",
-        bytes=sum((RAW_DIR / fn).stat().st_size
-                  for fn in ("candidates.csv", "committees.csv")),
+        filename=" + ".join(fn for fn, _ in to_write),
+        bytes=sum((RAW_DIR / fn).stat().st_size for fn, _ in to_write),
         rows=total,
         duration_s=round(time.perf_counter() - t0, 2),
     )
@@ -315,7 +355,9 @@ def download_public_committees(log, session: requests.Session) -> int | None:
     log.file_download_start(filename="public committees")
     t0 = time.perf_counter()
 
-    # filerEntityIds already captured via GetCandidateDetails.
+    # filerEntityIds already captured via GetCandidateDetails. committees.csv is
+    # normally absent (see download_entities) — it's still checked here so the
+    # dedupe stays correct on the day it isn't.
     existing_ids = set()
     for fn in ("candidates.csv", "committees.csv"):
         path = RAW_DIR / fn
@@ -528,6 +570,7 @@ def _recordsearch_session() -> requests.Session:
         "Origin":       "https://recordsearch.ethics.ga.gov",
         "Referer":      "https://recordsearch.ethics.ga.gov/",
     })
+    _apply_tls(s, "https://recordsearch.ethics.ga.gov")
     return s
 
 
@@ -767,6 +810,7 @@ def _legacy_session() -> requests.Session:
         "Accept":       "text/html,application/xhtml+xml,*/*",
         "Referer":      LEGACY_BASE,
     })
+    _apply_tls(s, LEGACY_BASE)
     return s
 
 
@@ -1344,9 +1388,13 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                 append_manifest({"transaction_type": "entities", "year": "candidates",
                                  "filename": "candidates.csv", "downloaded_at": today,
                                  "row_count": cand_count})
-                append_manifest({"transaction_type": "entities", "year": "committees",
-                                 "filename": "committees.csv", "downloaded_at": today,
-                                 "row_count": comm_count})
+                # Only recorded when the file exists — GetCandidateDetails
+                # returns candidate registrations only, so comm_count is
+                # normally 0 and no committees.csv is written.
+                if comm_count:
+                    append_manifest({"transaction_type": "entities", "year": "committees",
+                                     "filename": "committees.csv", "downloaded_at": today,
+                                     "row_count": comm_count})
 
             pub_count = download_public_committees(log, session)
             if pub_count is None:
