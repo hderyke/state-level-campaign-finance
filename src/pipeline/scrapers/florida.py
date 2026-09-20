@@ -78,6 +78,15 @@ MANIFEST_COLS = ["relation_type", "key", "filename", "downloaded_at", "row_count
 BASE_URL   = "https://dos.elections.myflorida.com"
 START_DATE = date(1996, 1, 1)
 
+# Backs the `sources` table (cloud/supabase/sources_schema.sql) -- the
+# "Sources" section on state/race/candidate-profile.html. Hand-maintained
+# here, pushed by cloud/supabase/push_sources.py, NOT part of the normal
+# scrape/parse pipeline. Keep in sync with the docstring above if Florida's
+# disclosure site ever moves.
+SOURCES = [
+    {"name": "Florida Division of Elections — Campaign Finance", "url": "https://dos.elections.myflorida.com"},
+]
+
 # Transaction chunking — start large, recurse down as needed
 CHUNK_DAYS     = 10      # primary window size
 SUB_CHUNK_DAYS = 3       # kept for reference; actual levels defined in _CHUNK_LEVELS
@@ -737,7 +746,8 @@ def _fill_txn_form(page, txn_type: str,
                    date_to:   date | None = None,
                    election_id: str = "All",
                    amount_min: str = "",
-                   amount_max: str = "") -> None:
+                   amount_max: str = "",
+                   search_on_override: str | None = None) -> None:
     """Fill the transaction search form in the current Playwright page.
 
     For contributions/transfers/other:
@@ -761,6 +771,22 @@ def _fill_txn_form(page, txn_type: str,
     elif txn_type in ("expenditures", "transfers"):
         search_on_val = "2"
     # "other" has no search_on radio — skip
+
+    # 2026-09-07: search_on=2 above only reaches the form's CANDIDATE Search
+    # panel ("List of expenditures" under a blank Candidate Last Name -- see
+    # the sibling Committee Search panel further down the same page, whose
+    # own "List of Expenditures" radio is search_on=4, not 2). A standalone
+    # PAC/CCE/ECO/PTY committee that is never itself a candidate (confirmed
+    # live 2026-09-07: "Friends of Byron Donalds PAC", a real, active,
+    # multi-million-dollar committee per src/registries/committees/fl.csv)
+    # NEVER appears under Candidate Search no matter how broad the query --
+    # it can only be found via Committee Search. search_on_override lets a
+    # caller force search_on=4 (with ComName/CanLName both still left blank,
+    # same "no name filter = everyone" pattern already used for search_on=2)
+    # to run a second, committee-scoped pass over the same election. See
+    # download_transactions()'s own comment on where this gets called.
+    if search_on_override is not None:
+        search_on_val = search_on_override
 
     if search_on_val is not None:
         radio = page.locator(f'input[name="search_on"][value="{search_on_val}"]')
@@ -814,7 +840,8 @@ def _fetch_chunk_playwright(page, txn_type: str,
                             max_retries: int = 3,
                             election_id: str = "All",
                             amount_min: str = "",
-                            amount_max: str = "") -> int:
+                            amount_max: str = "",
+                            search_on_override: str | None = None) -> int:
     """Navigate the form, submit, save the download to tmp_path.
 
     Retries up to max_retries times with a fresh page.goto() on each attempt —
@@ -852,7 +879,8 @@ def _fetch_chunk_playwright(page, txn_type: str,
 
             _fill_txn_form(page, txn_type, date_from, date_to,
                            election_id=election_id,
-                           amount_min=amount_min, amount_max=amount_max)
+                           amount_min=amount_min, amount_max=amount_max,
+                           search_on_override=search_on_override)
 
             # Try the standard submit button; fall back to any submit input or button
             submit_selectors = [
@@ -927,7 +955,8 @@ def _fetch_and_append(page, txn_type: str,
                       log, level: int = 0,
                       election_id: str = "All",
                       amount_min: str = "",
-                      amount_max: str = "") -> tuple[int, int]:
+                      amount_max: str = "",
+                      search_on_override: str | None = None) -> tuple[int, int]:
     """Recursively fetch a date window, sub-chunking if ROW_LIMIT is hit.
 
     `first` is a one-element list so the mutable flag survives recursion.
@@ -946,6 +975,7 @@ def _fetch_and_append(page, txn_type: str,
             page, txn_type, chunk_start, chunk_end, tmp_path, log,
             election_id=election_id,
             amount_min=amount_min, amount_max=amount_max,
+            search_on_override=search_on_override,
         )
     except Exception as e:
         tmp_path.unlink(missing_ok=True)
@@ -992,6 +1022,7 @@ def _fetch_and_append(page, txn_type: str,
                     year_path, first, log, level=_next_level,
                     election_id=election_id,
                     amount_min=amin, amount_max=amax,
+                    search_on_override=search_on_override,
                 )
                 total_rows += rows
                 total_err  += errs
@@ -1016,6 +1047,7 @@ def _fetch_and_append(page, txn_type: str,
                     year_path, first, log, level=_next_level,
                     election_id=election_id,
                     amount_min=amin, amount_max=amax,
+                    search_on_override=search_on_override,
                 )
                 total_rows += rows
                 total_err  += errs
@@ -1034,6 +1066,7 @@ def _fetch_and_append(page, txn_type: str,
                 year_path, first, log, level=_next_level,
                 election_id=election_id,
                 amount_min=amount_min, amount_max=amount_max,
+                search_on_override=search_on_override,
             )
             total_rows += rows
             total_err  += errs
@@ -1050,6 +1083,51 @@ def _new_page(p):
     browser = p.chromium.launch(headless=False)
     context = browser.new_context(accept_downloads=True)
     return browser, context.new_page()
+
+
+def _dedup_year_file(path: Path, log) -> int:
+    """Remove exact-duplicate data rows from a downloaded year file in place.
+
+    2026-09-07: confirmed live that FL's transaction search forms don't
+    cleanly scope results the way their parameters imply -- this affects
+    ALL transaction types, not just the Committee Search / expenditures
+    case documented above. Evidence: after fixing the committee-scoped
+    pass to query a single election, fl_expenditures_2026.txt still came
+    back ~46% duplicate rows (264,945 raw / 141,799 unique), and the
+    duplication hit ordinary candidates too (e.g. "Nocco, Chris", not a
+    PAC) -- so Candidate Search's own 5-elections-per-year loop is ALSO
+    returning overlapping/duplicate data, not just Committee Search.
+    fl_contributions_2025/2026.txt (date-chunked, not election-based at
+    all) showed a smaller but nonzero ~4-5% duplicate rate too, likely
+    from adaptive sub-chunking / retry-after-restart appending the same
+    rows twice. Rather than chase down each form's specific scoping quirk,
+    dedupe every year file unconditionally after all fetch passes finish
+    -- this is a superset fix that's correct regardless of which pass(es)
+    produced the duplicates, and is a no-op (returns immediately, rewrites
+    nothing) for any file that turns out to already be clean.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return 0
+    with open(path, encoding="utf-8", newline="") as f:
+        lines = f.readlines()
+    if not lines:
+        return 0
+    header, rows = lines[0], lines[1:]
+    seen: set[str] = set()
+    kept: list[str] = []
+    for line in rows:
+        if line in seen:
+            continue
+        seen.add(line)
+        kept.append(line)
+    removed = len(rows) - len(kept)
+    if removed:
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(header)
+            f.writelines(kept)
+        log.info(f"    deduped {path.name}: {len(rows):,} -> {len(kept):,} rows "
+                  f"({removed:,} exact-duplicate rows removed)")
+    return len(kept)
 
 
 def download_transactions(p, log,
@@ -1187,41 +1265,100 @@ def download_transactions(p, log,
                         for cs, ce in _date_chunks(year_start, year_end, CHUNK_DAYS)
                     ]
 
-                for chunk_start, chunk_end, election_id in items_to_fetch:
-                    try:
-                        rows, errs = _fetch_and_append(
-                            page, txn_type, chunk_start, chunk_end,
-                            year_path, first_flag, log, level=0,
-                            election_id=election_id,
-                        )
-                    except Exception as e:
-                        # Navigation error — browser session stale. Restart and retry once.
-                        log.warning(
-                            f"    [!] Browser session error — restarting "
-                            f"({type(e).__name__})"
-                        )
-                        try:
-                            browser.close()
-                        except Exception:
-                            pass
-                        time.sleep(3)
-                        browser, page = _new_page(p)
+                def _run_items(items, search_on_override=None):
+                    # 2026-09-07: factored out of the plain for-loop below,
+                    # unchanged in behavior, so it can also be run a SECOND
+                    # time over the same elections with search_on_override
+                    # set -- see the committee-scoped expenditures pass just
+                    # after this function's own for-loop call, and
+                    # _fill_txn_form()'s matching 2026-09-07 comment for why
+                    # a second pass is needed at all (search_on=2 only ever
+                    # reaches the form's Candidate Search panel; a standalone
+                    # PAC that is never itself a candidate -- confirmed live,
+                    # "Friends of Byron Donalds PAC" -- is invisible to it no
+                    # matter how broad the query, and only shows up via the
+                    # sibling Committee Search panel, search_on=4).
+                    nonlocal browser, page, year_rows, err
+                    for chunk_start, chunk_end, election_id in items:
                         try:
                             rows, errs = _fetch_and_append(
                                 page, txn_type, chunk_start, chunk_end,
                                 year_path, first_flag, log, level=0,
                                 election_id=election_id,
+                                search_on_override=search_on_override,
                             )
-                        except Exception as e2:
-                            chunk_label = election_id if txn_type in ELECTION_BASED_TYPES \
-                                else f"{chunk_start:%Y%m%d}_{chunk_end:%Y%m%d}"
-                            log.file_download_error(
-                                filename=f"{year_filename} [{chunk_label}]",
-                                error=str(e2),
+                        except Exception as e:
+                            # Navigation error — browser session stale. Restart and retry once.
+                            log.warning(
+                                f"    [!] Browser session error — restarting "
+                                f"({type(e).__name__})"
                             )
-                            rows, errs = 0, 1
-                    year_rows += rows
-                    err       += errs
+                            try:
+                                browser.close()
+                            except Exception:
+                                pass
+                            time.sleep(3)
+                            browser, page = _new_page(p)
+                            try:
+                                rows, errs = _fetch_and_append(
+                                    page, txn_type, chunk_start, chunk_end,
+                                    year_path, first_flag, log, level=0,
+                                    election_id=election_id,
+                                    search_on_override=search_on_override,
+                                )
+                            except Exception as e2:
+                                chunk_label = election_id if txn_type in ELECTION_BASED_TYPES \
+                                    else f"{chunk_start:%Y%m%d}_{chunk_end:%Y%m%d}"
+                                log.file_download_error(
+                                    filename=f"{year_filename} [{chunk_label}]",
+                                    error=str(e2),
+                                )
+                                rows, errs = 0, 1
+                        year_rows += rows
+                        err       += errs
+
+                _run_items(items_to_fetch)
+
+                # Committee-scoped second pass -- expenditures only,
+                # search_on=4 instead of 2. Appends into the SAME year_path
+                # file: the raw column schema is identical either way
+                # (Candidate/Committee, Date, Amount, Payee Name, Address,
+                # City State Zip, Purpose, Type), so no parser change is
+                # needed to pick these rows up.
+                #
+                # 2026-09-07, second pass: unlike Candidate Search (where a
+                # given election_id genuinely scopes results to that race),
+                # Committee Search's election_id does NOT reliably scope a
+                # PAC's results to one specific race -- confirmed live: after
+                # running this pass once per 2026 election (5 elections),
+                # "Friends of Byron Donalds PAC" alone came back 3x (its full
+                # expenditure list, not a per-election subset) and the
+                # duplication pattern across the whole file matched clusters
+                # of same-DATE elections (20261103-GEN + 20261103-S01 share
+                # one date; 20260324-S03/S02/S01 share another) -- consistent
+                # with Committee Search actually filtering by something close
+                # to the election's calendar date/cycle rather than by race,
+                # so querying multiple elections in the same cycle just
+                # re-fetches the same committee data multiple times. Querying
+                # ONE election per year (prefer the general -- "-GEN" -- when
+                # this year has one, since a statewide general is virtually
+                # certain to cover the same window as anything else that
+                # year) gets the same committee data without the multiplied
+                # duplicates. (58,029 rows appeared exactly 3x, 951 rows 2x,
+                # plus assorted higher multiplicities up to 73x, out of
+                # 265,443 raw rows / 142,285 actually-unique ones -- see
+                # git history for the one-off dedup script used to clean up
+                # the already-downloaded fl_expenditures_2025/2026.txt this
+                # bug produced before this fix landed.)
+                if txn_type == "expenditures":
+                    gen_election = next(
+                        (eid for eid, _ in year_elections if eid.endswith("-GEN")),
+                        year_elections[0][0],
+                    )
+                    log.info(f"    1 election ({gen_election}) for {year} (committee-scoped pass)")
+                    _run_items([(None, None, gen_election)], search_on_override="4")
+
+                year_rows = _dedup_year_file(year_path, log)
 
                 if year_path.exists() and year_path.stat().st_size > 0:
                     log.file_download_ok(
