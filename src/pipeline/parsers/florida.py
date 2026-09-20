@@ -54,6 +54,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src" / "pipeline"))
 from src.reporting.logger import get_logger
 import columns as C
 import utils
+from contributor_type_nb import classify_contributor_type
 
 csv.field_size_limit(sys.maxsize)
 
@@ -531,6 +532,7 @@ def _parse_contrib_row(row: dict, raw_file: str, row_num: int) -> tuple[dict | N
         "amount":            amount,
         "date":              date_,
         "contributor_name":  clean(row.get("Contributor Name", "")),
+        "contributor_type":  classify_contributor_type(clean(row.get("Contributor Name", ""))),
         "contributor_city":  city,
         "contributor_state": st,
         "contributor_zip":   zip_,
