@@ -4,6 +4,15 @@ parsers/georgia.py — Transform Georgia raw CSVs into the 5 normalized relation
 Input:  data/Georgia/raw/
   contributions_{year}.csv  — TCON transactions from Peachfile API (2025–present)
   expenditures_{year}.csv   — TEXP transactions from Peachfile API (2025–present)
+  independent_expenditures_{year}.csv — a SEPARATE Peachfile data category
+                              (PublicIndependentExpenditureDetails, not part of the
+                              TCON/TEXP export), flattened one row per
+                              (transaction, target). Added 2026-09-20: TEXP's own
+                              "Independent Expenditure" rows turned out to be a
+                              near-subset of this source (562 of 564 for 2026, same
+                              Transaction ID, matching dollar amounts) — see
+                              "independent expenditures" below for how the two are
+                              combined without double-counting.
   candidates.csv            — all filer registrations from GetCandidateDetails
   committees.csv            — non-candidate rows from GetCandidateDetails. Normally ABSENT:
                               that endpoint returns candidate registrations only, so the
@@ -37,6 +46,22 @@ Notes
     The amount is never divided: Georgia doesn't disclose how a buy splits
     across the candidates it names. candidate_name stays the SPENDER
     throughout, per columns.py.
+  • independent_expenditures_{year}.csv (see Input above) is now the primary
+    source for Independent Expenditure spending — richer (each target's own
+    stance already travels with it, so no separate pre-scan file is needed
+    the way load_ie_targets() needs one for TEXP) and a superset of TEXP's
+    own IE rows for the one year checked. It still needs its own one-pass
+    group-by-Transaction-ID step, because the scraper flattens one row per
+    (transaction, target) and a raw row's amount is the FULL transaction
+    amount repeated on every target row — writing it through unflattened
+    would multiply a multi-target buy's amount by its target count, same
+    bug load_ie_targets() documents for TEXP. The expenditures loop below
+    skips any TEXP "Independent Expenditure" Transaction ID this source
+    already covers, and falls back to the old parent/target pairing
+    (load_ie_targets()/ie_stance_code()) only for the rare Transaction ID
+    this source doesn't have — confirmed for 2026 to be 2 small transactions
+    only. If this source is ever confirmed absent/empty (e.g. the endpoint
+    changes), the old TEXP-only path still runs unmodified as the fallback.
   • All 1,266 candidates.csv rows have candidateLastName set, i.e. every row is a
     candidate registration; filerStatusCode distinguishes active (FACT) from
     terminated (TERMN) registrations. ~934 of these rows also carry a
@@ -592,6 +617,129 @@ def run():
                             relation="legacy_transactions")
 
         # ---------------------------------------------------------------- #
+        # two-business-day expedited reports (Peachfile) -- catches PENDING #
+        # transactions the bulk TCON/TEXP export excludes. Parsed FIRST so  #
+        # two_biz_contrib_txids/two_biz_expn_txids are ready before the     #
+        # contributions/expenditures loops below, which skip any            #
+        # Transaction Id already written here -- same "parsed first,        #
+        # skip-set" pattern as ie_api_txids/independent_expenditures_*.csv  #
+        # further down. This source is authoritative for any transaction it #
+        # has, including ones that ALSO later appear (now finalized) in the #
+        # bulk export. See scrapers/georgia.py's download_two_business_day()#
+        # docstring for the full story (2026-09-20): a same-day re-download #
+        # of the bulk export still misses transactions still "pending" on   #
+        # Georgia's side, and the gap doesn't reliably resolve with age.    #
+        # Field shape is identical to recordsearch's own rows below (same   #
+        # underlying API contract, different host/database), so the        #
+        # mapping logic mirrors the recordsearch contributions/expenditures #
+        # loops further down.                                              #
+        # ---------------------------------------------------------------- #
+        two_biz_contrib_txids = set()
+        two_biz_expn_txids    = set()
+
+        two_biz_contrib_path = RAW_DIR / "two_business_day_contributions.csv"
+        if two_biz_contrib_path.exists():
+            ft = time.perf_counter()
+            file_rows = 0
+            with open(two_biz_contrib_path, newline="", encoding="utf-8", errors="replace") as f:
+                reader = csv.DictReader(nul_free(f))
+                for row_num, row in enumerate(reader, start=2):
+                    txid = clean(row.get("transactionId"))
+                    if txid:
+                        two_biz_contrib_txids.add(txid)
+
+                    amount = parse_amount(row.get("transactionAmount"))
+                    date_str = (parse_recordsearch_date(row.get("sortTransactionDate"))
+                                or parse_recordsearch_date(row.get("transactionDate")))
+                    category = clean(row.get("transactionCategory"))
+                    committee_nm = utils.clean_name(
+                                       clean(row.get("campaignCommittee"))
+                                       or clean(row.get("filerName")))
+                    contributor_nm = clean(row.get("sourceName"))
+                    reg = registry.get(clean(row.get("filerEntityId")), {})
+
+                    cont_w.writerow({
+                        "state":             STATE,
+                        "committee_name":    committee_nm,
+                        "amount":            amount,
+                        "date":              date_str,
+                        "transaction_type":  f"Contribution – {category}" if category else "Contribution",
+                        "contributor_name":  contributor_nm,
+                        "contributor_type":  clean(row.get("transactionSource")),
+                        "contributor_city":  clean(row.get("transactionSourceCity")),
+                        "contributor_state": clean(row.get("transactionSourceStateCode")),
+                        "contributor_zip":   clean(row.get("transactionSourceZipcode")),
+                        "employer":          clean(row.get("payeeEmployer")),
+                        "occupation":        clean(row.get("payeeOccupation")),
+                        "candidate_name":    (recordsearch_candidate_name(row)
+                                              or utils.clean_name(reg.get("filerName", ""))),
+                        "office":            clean(reg.get("office")),
+                        "election_year":     clean(row.get("electionYear")),
+                        "amended":           "",
+                        "filing_id":         txid,
+                        "raw_file":          two_biz_contrib_path.name,
+                        "row_num":           row_num,
+                    })
+                    total_contributions += 1
+                    file_rows += 1
+                    _index_row(contrib_index, date_str, amount, contributor_nm, committee_nm)
+
+            log.file_parsed(two_biz_contrib_path.name, "two_business_day_contributions", file_rows,
+                            duration_s=round(time.perf_counter() - ft, 2),
+                            bytes=two_biz_contrib_path.stat().st_size)
+
+        two_biz_expn_path = RAW_DIR / "two_business_day_expenditures.csv"
+        if two_biz_expn_path.exists():
+            ft = time.perf_counter()
+            file_rows = 0
+            with open(two_biz_expn_path, newline="", encoding="utf-8", errors="replace") as f:
+                reader = csv.DictReader(nul_free(f))
+                for row_num, row in enumerate(reader, start=2):
+                    txid = clean(row.get("transactionId"))
+                    if txid:
+                        two_biz_expn_txids.add(txid)
+
+                    amount = parse_amount(row.get("transactionAmount"))
+                    date_str = (parse_recordsearch_date(row.get("sortTransactionDate"))
+                                or parse_recordsearch_date(row.get("transactionDate")))
+                    category = clean(row.get("transactionCategory"))
+                    committee_nm = utils.clean_name(
+                                       clean(row.get("campaignCommittee"))
+                                       or clean(row.get("filerName")))
+                    payee_nm = clean(row.get("sourceName"))
+                    reg = registry.get(clean(row.get("filerEntityId")), {})
+                    purpose = (clean(row.get("transactionPurposeDescription"))
+                              or clean(row.get("description")))
+
+                    expn_w.writerow({
+                        "state":            STATE,
+                        "committee_name":   committee_nm,
+                        "amount":           amount,
+                        "date":             date_str,
+                        "transaction_type": f"Expenditure – {category}" if category else "Expenditure",
+                        "purpose":          purpose,
+                        "payee_name":       payee_nm,
+                        "payee_city":       clean(row.get("transactionSourceCity")),
+                        "payee_state":      clean(row.get("transactionSourceStateCode")),
+                        "payee_zip":        clean(row.get("transactionSourceZipcode")),
+                        "election_year":    clean(row.get("electionYear")),
+                        "amended":          "",
+                        "filing_id":        txid,
+                        "raw_file":         two_biz_expn_path.name,
+                        "row_num":          row_num,
+                        "candidate_name":   (recordsearch_candidate_name(row)
+                                             or utils.clean_name(reg.get("filerName", ""))),
+                        "office":           clean(reg.get("office")),
+                    })
+                    total_expenditures += 1
+                    file_rows += 1
+                    _index_row(expn_index, date_str, amount, payee_nm, committee_nm)
+
+            log.file_parsed(two_biz_expn_path.name, "two_business_day_expenditures", file_rows,
+                            duration_s=round(time.perf_counter() - ft, 2),
+                            bytes=two_biz_expn_path.stat().st_size)
+
+        # ---------------------------------------------------------------- #
         # contributions                                                     #
         # ---------------------------------------------------------------- #
         for path in raw_files("contributions_*.csv"):
@@ -599,8 +747,25 @@ def run():
             file_rows = 0
 
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
-                reader = csv.DictReader(f)
+                # nul_free() closes the gap its own docstring documents: this
+                # loop previously read the file directly and only survived
+                # contributions_2026.csv's stray NUL byte by luck. Confirmed
+                # 2026-09-20 that luck ran out -- a fresh contributions_2026.csv
+                # scrape has a NUL later in the file than before, and a bare
+                # csv.DictReader(f) now raises `_csv.Error: line contains NUL`
+                # and aborts the entire Georgia parse. Matches the expenditures
+                # loop below, which already wraps with nul_free().
+                reader = csv.DictReader(nul_free(f))
                 for row_num, row in enumerate(reader, start=2):
+                    txid = clean(row.get("Transaction Id"))
+                    if txid and txid in two_biz_contrib_txids:
+                        # Already written from two_business_day_contributions.csv
+                        # above (the pending-transaction source, authoritative
+                        # for any Transaction Id it has) -- skip here to avoid
+                        # double-counting now that this transaction has also
+                        # shown up (finalized) in this bulk export.
+                        continue
+
                     tx_type = clean(row.get("Transaction Type"))
                     sub_type = clean(row.get("Transaction Sub Type"))
                     entity_id = clean(row.get("Filing Entity ID"))
@@ -612,14 +777,15 @@ def run():
 
                     base = {
                         "state":          STATE,
-                        "committee_name": (clean(row.get("Campaign Committee Name"))
-                                           or clean(row.get("Filing Entity Name"))),
+                        "committee_name": utils.clean_name(
+                                              clean(row.get("Campaign Committee Name"))
+                                              or clean(row.get("Filing Entity Name"))),
                         "amount":         amount,
                         "date":           parse_date(row.get("Transaction Date")),
                         "transaction_type": f"{tx_type}" + (f" – {sub_type}" if sub_type else ""),
                         "election_year":  clean(row.get("Election Year")),
                         "amended":        amended_flag(row.get("Amended")),
-                        "filing_id":      clean(row.get("Transaction Id")),
+                        "filing_id":      txid,
                         "raw_file":       path.name,
                         "row_num":        row_num,
                         # from registry
@@ -670,10 +836,52 @@ def run():
                      + raw_files("legacy_contributions_in-kind_*.csv")):
             ft = time.perf_counter()
             file_rows = 0
+            file_malformed = 0
 
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
                 reader = csv.DictReader(f)
                 for row_num, row in enumerate(reader, start=2):
+                    row, overflow = strip_keys(row)
+                    underflow = overflow is None and None in row.values()
+                    if overflow is not None or underflow:
+                        # Same failure mode strip_keys() was built for in the
+                        # Peachfile expenditures loop below (a stray quote in
+                        # a free-text field shifts every later column one
+                        # place right) -- but here the break lands early
+                        # (inside LastName, field 3 of 22), not late, so
+                        # there's no reliable prefix worth keeping: FirstName
+                        # through Committee_Name are ALL misaligned by the
+                        # time this fires. Confirmed live 2026-09-19: exactly
+                        # this shift put the string "Primary" (from the
+                        # Election column) into contributions.election_year
+                        # on a David Shafer row, which Supabase's `election_year
+                        # INT` column then rejected outright.
+                        #
+                        # Two source patterns produce this, both misquoting:
+                        # an extra unescaped `"` shifts everything one column
+                        # right (row.get(None) catches this -- strip_keys()'s
+                        # `overflow`); a smart/curly quote (“...”, which
+                        # csv.reader doesn't recognize as quoting at all)
+                        # followed by a real closing `"` swallows a comma and
+                        # shifts everything one column LEFT instead, which
+                        # never trips `overflow` -- it just runs the row a
+                        # field short, so DictReader backfills the last
+                        # column with None (real fields are never None,
+                        # only "" when genuinely blank -- that's how this is
+                        # told apart from an ordinary empty Committee_Name).
+                        # Both are skipped rather than salvaged, unlike the
+                        # Peachfile case.
+                        file_malformed += 1
+                        if file_malformed <= 3:
+                            detail = (f"{len(overflow)} field(s) past the header"
+                                      if overflow is not None
+                                      else "one field short (a smart-quote likely swallowed a comma)")
+                            log.warning(
+                                f"  {path.name} row {row_num}: {detail} — "
+                                f"misquoted source row, row dropped rather "
+                                f"than written with shifted columns"
+                            )
+                        continue
                     sub_type = clean(row.get("Type"))  # "Monetary" or "In-Kind"
                     filer_id = clean(row.get("FilerID"))
                     reg = legacy_registry.get(filer_id, {})
@@ -685,10 +893,11 @@ def run():
 
                     contributor_nm, contributor_type = legacy_contributor_info(row)
                     candidate_nm = legacy_candidate_name(row) or reg.get("candidate_name", "")
-                    committee_nm = (clean(row.get("Committee_Name"))
-                                   or reg.get("committee_name", "")
-                                   or legacy_committee_names.get(filer_id, "")
-                                   or candidate_nm)
+                    committee_nm = utils.clean_name(
+                                  clean(row.get("Committee_Name"))
+                                  or reg.get("committee_name", "")
+                                  or legacy_committee_names.get(filer_id, "")
+                                  or candidate_nm)
                     date_str = parse_date(row.get("Date"))
 
                     cont_w.writerow({
@@ -716,7 +925,12 @@ def run():
                     file_rows += 1
                     _index_row(contrib_index, date_str, amount, contributor_nm, committee_nm)
 
+            if file_malformed > 3:
+                log.warning(f"  {path.name}: {file_malformed:,} malformed rows "
+                            f"total (first 3 shown), all dropped")
+
             log.file_parsed(path.name, "legacy_contributions", file_rows,
+                            malformed=file_malformed,
                             duration_s=round(time.perf_counter() - ft, 2),
                             bytes=path.stat().st_size)
 
@@ -726,10 +940,28 @@ def run():
         for path in raw_files("legacy_contributions_loan_*.csv"):
             ft = time.perf_counter()
             file_rows = 0
+            file_malformed = 0
 
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
                 reader = csv.DictReader(f)
                 for row_num, row in enumerate(reader, start=2):
+                    row, overflow = strip_keys(row)
+                    underflow = overflow is None and None in row.values()
+                    if overflow is not None or underflow:
+                        # Same early-break misquote issue (both the overflow
+                        # and underflow forms) as the legacy contributions
+                        # loop above -- see the comment there.
+                        file_malformed += 1
+                        if file_malformed <= 3:
+                            detail = (f"{len(overflow)} field(s) past the header"
+                                      if overflow is not None
+                                      else "one field short (a smart-quote likely swallowed a comma)")
+                            log.warning(
+                                f"  {path.name} row {row_num}: {detail} — "
+                                f"misquoted source row, row dropped rather "
+                                f"than written with shifted columns"
+                            )
+                        continue
                     record_type = clean(row.get("Type"))  # "Loan" or "Credit Received on Loan"
                     filer_id = clean(row.get("FilerID"))
                     reg = legacy_registry.get(filer_id, {})
@@ -742,10 +974,11 @@ def run():
 
                     loan_w.writerow({
                         "state":              STATE,
-                        "committee_name":     (clean(row.get("Committee_Name"))
-                                               or reg.get("committee_name", "")
-                                               or legacy_committee_names.get(filer_id, "")
-                                               or candidate_nm),
+                        "committee_name":     utils.clean_name(
+                                                  clean(row.get("Committee_Name"))
+                                                  or reg.get("committee_name", "")
+                                                  or legacy_committee_names.get(filer_id, "")
+                                                  or candidate_nm),
                         "original_amount":    amount,
                         "date":               parse_date(row.get("Date")),
                         "record_type":        record_type,
@@ -763,7 +996,134 @@ def run():
                     total_loans += 1
                     file_rows += 1
 
+            if file_malformed > 3:
+                log.warning(f"  {path.name}: {file_malformed:,} malformed rows "
+                            f"total (first 3 shown), all dropped")
+
             log.file_parsed(path.name, "legacy_loans", file_rows,
+                            malformed=file_malformed,
+                            duration_s=round(time.perf_counter() - ft, 2),
+                            bytes=path.stat().st_size)
+
+        # ---------------------------------------------------------------- #
+        # independent expenditures — Peachfile IE-API                       #
+        # (PublicIndependentExpenditureDetails, NOT the TCON/TEXP export —   #
+        # see scrapers/georgia.py's "independent expenditures (Peachfile)"  #
+        # section). Parsed FIRST so ie_api_txids is ready before the TEXP   #
+        # expenditures loop below needs to skip rows this source covers.    #
+        # ---------------------------------------------------------------- #
+        ie_api_txids = set()
+
+        for path in raw_files("independent_expenditures_*.csv"):
+            ft = time.perf_counter()
+            file_rows = 0
+
+            # The scraper flattens one row per (transaction, target) — see
+            # _flatten_ie_item() — and amountApplied is the FULL transaction
+            # amount, repeated on every target row of a multi-target buy.
+            # Writing one output row per input row would multiply a
+            # multi-target buy's amount by its target count — exactly the bug
+            # load_ie_targets() above already documents and fixes for the
+            # TEXP source ("one $2,981,816 buy naming 21 candidates became
+            # $62,618,136"). Group back down to one row per Transaction ID
+            # first — simpler than load_ie_targets()'s two-pass parent/target
+            # scan, since target name + stance already live on the same row
+            # here, just repeated once per group instead of split across rows.
+            groups = defaultdict(list)
+            with open(path, newline="", encoding="utf-8", errors="replace") as f:
+                reader = csv.DictReader(nul_free(f))
+                reader.fieldnames = [(k or "").strip() for k in (reader.fieldnames or [])]
+                for row in reader:
+                    row, _ = strip_keys(row)
+                    txid = clean(row.get("transactionId"))
+                    if txid:
+                        groups[txid].append(row)
+
+            row_num = 1
+            for txid, group_rows in groups.items():
+                ie_api_txids.add(txid)
+                first = group_rows[0]
+
+                committee_nm = utils.clean_name(
+                    clean(first.get("committeeName")) or clean(first.get("filerName")))
+
+                # Same "Last, First Middle" convention as payee_name() —
+                # column names differ (this source's are the API's own
+                # camelCase) so it isn't reused directly. An org payee
+                # (e.g. "M2 Placement LLC") has payeeLastName set and no
+                # payeeFirstName, same as the TEXP CSV's own convention.
+                payee_last  = clean(first.get("payeeLastName"))
+                payee_first = clean(first.get("payeeFirstName"))
+                payee_mid   = clean(first.get("payeeMiddleName"))
+                if payee_first:
+                    payee_nm = f"{payee_last}, {payee_first}"
+                    if payee_mid:
+                        payee_nm += f" {payee_mid}"
+                else:
+                    payee_nm = payee_last
+                payee_nm = utils.clean_name(payee_nm) or utils.clean_name(clean(first.get("sourceName")))
+
+                expn_date_str = parse_date((first.get("transactionDate") or "")[:10])
+                amount = parse_amount(first.get("amountApplied"))
+
+                # 2026-09-20: one output row PER TARGET, not one joined row
+                # per transaction. The old approach joined every target's
+                # name with "; " and collapsed the stance via
+                # ie_stance_code() — blank whenever a multi-target buy's
+                # stances didn't all agree. A buy that supports one
+                # candidate AND opposes another in the same transaction
+                # (confirmed live: a $271,909.96 GA gov buy supporting Carr
+                # + opposing Jones) always disagrees, so support_oppose came
+                # out blank and match_table() (transform/matching.py) then
+                # saw 2+ distinct real candidates on the row and dropped it
+                # as ambiguous — neither candidate's page ever saw this
+                # money. Each row below now carries exactly ONE target's own
+                # real name + real stance, so match_table() resolves it like
+                # any ordinary single-target IE row. Every split row of the
+                # same transaction shares filing_id=txid (carried into the
+                # new expenditures.source_txn_group_id column — see
+                # entities.py's transform_expenditure()) and repeats the
+                # FULL transaction amount, same "never divide a buy across
+                # its targets" convention as load_ie_targets()'s docstring
+                # (Georgia doesn't disclose how a buy splits across the
+                # candidates it names) — rpc_race_profile.sql's race-wide
+                # totalSpent dedupes on that shared id so a race whose
+                # candidates are on both sides of one buy doesn't count it
+                # twice.
+                for target_row in group_rows:
+                    row_num += 1
+                    target_nm = utils.clean_name(clean(target_row.get("target_candidate_measure_title")))
+                    stance = clean(target_row.get("target_stance"))
+                    support_oppose = ie_stance_code([stance]) if stance else ""
+
+                    expn_w.writerow({
+                        "state":            STATE,
+                        "committee_name":   committee_nm,
+                        "amount":           amount,
+                        "date":             expn_date_str,
+                        "transaction_type": clean(first.get("transactionType")) or "Independent Expenditure",
+                        "purpose":          clean(first.get("purpose")),
+                        "payee_name":       payee_nm,
+                        "payee_city":       clean(first.get("payeeMailingCity")),
+                        "payee_state":      clean(first.get("payeeMailingState")),
+                        "payee_zip":        clean_zip(first.get("payeeMailingZipCode", "")),
+                        "election_year":    clean(first.get("electionYear")),
+                        "amended":          "",
+                        "filing_id":        txid,
+                        "raw_file":         path.name,
+                        "row_num":          row_num,
+                        # Always the SPENDER, never the target — same rule as
+                        # the TEXP branch below (see columns.py).
+                        "candidate_name":   committee_nm,
+                        "office":           "",
+                        "affiliated_candidate_name": target_nm,
+                        "support_oppose":            support_oppose,
+                    })
+                    total_expenditures += 1
+                    file_rows += 1
+                    _index_row(expn_index, expn_date_str, amount, payee_nm, committee_nm)
+
+            log.file_parsed(path.name, "independent_expenditures", file_rows,
                             duration_s=round(time.perf_counter() - ft, 2),
                             bytes=path.stat().st_size)
 
@@ -808,9 +1168,32 @@ def run():
                         continue
 
                     txid = clean(row.get("Transaction ID"))
+                    if txid and txid in two_biz_expn_txids:
+                        # Already written from two_business_day_expenditures.csv
+                        # above (the pending-transaction source, authoritative
+                        # for any Transaction Id it has) -- skip here to avoid
+                        # double-counting now that this transaction has also
+                        # shown up (finalized) in this bulk export.
+                        file_skipped += 1
+                        continue
+
                     ie_affiliated = ""
                     ie_support_oppose = ""
                     if tx_type == "Independent Expenditure":
+                        if txid in ie_api_txids:
+                            # Already written from independent_expenditures_*.csv
+                            # above (the richer, superset IE-API source) — skip
+                            # entirely here, parent or target row alike, to
+                            # avoid double-counting. Confirmed 2026-09-20 (2026
+                            # data): 562 of TEXP's 564 IE transactions are the
+                            # exact same transactions (same Transaction ID,
+                            # matching dollar amounts to the cent) as the IE-API
+                            # source, which is also a strict superset (620 vs
+                            # 564) — so the IE-API source wins whenever it has
+                            # the transaction.
+                            file_skipped += 1
+                            continue
+
                         if clean(row.get(IE_TARGET_COL)):
                             # "Target" row: carries a candidate/measure but no
                             # money of its own. The parent row below holds the
@@ -819,7 +1202,9 @@ def run():
                             file_skipped += 1
                             continue
 
-                        # "Parent" row — the one with the money. Fold in every
+                        # "Parent" row — the one with the money. Fallback path
+                        # for the rare Transaction ID the IE-API source above
+                        # doesn't have (2 of 564 for 2026) — fold in every
                         # target this transaction named. Multi-target IEs get a
                         # "; "-joined list (longest observed: 594 chars); the
                         # amount stays whole and is never divided, because
@@ -845,8 +1230,9 @@ def run():
                         or clean(row.get("Filing Entity Name"))
                     )
 
-                    expn_committee_nm = (clean(row.get("Campaign Committee Name"))
-                                        or clean(row.get("Filing Entity Name")))
+                    expn_committee_nm = utils.clean_name(
+                                            clean(row.get("Campaign Committee Name"))
+                                            or clean(row.get("Filing Entity Name")))
                     expn_date_str = parse_date(row.get("Transaction Date"))
                     expn_payee_nm = payee_name(row)
 
@@ -905,10 +1291,11 @@ def run():
 
                     amount = parse_amount(row.get("Paid")) or parse_amount(row.get("Other"))
                     candidate_nm = legacy_candidate_name(row) or reg.get("candidate_name", "")
-                    legacy_expn_committee_nm = (clean(row.get("Committee_Name"))
-                                                or reg.get("committee_name", "")
-                                                or legacy_committee_names.get(filer_id, "")
-                                                or candidate_nm)
+                    legacy_expn_committee_nm = utils.clean_name(
+                                                    clean(row.get("Committee_Name"))
+                                                    or reg.get("committee_name", "")
+                                                    or legacy_committee_names.get(filer_id, "")
+                                                    or candidate_nm)
                     legacy_expn_date_str = parse_date(row.get("Date"))
                     legacy_expn_payee_nm = legacy_payee_name(row)
 
@@ -958,8 +1345,9 @@ def run():
                     date_str = (parse_recordsearch_date(row.get("sortTransactionDate"))
                                 or parse_recordsearch_date(row.get("transactionDate")))
                     category = clean(row.get("transactionCategory"))
-                    committee_nm   = (clean(row.get("campaignCommittee"))
-                                      or clean(row.get("filerName")))
+                    committee_nm   = utils.clean_name(
+                                          clean(row.get("campaignCommittee"))
+                                          or clean(row.get("filerName")))
                     contributor_nm = clean(row.get("sourceName"))
 
                     if _is_duplicate(contrib_index, date_str, amount,
@@ -1013,8 +1401,9 @@ def run():
                     date_str = (parse_recordsearch_date(row.get("sortTransactionDate"))
                                 or parse_recordsearch_date(row.get("transactionDate")))
                     category = clean(row.get("transactionCategory"))
-                    committee_nm = (clean(row.get("campaignCommittee"))
-                                   or clean(row.get("filerName")))
+                    committee_nm = utils.clean_name(
+                                       clean(row.get("campaignCommittee"))
+                                       or clean(row.get("filerName")))
                     payee_nm = clean(row.get("sourceName"))
 
                     if _is_duplicate(expn_index, date_str, amount,
