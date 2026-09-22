@@ -117,6 +117,94 @@ def clean(val) -> str:
     return (val or "").strip()
 
 
+# Qualifiers the legacy site appends to its office label, e.g.
+#   "State Representative District: 107"
+#   "Councilman District: 1 Post: 2 City:Butler"
+#   "Judge Superior Court Circuit: Eastern"
+#   "Mayor City:Fargo"                      (note: no space after the colon)
+# Split into two groups because they land in different schema columns.
+LEGACY_SUBDISTRICT_QUALIFIERS = ("District", "Ward", "Post", "Division")
+LEGACY_JURISDICTION_QUALIFIERS = ("County", "City", "Circuit")
+
+_LEGACY_OFFICE_RE = re.compile(
+    r"\b(" + "|".join(LEGACY_SUBDISTRICT_QUALIFIERS + LEGACY_JURISDICTION_QUALIFIERS)
+    + r")\s*:\s*"
+)
+
+
+def split_legacy_office(raw: str) -> tuple[str, str, str]:
+    """Split a legacy office string into (office, district, jurisdiction).
+
+    The legacy portal stores one combined string where Peachfile has three
+    separate fields, so `office` arrived looking like
+    "State Representative District: 107" while `district` and `jurisdiction`
+    sat empty. Two consequences, both of which this fixes:
+
+      * `assign_person_ids()` groups by (state, candidate_name, office,
+        district). A candidate's pre-2025 legacy registrations therefore never
+        unified with their 2025+ Peachfile ones — same person, different
+        person_id. This was the "legacy/Peachfile person_id split" recorded as
+        a known limitation in docs/states/georgia.md.
+      * office_types.csv maps the bare label ("GA,State Representative"), so
+        every district-suffixed value missed the alias table and had to be
+        rescued by LIKE patterns in aggregate.py.
+
+    Peachfile's convention is the target: office="State Representative",
+    districtName="167", jurisdiction="" — the district TYPE is not kept, just
+    its value. This mirrors that, so the two sources now agree.
+
+    Multiple sub-district qualifiers are preserved rather than collapsed:
+    "District: 1 Post: 1" becomes district="1 Post 1", because District 1
+    Post 1 and District 1 Post 2 are genuinely different seats and flattening
+    both to "1" would merge two people under one person_id.
+
+    >>> split_legacy_office("State Representative District: 107")
+    ('State Representative', '107', '')
+    >>> split_legacy_office("Councilman District: 1 Post: 2 City:Butler")
+    ('Councilman', '1 Post 2', 'Butler')
+    >>> split_legacy_office("Judge Superior Court Circuit: Eastern")
+    ('Judge Superior Court', '', 'Eastern')
+    >>> split_legacy_office("County Commission Chair County: Clayton")
+    ('County Commission Chair', '', 'Clayton')
+    >>> split_legacy_office("UNSP")
+    ('UNSP', '', '')
+    """
+    raw = clean(raw)
+    if not raw:
+        return "", "", ""
+
+    matches = list(_LEGACY_OFFICE_RE.finditer(raw))
+    if not matches:
+        return raw, "", ""
+
+    office = raw[:matches[0].start()].strip()
+    found: dict[str, str] = {}
+    for i, m in enumerate(matches):
+        end   = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        value = raw[m.end():end].strip().strip(",")
+        if value and m.group(1) not in found:
+            found[m.group(1)] = value
+
+    # "Consolidated Government (City/ County: MACON-BIBB ..." — the label itself
+    # contains "City/" and the site's own "County:" is part of that label, not a
+    # qualifier. 16 rows; repair the label rather than leave it dangling.
+    if office.endswith("(City/"):
+        office = office + "County)"
+
+    sub = [(q, found[q]) for q in LEGACY_SUBDISTRICT_QUALIFIERS if q in found]
+    if not sub:
+        district = ""
+    else:
+        district = sub[0][1]
+        for qual, val in sub[1:]:
+            district = f"{district} {qual} {val}"
+
+    jurisdiction = next(
+        (found[q] for q in LEGACY_JURISDICTION_QUALIFIERS if q in found), ""
+    )
+    return office.strip(), district.strip(), jurisdiction.strip()
+
+
 def amended_flag(val) -> str:
     """Normalize Peachfile's Y/N amendment flag to the schema's 0/1.
 
@@ -497,7 +585,9 @@ def build_legacy_registry() -> dict[str, dict]:
     Used to enrich legacy transaction rows when their own Candidate_*/
     Committee_Name columns are blank (common for non-candidate-committee
     filers, whose transactions carry no Candidate_* info):
-      - candidates ("C..."):  candidate_name, office (raw combined string)
+      - candidates ("C..."):  candidate_name, office/district/jurisdiction
+                              (the site's combined string, split apart by
+                              split_legacy_office)
       - committees ("NC..."): committee_name, committee_type
     First occurrence of a given filer_id wins.
     """
@@ -509,9 +599,17 @@ def build_legacy_registry() -> dict[str, dict]:
                 fid = clean(row.get("filer_id"))
                 if not fid or fid in registry:
                     continue
+                l_office, l_district, l_jurisdiction = split_legacy_office(
+                    row.get("office"))
                 registry[fid] = {
                     "candidate_name": utils.clean_name(row.get("candidate_name", "")),
-                    "office":         clean(row.get("office")),
+                    # Split, not raw: legacy transaction rows take `office` from
+                    # here, so leaving the combined string would keep
+                    # "State Representative District: 107" in contributions and
+                    # expenditures even after candidates.csv.gz was fixed.
+                    "office":         l_office,
+                    "district":       l_district,
+                    "jurisdiction":   l_jurisdiction,
                     "committee_name": "",
                     "committee_type": "",
                 }
@@ -1636,14 +1734,20 @@ def run():
                     m = LEGACY_FILER_ID_YEAR_RE.match(filer_id)
                     election_year = m.group(1) if m else ""
 
+                    # The legacy portal combines office + district + jurisdiction
+                    # into one string; Peachfile keeps them apart. Split so the
+                    # two sources agree and person_ids can unify across them.
+                    office, district, jurisdiction = split_legacy_office(
+                        row.get("office"))
+
                     cand_w.writerow({
                         "state":           STATE,
                         "candidate_name":  utils.clean_name(raw_name),
                         "candidate_first": first,
                         "candidate_last":  last.strip(),
-                        "office":          clean(row.get("office")),
-                        "district":        "",
-                        "jurisdiction":    "",
+                        "office":          office,
+                        "district":        district,
+                        "jurisdiction":    jurisdiction,
                         "party":           "",
                         "election_year":   election_year,
                         "incumbent":       "",
