@@ -90,9 +90,16 @@ Column mapping — contributions (CAC_CON_*, verified; PAC/PARTY assumed identic
     FIRST/MIDDLE/LAST/SUFFIX_NAME          -> contributor_name (individual)
     NON_INDIVIDUAL                         -> contributor_name (organization,
                                               used when no individual name)
-    PAC_REG_NO                             -> not mapped directly (no
-                                              canonical column for the
-                                              contributing PAC's own reg no)
+    PAC_REG_NO                             -> contributor_type "PAC" /
+                                              "Federal PAC" / "PCE" when the
+                                              row carries a real number
+                                              (candidates/parties files only;
+                                              in pacs files it is the filer's
+                                              own number). The number itself
+                                              has no canonical column.
+    OTHER_INCOME_TYPE                      -> appended to transaction_type on
+                                              31-A-2 rows, e.g. "31-A-2  Other
+                                              Income (Interest)"
     CITY/STATE/ZIP                         -> contributor_city/state/zip
     FILE_DATE                              -> date
     AMOUNT                                  -> amount
@@ -207,6 +214,11 @@ _CONTRIB_ALIASES = {
     "office":           ["OFFICE"],
     "rpt_year":         ["RPT_YEAR"],
     "report_key":       ["REPORT_KEY"],
+    # Contributor-side extras, folded into existing columns (see _contributor_type_from_reg_no
+    # and _with_other_income_type). PAC_REG_NO is only the CONTRIBUTOR's number in the
+    # candidates/parties files; in the pacs files it is the filing PAC's own number.
+    "pac_reg_no":       ["PAC_REG_NO"],
+    "other_income_type": ["OTHER_INCOME_TYPE"],
 }
 
 _EXPEND_ALIASES = {
@@ -273,6 +285,51 @@ def _clean(val) -> str:
 def _join_name(*parts) -> str:
     joined = " ".join(_clean(p) for p in parts if _clean(p))
     return joined
+
+
+# 2026-09-29: contributor PAC registration number -> contributor_type.
+# PAC_REG_NO on a candidate/party contribution row is the contributing PAC's
+# own Ohio registration number (OH###, CP###, LA###, bare digits), its FEC ID
+# (C########), or "PCE" (political contributing entity). There is no
+# canonical column for the number itself, so it is folded into
+# contributor_type the way other states' own codes already are (AZ
+# "Contributions from PACs", TX OUT_OF_STATE_PAC). Values without a digit
+# other than PCE ("LOCAL", "N/A") are filer typos and are ignored.
+_FEC_COMMITTEE_ID = re.compile(r"^C\d{8,9}$")
+
+
+def _contributor_type_from_reg_no(raw: str) -> str:
+    n = re.sub(r"[^A-Z0-9]", "", (raw or "").upper())
+    if not n:
+        return ""
+    if n == "PCE":
+        return "PCE"
+    if _FEC_COMMITTEE_ID.match(n):
+        return "Federal PAC"
+    if any(ch.isdigit() for ch in n):
+        return "PAC"
+    return ""
+
+
+# 2026-09-29: OTHER_INCOME_TYPE on 31-A-2 "Other Income" rows says what the
+# income was. Folded into transaction_type (e.g. "31-A-2  Other Income
+# (Interest)") so interest and refunds can be told apart downstream without a
+# new column. Codes seen in 2025-2026 data: IN, RE, SA, VO, OT.
+_OTHER_INCOME_LABELS = {
+    "IN": "Interest",
+    "RE": "Refund",
+    "SA": "Sale of Assets",
+    "VO": "Voided Check",
+    "OT": "Other",
+}
+
+
+def _with_other_income_type(short_description: str, other_income_type: str) -> str:
+    sd = _clean(short_description)
+    if not sd.startswith("31-A-2"):
+        return sd
+    label = _OTHER_INCOME_LABELS.get(_clean(other_income_type).upper())
+    return f"{sd} ({label})" if label else sd
 
 
 def parse_amount(val: str) -> str:
@@ -675,6 +732,13 @@ def _run(log, t0: float):
                             contributor_name, contributor_type = org, "Non-Individual"
                         else:
                             contributor_name, contributor_type = "", ""
+                        # A registration number on the row identifies a registered PAC /
+                        # PCE even when the filer typed its name into the individual name
+                        # fields. Not for the pacs group, where PAC_REG_NO is the filer's own.
+                        if slug != "pacs":
+                            reg_type = _contributor_type_from_reg_no(_get(row, resolved, "pac_reg_no"))
+                            if reg_type and contributor_name:
+                                contributor_type = reg_type
 
                         filer_id = _clean(_get(row, resolved, "state_filer_id"))
                         if filer_id and filer_id not in seen_filer_ids:
@@ -700,7 +764,9 @@ def _run(log, t0: float):
                             "committee_name": committee_name,
                             "amount": amount,
                             "date": dt,
-                            "transaction_type": _clean(_get(row, resolved, "short_description")),
+                            "transaction_type": _with_other_income_type(
+                                _get(row, resolved, "short_description"),
+                                _get(row, resolved, "other_income_type")),
                             "contributor_name": contributor_name,
                             "contributor_type": contributor_type,
                             "contributor_city": _clean(_get(row, resolved, "city")),
