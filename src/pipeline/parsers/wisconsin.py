@@ -485,6 +485,46 @@ def ie_purpose(row: dict) -> str:
     return " ".join(p for p in parts if p)
 
 
+def ie_affiliation(row: dict) -> tuple[str, str]:
+    """
+    Independent-expenditure targeting for the dedicated
+    affiliated_candidate_name/support_oppose columns (columns.py) --
+    as opposed to ie_purpose() above, which folds the same two source
+    fields into the free-text purpose annotation for human readability.
+    Those columns are what transform/matching.py's match_table() and
+    contrib_matches() actually key IE-aware candidate attribution off of
+    (see that file's is_ie_row / tracked_ie_committees checks) -- until
+    this function, WI's parser only ever wrote the annotation, so this
+    committee's/candidate's name never reached those columns and every
+    dollar of WI's outside spending was invisible to candidate
+    attribution (confirmed 2026-09-26: $348.4M in category='Independent
+    Expenditure' rows, none of it attributed).
+
+    `Related Entity` is WHO the spending targets; `Support Stance` is
+    WHICH WAY. Related Entity is filled on 99.3% of IE rows but Support
+    Stance on only 5.5% of them (confirmed against a live download of
+    campaignfinance.wi.gov's own Independent Expenditure category,
+    2026-09-25) -- a targeted-but-undeclared-direction row is common,
+    not an edge case, so it gets the explicit 'U' (Unknown) value rather
+    than being left blank (indistinguishable from "not an IE row at
+    all" -- see columns.py's own support_oppose comment) or defaulted to
+    'S' (safe for TX's DCE data, which has no opposing-expenditure form
+    code at all, but not for WI: its own labeled sample has AGAINST
+    dollars, $26.8M, slightly EXCEEDING FOR dollars, $21.6M, so
+    defaulting would misattribute a large share of real attack-ad
+    spending as support).
+    """
+    related = clean(row.get("Related Entity", ""))
+    if not related:
+        return "", ""
+    stance = clean(row.get("Support Stance", "")).upper()
+    if stance == "FOR":
+        return related, "S"
+    if stance == "AGAINST":
+        return related, "O"
+    return related, "U"
+
+
 def warn_overlapping_chunks(log, files: list[Path]):
     """
     Warn if two transaction chunks cover the same dates.
@@ -717,6 +757,7 @@ def run():
                         n_cont += 1
 
                     elif dest == "expenditures":
+                        affiliated_candidate_name, support_oppose = ie_affiliation(row)
                         expn_w.writerow({
                             "state":            STATE,
                             "committee_name":   cmte_name,
@@ -726,6 +767,8 @@ def run():
                                                 or clean(row.get("Transaction Type", "")),
                             "payee_name":       clean(row.get("Payee Name", "")),
                             "purpose":          ie_purpose(row),
+                            "affiliated_candidate_name": affiliated_candidate_name,
+                            "support_oppose":   support_oppose,
                             "category":         clean(row.get("Transaction Category", "")),
                             "payee_city":       clean(row.get("Payee City", "")),
                             "payee_state":      state_abbr(row.get("Payee State", "")),
