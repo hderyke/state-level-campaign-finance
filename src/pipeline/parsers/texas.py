@@ -10,7 +10,7 @@ Raw files (data/Texas/raw/, written by scrapers/texas.py):
   contribs_##.csv   -> contributions             (102 shards, ~34M rows)
   credits.csv       -> contributions             (Schedule K interest/credits/gains)
   expend_##.csv     -> expenditures              (13 shards)
-  cand.csv          -> expenditure enrichment    (direct-campaign-expenditure beneficiaries)
+  cand.csv          -> expenditure enrichment    (independent-expenditure targeting -- see the 2026-09-25 comment above dce_candidate)
   loans.csv         -> loans_debts               (Schedule E)
   debts.csv         -> loans_debts               (Schedule L outstanding loans)
   expn_catg.csv     -> expenditure category code -> label lookup
@@ -1210,11 +1210,56 @@ def run():
                                 relation="expenditures")
 
         # =================== 4. Direct-expenditure beneficiaries ===================
-        # cand.csv holds the candidate a direct campaign expenditure was made
-        # to benefit — a child record of an EXPN row, joined on expendInfoId.
-        # Without it, a PAC's independent spending "for" a candidate has no
-        # candidate attached to it anywhere in the output.
-        dce_candidate: dict[str, tuple[str, str]] = {}   # expendInfoId -> (name, office)
+        # cand.csv holds the candidate(s) a direct campaign expenditure was
+        # made to benefit -- a child record of an EXPN row, joined on
+        # expendInfoId. A TEC "Direct Campaign Expenditure" (formTypeCd
+        # 'DCE', 12,899 rows / $27.6M across TX's full history) is TEC's own
+        # name for what other states call an independent expenditure -- its
+        # own CFS-Codes.txt form-code description: "a campaign expenditure
+        # made on someone else's behalf and without the prior consent or
+        # approval of that person." No separate DCE contribution volume
+        # worth tracking (only 25 rows / $20,738 total in contribs_*.csv
+        # under formTypeCd 'DCE' across all TX history) -- unlike AK/GA,
+        # TX's independent spenders overwhelmingly self-fund rather than
+        # raising money through a PAC first, so this is an expenditure-side
+        # fix only, no companion IE-contributions pipeline needed.
+        #
+        # 2026-09-25 fix: this used to fold the beneficiary straight into
+        # candidate_name/office ("cand_name = cand_name or dce[0]" below),
+        # exactly the thing columns.py's own affiliated_candidate_name/
+        # support_oppose docstring warns against ("an IE committee spending
+        # against a candidate never IS that candidate") -- candidate_name
+        # is supposed to mean "the FILING committee's own candidate",
+        # never "who this outside money was for". Confirmed live: real
+        # DCE filers include national advocacy groups with no committee
+        # relationship to the candidate at all (Alzheimer's Association
+        # $530K x3, VoteVets $325K, National Wildlife Federation Action
+        # Fund $320K) -- none of these are "the candidate's own committee"
+        # by any definition, so folding them into candidate_name/office
+        # either double-counted them as the candidate's own spending, or
+        # (after candidate_committee_attribution's committee-whitelist
+        # fix, see tx_committee_person_id_attribution_fix_2026_09_25.md)
+        # got silently filtered out of the candidate's totals entirely --
+        # invisible either way, and TX's dedicated IE Activity views
+        # (candidate_ie_activity etc.) sat at 0 rows the whole time. Now
+        # tags these rows via affiliated_candidate_name/support_oppose
+        # instead -- same convention georgia.py/ohio.py/alaska.py already
+        # use -- so match_table() routes them through its real
+        # IE-matching path (affiliated_candidate_name first, never
+        # candidate_name) instead of silently conflating them with the
+        # candidate's own committee. Always support_oppose='S' -- TEC's
+        # DCE definition above is inherently supportive ("to benefit"
+        # someone); there's no opposing-DCE form code in CFS-Codes.txt,
+        # unlike GA's explicit stance field.
+        #
+        # One DCE expenditure can also legitimately benefit MORE THAN ONE
+        # candidate (a shared mailer, a slate ad) -- dce_candidate is now
+        # list-valued per expendInfoId (was "first wins, collision only
+        # counted") so every beneficiary survives, "; "-joined at write
+        # time into affiliated_candidate_name -- the exact multi-target
+        # format match_table()'s IE branch already splits on (see
+        # georgia.py's load_ie_targets()).
+        dce_candidate: dict[str, list[tuple[str, str]]] = {}   # expendInfoId -> [(name, office), ...]
         dce_multi = dce_superseded = 0
         cand_path = RAW_DIR / "cand.csv"
         if cand_path.exists() and cand_path.stat().st_size > 0:
@@ -1236,24 +1281,19 @@ def run():
                         continue
                     office = (clean(row.get("candidateSeekOfficeCd"))
                               or clean(row.get("candidateHoldOfficeCd")))
-                    prev = dce_candidate.get(eid)
-                    if prev is not None:
-                        # One direct expenditure can legitimately benefit
-                        # several candidates (a shared mailer, a slate ad), but
-                        # expenditures.candidate_name holds one name. First
-                        # wins, and the collisions are counted so the scale of
-                        # what's being flattened is visible in the log rather
-                        # than invisible.
-                        if prev[0] != nm:
-                            dce_multi += 1
-                        continue
-                    dce_candidate[eid] = (nm, office)
+                    bucket = dce_candidate.setdefault(eid, [])
+                    if any(b[0] == nm for b in bucket):
+                        continue  # same beneficiary re-listed -- not a second one
+                    if bucket:
+                        dce_multi += 1
+                    bucket.append((nm, office))
             log.registry_loaded("cand.csv", entries=len(dce_candidate),
                                 relation="expenditures",
                                 bytes=cand_path.stat().st_size)
             log.info(f"  direct-expenditure beneficiaries: {len(dce_candidate):,} "
                      f"({dce_multi:,} expenditures benefit more than one candidate "
-                     f"— first kept; {dce_superseded:,} superseded rows ignored) "
+                     f"— all kept, joined into affiliated_candidate_name; "
+                     f"{dce_superseded:,} superseded rows ignored) "
                      f"({time.perf_counter() - ft:.1f}s)")
 
         # =================== 5. Transactions ===================
@@ -1366,14 +1406,16 @@ def run():
                     sched = clean(row.get("schedFormTypeCd"))
                     code  = clean(row.get("expendCatCd"))
 
-                    # A direct campaign expenditure names the candidate it
-                    # benefits rather than being money the candidate controls;
-                    # that beneficiary (from cand.csv) is the more useful
-                    # attribution than the spending PAC's own blank.
+                    # See the 2026-09-25 comment above dce_candidate's
+                    # declaration: a DCE beneficiary is independent-
+                    # expenditure targeting, not this row's own
+                    # candidate_name/office -- those stay whatever
+                    # register_from_transaction() resolved for the FILING
+                    # committee (blank for a pure outside spender, which is
+                    # correct -- they don't have one).
                     dce = dce_candidate.get(clean(row.get("expendInfoId")))
-                    if dce:
-                        cand_name = cand_name or dce[0]
-                        office    = office or dce[1]
+                    affiliated_candidate_name = "; ".join(nm for nm, _ in dce) if dce else ""
+                    support_oppose = "S" if dce else ""
 
                     expn_w.writerow({
                         "state":            STATE,
@@ -1390,6 +1432,8 @@ def run():
                         "candidate_name":   cand_name,
                         "office":           office,
                         "election_year":    year_of(txn_date),
+                        "affiliated_candidate_name": affiliated_candidate_name,
+                        "support_oppose":   support_oppose,
                         "amended":          "1" if clean(row.get("formTypeCd")).startswith("COR") else "0",
                         "filing_id":        clean(row.get("reportInfoIdent")),
                         "raw_file":         path.name,
