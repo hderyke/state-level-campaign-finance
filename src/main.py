@@ -267,10 +267,16 @@ def _run_with_fallback(command: str, state_args: list[str],
     # Same CF_RUN_ID orc.main() just set — these events land in the same
     # run's log.jsonl, taggable by operation="fallback" for downstream readers
     # (e.g. ops/emailer.py) that need to know which states were rolled back.
-    log = get_logger(None, "fallback")
-
     results = orc.main(command, state_args, extra_flags=extra_flags,
                        no_aggregate=True)
+
+    # Created AFTER orc.main() (2026-10-03): the logger picks its file when
+    # it is constructed, and CF_RUN_ID is only set inside orc.main(). Built
+    # before that call, as it used to be, every fallback event went to a
+    # stray logs/dev/{ts}-fallback.jsonl instead of this run's log.jsonl,
+    # so nothing reading the run (ops/daemon.py, ops/emailer.py) could see
+    # which states had been rolled back.
+    log = get_logger(None, "fallback")
 
     failed = [a for a, ok in results.items() if not ok]
     fresh  = [a for a, ok in results.items() if ok]
