@@ -265,6 +265,11 @@ OH,31-A  Stmt of Contribution,Monetary
 OH,31-E FR Contributions,Monetary
 OH,31-J-1 In-Kind Cont Rcvd,In-Kind
 OH,31-A-2  Other Income,Other
+OH,31-A-2  Other Income (Interest),Other
+OH,31-A-2  Other Income (Refund),Refund
+OH,31-A-2  Other Income (Sale of Assets),Other
+OH,31-A-2  Other Income (Voided Check),Other
+OH,31-A-2  Other Income (Other),Other
 # == New Hampshire =============================================================,,
 "# NH receipts file: Transaction Type is mostly the uninformative ""Receipt"" --",,
 # the real distinction lives in Transaction Sub Type. The parser uses Sub Type,,

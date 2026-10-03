@@ -5,9 +5,10 @@ Reads bulk CSV exports from data/Arizona/raw/ and writes normalized output
 to data/Arizona/cleaned/.
 
 Input files:
-  Income_{cycle}_{type}.csv        — contributions received (1998–2026 + Recall_Fann)
-  Expenditures_{cycle}_{type}.csv  — expenditures made
-  az_committees_all.csv            — full committee registry (all filer types, 43K+ entities)
+  Income_{cycle}_{type}.csv                — contributions received (1998–2026 + Recall_Fann)
+  Expenditures_{cycle}_{type}.csv          — expenditures made
+  IndependentExpenditures_{cycle}.csv      — independent expenditures (see below)
+  az_committees_all.csv                    — full committee registry (all filer types, 43K+ entities)
 
 File types per cycle: Candidate, PAC, Party, Officeholder
 
@@ -35,6 +36,19 @@ Schema notes:
 
   No loan/debt data — loans_debts.csv.gz written empty (header only).
   person_id model: "committee" — Arizona assigns IDs per committee registration.
+
+Independent expenditures: a separate raw source from Income/Expenditures (see
+scrapers/arizona.py's module docstring) — IndependentExpenditures_{cycle}.csv
+holds itemized IE transactions fetched via a per-candidate drill-down, not
+the AdvancedSearch API. Written into expenditures.csv.gz alongside regular
+expenditures: committee_name is the IE-spending committee (the one making
+the payment), affiliated_candidate_name/support_oppose identify who the
+spending was for/against — distinct from candidate_name, which is only
+populated when the filing committee IS that candidate's own committee (an
+IE committee spending against a candidate never is that candidate). Dates
+arrive as .NET "/Date(ms)/" epoch-millisecond strings (a different raw
+format than Income/Expenditures' "MM/DD/YYYY ..." strings) — see
+parse_net_date_ms().
 """
 
 import csv
@@ -103,6 +117,43 @@ def parse_date(val: str) -> str:
         except ValueError:
             continue
     return ""
+
+
+def parse_net_date_ms(val: str) -> str:
+    """
+    '/Date(1721286000000)/' → '2024-07-18' (UTC).
+    IndependentExpenditures_*.csv carries dates in this .NET epoch-ms format
+    (from GetNEWDetailedTableData's raw JSON) rather than the "MM/DD/YYYY ..."
+    strings Income/Expenditures use — a genuinely different raw format, not
+    an inconsistency worth normalizing away at the scraper level. Falls back
+    to parse_date() for any row that somehow arrives as a plain date string.
+    Returns '' on failure or implausible year.
+    """
+    val = (val or "").strip()
+    if not val:
+        return ""
+    m = re.search(r"/Date\((-?\d+)\)/", val)
+    if not m:
+        return parse_date(val)
+    from datetime import timezone
+    d = datetime.fromtimestamp(int(m.group(1)) / 1000, tz=timezone.utc)
+    if d.year < 1970 or d.year > MAX_VALID_YEAR:
+        return ""
+    return d.strftime("%Y-%m-%d")
+
+
+def ie_payee_name(row: dict) -> str:
+    """Build a payee name from GetNEWDetailedTableData's Transaction*Name fields.
+    Individuals have First/Middle/Last populated; organizations/vendors (the
+    common case for IE spending — ad buys, consultants, etc.) have only
+    TransactionLastName holding the full name (e.g. "Facebook").
+    """
+    first  = clean(row.get("TransactionFirstName", ""))
+    middle = clean(row.get("TransactionMiddleName", ""))
+    last   = clean(row.get("TransactionLastName", ""))
+    if not first and not middle:
+        return last
+    return " ".join(p for p in (first, middle, last) if p)
 
 
 def year_from_filename(path: Path) -> str:
@@ -176,33 +227,80 @@ def _split_last_first(last_first: str) -> tuple[str, str]:
     return last_first, ""
 
 
+def _is_ie_ghost_registration(row: dict) -> bool:
+    """AZ's registry API (az_committees_all.csv) emits a spurious extra row
+    for every (subject entity, IE-spending committee) pair once that entity
+    has received any independent expenditure support/opposition: filer_type
+    is "Officeholder" but the row carries no registration data of its own
+    (office_name blank) and no financial activity of its own (income and
+    expense both 0) -- instead the IE-*spending* committee's own name and
+    filer ID get stuffed into entity_first_name/entity_middle_name in place
+    of a real person's name, while entity_id/committee_name are just a
+    repeat of the real registration that exists as a separate row elsewhere
+    in the same file. Pure duplicate/relational noise: the real registration
+    for this entity_id is that separate row, and the IE relationship itself
+    is now captured properly by IndependentExpenditures_*.csv, so these
+    ghost rows contribute nothing but garbled candidate_name/committee
+    duplication if written through.
+
+    Verified against the full registry (2026-09-23): every row matching
+    filer_type=="Officeholder" + blank office_name + zero income/expense
+    also carries a nonzero ie_support/ie_opposition (5,054 of 44,077 rows,
+    ~11%) -- i.e. this signature never fires on a real, if sparse,
+    registration; it only ever fires on these phantom rows.
+    """
+    if row.get("filer_type") != "Officeholder":
+        return False
+    if (row.get("office_name") or "").strip():
+        return False
+    try:
+        if float(row.get("income") or 0) != 0 or float(row.get("expense") or 0) != 0:
+            return False
+    except ValueError:
+        return False
+    try:
+        return (float(row.get("ie_support") or 0) != 0
+                or float(row.get("ie_opposition") or 0) != 0)
+    except ValueError:
+        return False
+
+
 # ========================== registry loader ===========================
 
-def load_registry() -> tuple[dict, dict]:
+def load_registry() -> tuple[dict, dict, dict]:
     """
     Build lookup dicts from az_committees_all.csv.
-    Returns (by_lastname, by_cmte_name):
+    Returns (by_lastname, by_cmte_name, by_entity_id):
       by_lastname  : entity_last_name → registry row  (Candidate files)
       by_cmte_name : committee_name   → registry row  (Officeholder / PAC / Party)
+      by_entity_id : entity_id        → registry row  (IE SubjectCommitteeId lookup —
+                     IndependentExpenditures_*.csv gives us the candidate committee's
+                     numeric ID directly, no name-matching ambiguity needed)
     """
     by_lastname  = {}
     by_cmte_name = {}
+    by_entity_id = {}
     path = RAW_DIR / "az_committees_all.csv"
     if not path.exists():
         path = RAW_DIR / "az_committees.csv"   # fall back to old candidates-only file
     if not path.exists():
-        return by_lastname, by_cmte_name
+        return by_lastname, by_cmte_name, by_entity_id
 
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(f):
+            if _is_ie_ghost_registration(row):
+                continue
             ln = row.get("entity_last_name", "").strip()
             cn = row.get("committee_name", "").strip()
+            eid = row.get("entity_id", "").strip()
             if ln and ln not in by_lastname:
                 by_lastname[ln] = row
             if cn and cn not in by_cmte_name:
                 by_cmte_name[cn] = row
+            if eid and eid not in by_entity_id:
+                by_entity_id[eid] = row
 
-    return by_lastname, by_cmte_name
+    return by_lastname, by_cmte_name, by_entity_id
 
 
 def lookup_filer(filer_name: str, filer_type: str,
@@ -247,6 +345,7 @@ def run():
 
     total_contributions = 0
     total_expenditures  = 0
+    total_ie            = 0   # independent expenditures — folded into total_expenditures too
     committees_written  = 0
     candidates_written  = 0
     file_handles        = []
@@ -259,7 +358,7 @@ def run():
 
         log.info(f"  loading registry from {reg_path.name if reg_path.exists() else '(not found)'}...")
         ft = time.perf_counter()
-        by_lastname, by_cmte_name = load_registry()
+        by_lastname, by_cmte_name, by_entity_id = load_registry()
         log.registry_loaded(
             reg_path.name if reg_path.exists() else "az_committees_all.csv",
             len(by_lastname),
@@ -283,6 +382,8 @@ def run():
         if reg_path.exists():
             with open(reg_path, newline="", encoding="utf-8", errors="replace") as f:
                 for row_num, row in enumerate(csv.DictReader(f), start=2):
+                    if _is_ie_ghost_registration(row):
+                        continue
                     etype = clean(row.get("entity_type_name") or row.get("entity_type", ""))
                     cmte_w.writerow({
                         "state":          STATE,
@@ -312,6 +413,8 @@ def run():
         if reg_path.exists():
             with open(reg_path, newline="", encoding="utf-8", errors="replace") as f:
                 for row_num, row in enumerate(csv.DictReader(f), start=2):
+                    if _is_ie_ghost_registration(row):
+                        continue
                     etype = clean(row.get("entity_type_name") or row.get("entity_type", ""))
                     if "Candidate" not in etype and "$500 Threshold" not in etype:
                         continue
@@ -458,6 +561,103 @@ def run():
                             bytes=path.stat().st_size)
             total_expenditures += count
 
+        # ── Independent Expenditures → expenditures ────────────────────────────
+        # Separate raw source from Income/Expenditures (see module docstring).
+        # committee_name = the IE-spending committee; affiliated_candidate_name/
+        # support_oppose identify who it was for/against. candidate_name is left
+        # blank — that field means "the filing committee IS this candidate's own
+        # committee", which is never true for an IE committee spending on someone
+        # else's race.
+        # AZ's IE summary/detail endpoints only take whole calendar years (see
+        # scrapers/arizona.py's download_independent_expenditures_all docstring) —
+        # a short cycle like a recall whose date range falls inside a regular
+        # cycle's calendar years reduces to the same year window and the scraper
+        # skips re-fetching it. This TransactionId dedup is a second, independent
+        # safety net so that even if two raw files ever did carry overlapping
+        # transactions, they aren't double-counted here.
+        seen_ie_transaction_ids: set = set()
+
+        for path in sorted(RAW_DIR.glob("IndependentExpenditures_*.csv")):
+            if path.stat().st_size == 0:
+                continue
+            year = year_from_filename(path)
+            log.info(f"  independent expenditures  {path.name}...")
+            ft = time.perf_counter()
+            count = skipped = 0
+
+            with open(path, newline="", encoding="utf-8", errors="replace") as f:
+                reader = csv.DictReader(f)
+                for row_num, row in enumerate(reader, start=2):
+                    tid = clean(row.get("TransactionId", ""))
+                    if tid and tid in seen_ie_transaction_ids:
+                        skipped += 1
+                        continue
+
+                    committee_name = clean(row.get("CommitteeName", ""))
+                    amount         = parse_amount(clean(row.get("Amount", "")))
+
+                    if not committee_name and not amount:
+                        skipped += 1
+                        continue
+
+                    if tid:
+                        seen_ie_transaction_ids.add(tid)
+
+                    benefited_opposed = clean(row.get("BenefitedOpposed", ""))
+                    if benefited_opposed == "Benefited":
+                        support_oppose = "S"
+                    elif benefited_opposed == "Opposed":
+                        support_oppose = "O"
+                    else:
+                        support_oppose = ""
+
+                    # SubjectCommitteeId is the candidate committee's own entity_id
+                    # (matches az_committees_all.csv's entity_id directly — no
+                    # name-matching ambiguity) -- prefer the candidate's actual
+                    # personal name from the registry; fall back to the raw
+                    # committee name (e.g. "Abeytia for AZ") if the committee
+                    # isn't in the registry we have on disk (a different cycle's
+                    # sweep, or a ballot-measure committee rather than a candidate).
+                    subject_id  = clean(row.get("SubjectCommitteeId", ""))
+                    subject_reg = by_entity_id.get(subject_id)
+                    if subject_reg:
+                        affiliated_name = _format_name(
+                            clean(subject_reg.get("entity_last_name", "")),
+                            clean(subject_reg.get("entity_first_name", "")),
+                        ) or clean(row.get("SubjectCommitteeName", ""))
+                    else:
+                        affiliated_name = clean(row.get("SubjectCommitteeName", ""))
+
+                    expn_w.writerow({
+                        "state":            STATE,
+                        "committee_name":   utils.clean_name(committee_name),
+                        "payee_name":       ie_payee_name(row),
+                        "amount":           amount,
+                        "date":             parse_net_date_ms(row.get("TransactionDate", "")),
+                        "transaction_type": clean(row.get("TransactionType", "")),
+                        "purpose":          clean(row.get("TransactionType", "")),
+                        "category":         "Independent Expenditure",
+                        "payee_city":       clean(row.get("TransactionCity", "")),
+                        "payee_state":      clean(row.get("TransactionState", "")),
+                        "payee_zip":        clean(row.get("TransactionZipCode", "")),
+                        "candidate_name":   "",
+                        "office":           clean(subject_reg.get("office_name", "")) if subject_reg else "",
+                        "election_year":    year,
+                        "affiliated_candidate_name": utils.clean_name(affiliated_name) if affiliated_name else "",
+                        "support_oppose":   support_oppose,
+                        "filing_id":        "",
+                        "amended":          "",
+                        "raw_file":         path.name,
+                        "row_num":          row_num,
+                    })
+                    count += 1
+
+            log.file_parsed(path.name, "expenditures", count, skipped,
+                            duration_s=round(time.perf_counter() - ft, 2),
+                            bytes=path.stat().st_size)
+            total_expenditures += count
+            total_ie += count
+
         # ── Close handles before person-ID assignment ─────────────────────────
         for fh in file_handles:
             fh.close()
@@ -486,6 +686,7 @@ def run():
         log.info(f"Done in {duration}s")
         log._emit("parse_completed", status="completed", duration_s=duration,
                   contributions=total_contributions, expenditures=total_expenditures,
+                  independent_expenditures=total_ie,
                   committees=committees_written, candidates=candidates_written)
 
     except KeyboardInterrupt:
@@ -493,6 +694,7 @@ def run():
         log._emit("parse_completed", status="interrupted",
                   duration_s=round(time.perf_counter() - t0, 1),
                   contributions=total_contributions, expenditures=total_expenditures,
+                  independent_expenditures=total_ie,
                   committees=committees_written, candidates=candidates_written)
         raise
 
@@ -500,6 +702,7 @@ def run():
         log._emit("parse_completed", status="error",
                   duration_s=round(time.perf_counter() - t0, 1),
                   contributions=total_contributions, expenditures=total_expenditures,
+                  independent_expenditures=total_ie,
                   committees=committees_written, candidates=candidates_written,
                   error_type=type(e).__name__, error=str(e))
         raise

@@ -25,6 +25,20 @@ Output CSV columns for Income/Expenditures files (TX_COLS):
   CommitteeID, CommitteeName, TransactionDate, Amount, TransactionName,
   TransactionType, Occupation, Employer, City, State, ZipCode,
   FirstName, LastName, FilerName, Memo
+
+Independent expenditures (IE) are a wholly separate data source from the
+above, discovered 2026-09-22. AdvancedSearch/FILER_TYPES has no filer type
+that captures them — confirmed the committees making IE spending are not
+limited to entities registered under AZ's own "Independent Expenditures"
+registry types, so there's no shortcut through the existing transaction
+pull. Instead: GetNEWTableData (ChartName=5) returns per-candidate-
+committee IESupport/IEOpposition totals for a year window, and
+GetNEWDetailedTableData (ChartName=60 for support / 61 for oppose) returns
+itemized transactions for one candidate committee at a time. Both are
+DataTables POSTs like AdvancedSearch, reached the same way via
+build_session() — the site's Cloudflare check blocks a plain browser
+session but not this API flow. Output: IndependentExpenditures_{cycle}.csv,
+one row per itemized IE transaction (see IE_RAW_FIELDS).
 """
 
 import argparse
@@ -54,6 +68,11 @@ RAW_DIR.mkdir(parents=True, exist_ok=True)
 MANIFEST_COLS = ["cycle_label", "filer_type", "category_type", "filename", "downloaded_at", "row_count"]
 
 # ========================= state-specific constants ===================
+
+SOURCES = [
+    {"name": "Arizona Secretary of State — SeeTheMoney",
+     "url": "https://seethemoney.az.gov/Reporting/AdvancedSearch/"},
+]
 
 BASE_URL      = "https://seethemoney.az.gov/Reporting/AdvancedSearch/"
 REPORTING_URL = "https://seethemoney.az.gov/Reporting"
@@ -122,6 +141,31 @@ TX_COLS = [
     "Amount", "TransactionName", "TransactionType",
     "Occupation", "Employer", "City", "State", "ZipCode",
     "FirstName", "LastName", "FilerName", "Memo",
+]
+
+# ==================== independent expenditures =========================
+# See the module docstring for how this source was found and why it needs
+# its own drill-down flow instead of reusing AdvancedSearch/FILER_TYPES.
+IE_CHART_SUMMARY = "5"    # GetNEWTableData?ChartName=5 — per-candidate totals
+IE_CHART_SUPPORT = "60"   # GetNEWDetailedTableData?Page=60 — itemized "for"
+IE_CHART_OPPOSE  = "61"   # GetNEWDetailedTableData?Page=61 — itemized "against"
+IE_SUMMARY_LENGTH = 2000  # candidate-committee rows per summary page
+IE_TABLE_LENGTH    = 1000  # transaction rows per detail page — 500 confirmed safe
+                          # against the server's maxJsonLength cap; leaving headroom
+
+# Raw fields kept from GetNEWDetailedTableData's response (it returns many more
+# columns than this — CandidateOfficeId/CandidatePartyId/etc. — but these are
+# the ones with a place in the cleaned schema; extras are dropped on write).
+IE_RAW_FIELDS = [
+    "TransactionId", "PublicTransactionId", "TransactionDate",
+    "CommitteeId", "CommitteeName",
+    "Amount", "BenefitedOpposed",
+    "SubjectCommitteeId", "SubjectCommitteeName",
+    "TransactionFirstName", "TransactionMiddleName", "TransactionLastName",
+    "TransactionType", "TransactionGroupName",
+    "TransactionCity", "TransactionState", "TransactionZipCode",
+    "TransactionOccupation", "TransactionEmployer", "EntityDescription",
+    "Memo", "JurisdictionName",
 ]
 
 
@@ -606,7 +650,10 @@ def append_manifest(record: dict):
         writer.writerow(record)
 
 
-PARALLEL_WORKERS = 4   # concurrent download threads; raise if server doesn't rate-limit
+PARALLEL_WORKERS = 8   # concurrent download threads; raise if server doesn't rate-limit
+                        # (bumped from 4 -- zero errors across 9 IE cycles' worth of
+                        # concurrent per-entity requests at that level; site shows no
+                        # sign of rate-limiting)
 
 
 def download_transactions(log, session: req_lib.Session, done: set,
@@ -712,6 +759,283 @@ def download_transactions(log, session: req_lib.Session, done: set,
             if _counts is not None:
                 _counts[0] = ok
                 _counts[1] = err
+
+    return ok, err
+
+
+# ==================== independent expenditures =========================
+
+def fetch_ie_summary(session: req_lib.Session, start_year: int, end_year: int,
+                     start: int = 0, length: int = IE_SUMMARY_LENGTH) -> tuple[list[dict], int]:
+    """One page of the ChartName=5 per-candidate-committee IE totals table.
+
+    Unlike AdvancedSearch, this endpoint takes plain calendar startYear/endYear
+    (not a CycleId~date string) and no FilerTypeId — it always returns every
+    candidate committee with a nonzero IESupport or IEOpposition in the window.
+    """
+    params = {
+        "Page": IE_CHART_SUMMARY, "startYear": str(start_year), "endYear": str(end_year),
+        "JurisdictionId": "0", "TablePage": "1", "TableLength": str(length),
+        "IsLessActive": "false", "ShowOfficeHolder": "false", "ChartName": IE_CHART_SUMMARY,
+    }
+    dt_body = {
+        "draw": "1", "start": str(start), "length": str(length),
+        "search[value]": "", "search[regex]": "false",
+        "order[0][column]": "0", "order[0][dir]": "asc",
+    }
+    r = session.post(f"{REPORTING_URL}/GetNEWTableData/", params=params, data=dt_body, timeout=60)
+    r.raise_for_status()
+    inner = r.json()
+    if not isinstance(inner, dict):
+        raise RuntimeError(f"unexpected IE summary response type={type(inner)}")
+    rows  = inner.get("data") or []
+    total = int(inner.get("recordsTotal") or 0)
+    return rows, total
+
+
+# Column defs for GetNEWDetailedTableData's DataTables body — confirmed from a
+# live browser network capture (2026-09-22). First column is an unnamed
+# expand/detail column the site's own UI uses; not orderable, no data key.
+_IE_DETAIL_COLUMNS = ["", "TransactionId", "TransactionDate", "CommitteeName",
+                      "TransactionLastName", "Amount", "BenefitedOpposed"]
+
+
+def fetch_ie_detail(session: req_lib.Session, side: str, entity_id: str,
+                    start_year: int, end_year: int,
+                    start: int = 0, length: int = IE_TABLE_LENGTH) -> tuple[list[dict], int]:
+    """One page of itemized IE transactions for one candidate committee.
+
+    side: "support" (Page/ChartName=60, BenefitedOpposed="Benefited") or
+          "oppose" (Page/ChartName=61, BenefitedOpposed="Opposed").
+    Only worth calling when the summary row shows a nonzero total on that
+    side — an empty side still returns 200 with zero rows, just a wasted
+    round-trip.
+    """
+    page = IE_CHART_SUPPORT if side == "support" else IE_CHART_OPPOSE
+    params = {
+        "Page": page, "startYear": str(start_year), "endYear": str(end_year),
+        "JurisdictionId": "0", "TablePage": "1", "TableLength": str(length),
+        "Name": f"5~{entity_id}", "entityId": str(entity_id),
+        "ChartName": page, "IsLessActive": "false", "ShowOfficeHolder": "false",
+    }
+    dt_body: dict[str, str] = {
+        "draw": "1", "start": str(start), "length": str(length),
+        "search[value]": "", "search[regex]": "false",
+        "order[0][column]": "2", "order[0][dir]": "desc",
+    }
+    for i, col in enumerate(_IE_DETAIL_COLUMNS):
+        dt_body[f"columns[{i}][data]"]          = col
+        dt_body[f"columns[{i}][name]"]          = ""
+        dt_body[f"columns[{i}][searchable]"]    = "true"
+        dt_body[f"columns[{i}][orderable]"]     = "false" if i == 0 else "true"
+        dt_body[f"columns[{i}][search][value]"] = ""
+        dt_body[f"columns[{i}][search][regex]"] = "false"
+
+    r = session.post(f"{REPORTING_URL}/GetNEWDetailedTableData/",
+                     params=params, data=dt_body, timeout=60)
+    r.raise_for_status()
+    inner = r.json()
+    if not isinstance(inner, dict):
+        raise RuntimeError(f"unexpected IE detail response type={type(inner)}")
+    rows  = inner.get("data") or []
+    total = int(inner.get("recordsTotal") or 0)
+    return rows, total
+
+
+def download_independent_expenditures(log, session: req_lib.Session,
+                                       cycle_label: str,
+                                       start_year: int, end_year: int) -> tuple[str, int] | None:
+    """Sweep the IE summary + per-candidate drill-down for one cycle's year
+    window. Writes IndependentExpenditures_{cycle_label}.csv.
+    Returns (filename, row_count), or None on an unrecoverable failure.
+
+    Uses page_scrape_* logging rather than file_download_* — like
+    download_committee_details(), this is a sweep over many individual
+    entities (one or two API calls per candidate committee with a nonzero
+    IE total), not a single bulk fetch.
+    """
+    filename = f"IndependentExpenditures_{cycle_label}.csv"
+    out_path = RAW_DIR / filename
+    t0 = time.perf_counter()
+
+    # 1. Full candidate-committee summary for this window (paginated —
+    #    IE_SUMMARY_LENGTH is generous, but don't assume one page is enough).
+    summary_rows: list[dict] = []
+    start = 0
+    try:
+        while True:
+            rows, total = fetch_ie_summary(session, start_year, end_year, start=start,
+                                           length=IE_SUMMARY_LENGTH)
+            if not rows:
+                break
+            summary_rows.extend(rows)
+            if len(summary_rows) >= total or len(rows) < IE_SUMMARY_LENGTH:
+                break
+            start += IE_SUMMARY_LENGTH
+            time.sleep(0.2)
+    except Exception as e:
+        log.file_download_error(filename=filename, error=f"summary fetch failed: {e}")
+        return None
+
+    # 2. Per-candidate itemized pulls, one side at a time, only where the
+    #    summary shows a nonzero total on that side.
+    targets = []
+    for row in summary_rows:
+        eid = row.get("EntityID")
+        if eid is None:
+            continue
+        if float(row.get("IESupport") or 0) != 0:
+            targets.append((eid, "support"))
+        if float(row.get("IEOpposition") or 0) != 0:
+            targets.append((eid, "oppose"))
+
+    all_rows: list[dict] = []
+    ok = err = 0
+
+    def _fetch_one(target):
+        eid, side = target
+        worker_session = build_session()   # each thread owns its session
+        rows_out: list[dict] = []
+        start = 0
+        while True:
+            rows, total = fetch_ie_detail(worker_session, side, eid, start_year, end_year,
+                                          start=start)
+            if not rows:
+                break
+            rows_out.extend(rows)
+            if len(rows) < IE_TABLE_LENGTH or start + len(rows) >= total:
+                break
+            start += IE_TABLE_LENGTH
+            time.sleep(0.1)
+        return rows_out
+
+    if targets:
+        from tqdm import tqdm
+        from tqdm.contrib.logging import logging_redirect_tqdm
+        with logging_redirect_tqdm(loggers=[log._log]):
+            with tqdm(total=len(targets), desc=f"  IE {cycle_label}", unit="req",
+                     dynamic_ncols=True) as bar:
+                with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as pool:
+                    futures = {pool.submit(_fetch_one, t): t for t in targets}
+                    for future in as_completed(futures):
+                        eid, side = futures[future]
+                        try:
+                            all_rows.extend(future.result())
+                            ok += 1
+                        except Exception as e:
+                            log.page_scrape_error(entity="ie_candidate", page_id=f"{eid}:{side}",
+                                                  error=str(e))
+                            err += 1
+                        bar.update(1)
+
+    # De-dupe on the source's own TransactionId — a transaction could in
+    # principle surface on both pulls if BenefitedOpposed changed between an
+    # original filing and an amendment.
+    seen: set = set()
+    deduped = []
+    for r in all_rows:
+        tid = r.get("TransactionId")
+        if tid in seen:
+            continue
+        seen.add(tid)
+        deduped.append(r)
+
+    with open(out_path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=IE_RAW_FIELDS, extrasaction="ignore", restval="")
+        writer.writeheader()
+        for r in deduped:
+            writer.writerow(r)
+
+    log.page_scrape_complete(filename=str(out_path), rows=len(deduped),
+                             duration_s=round(time.perf_counter() - t0, 2), ok=ok, err=err)
+    return filename, len(deduped)
+
+
+def download_independent_expenditures_all(log, session: req_lib.Session, done: set,
+                                           force: bool = False,
+                                           start_year: int | None = None,
+                                           end_year: int | None = None) -> tuple[int, int]:
+    """Walk CYCLES and call download_independent_expenditures() for each cycle
+    in scope. Mirrors download_transactions()'s scope resolution exactly
+    (current-cycle-always-refreshed, --force wipes, --start-year/--end-year
+    restricts to a range) so IE data follows the same incremental semantics
+    as Income/Expenditures.
+    """
+    year_range_active = start_year is not None or end_year is not None
+    incremental = not force and not year_range_active
+
+    cycles = []
+    for lbl, cid in CYCLES:
+        if year_range_active:
+            try:
+                cycle_year = int(lbl)
+            except ValueError:
+                continue
+            if start_year is not None and cycle_year < start_year:
+                continue
+            if end_year is not None and cycle_year > end_year:
+                continue
+        elif incremental and not cycle_is_current(cid):
+            continue
+        cycles.append((lbl, cid))
+
+    ok = err = 0
+    # AZ's IE endpoints (GetNEWTableData/GetNEWDetailedTableData) only accept
+    # whole calendar years, unlike AdvancedSearch's day-precision date filtering
+    # used for Income/Expenditures. A short cycle nested inside a regular cycle's
+    # calendar years (e.g. Recall_Fann's 7/2021-3/2022 inside 2022's 1/2021-12/2022)
+    # reduces to the identical (start_year, end_year) pair, so re-fetching it would
+    # pull the exact same dataset a second time — wasted requests, plus a duplicate
+    # raw file downstream. Sweep each distinct year-window once per run and alias
+    # any other cycle sharing it to that file instead of re-fetching.
+    window_source: dict[tuple[int, int], tuple[str, str]] = {}  # window -> (cycle_label, filename)
+
+    for cycle_label, cycle_id_str in cycles:
+        key = (cycle_label, "IE", "IndependentExpenditures")
+        c_start, c_end = parse_cycle_dates(cycle_id_str)
+        sy, ey = int(c_start[:4]), int(c_end[:4])
+        window = (sy, ey)
+
+        if window in window_source:
+            source_label, source_filename = window_source[window]
+            if key not in done:
+                log.file_download_skip(
+                    filename=f"IndependentExpenditures_{cycle_label}.csv "
+                             f"(same {sy}-{ey} calendar-year window as cycle {source_label}; "
+                             f"IE data is calendar-year scoped, nothing separate to fetch)")
+                append_manifest({
+                    "cycle_label":   cycle_label,
+                    "filer_type":    "IE",
+                    "category_type": "IndependentExpenditures",
+                    "filename":      source_filename,
+                    "downloaded_at": datetime.today().strftime("%Y-%m-%d"),
+                    "row_count":     0,
+                })
+                done.add(key)
+            continue
+
+        if key in done and not cycle_is_current(cycle_id_str):
+            log.file_download_skip(filename=f"IndependentExpenditures_{cycle_label}.csv")
+            window_source[window] = (cycle_label, f"IndependentExpenditures_{cycle_label}.csv")
+            continue
+
+        result = download_independent_expenditures(log, session, cycle_label, sy, ey)
+        if result is None:
+            err += 1
+            continue
+
+        filename, row_count = result
+        ok += 1
+        window_source[window] = (cycle_label, filename)
+        append_manifest({
+            "cycle_label":   cycle_label,
+            "filer_type":    "IE",
+            "category_type": "IndependentExpenditures",
+            "filename":      filename,
+            "downloaded_at": datetime.today().strftime("%Y-%m-%d"),
+            "row_count":     row_count,
+        })
+        done.add(key)
 
     return ok, err
 
@@ -834,6 +1158,7 @@ def run(
     expenditures: bool = False,
     candidates: bool = False,
     committees: bool = False,
+    independent_expenditures: bool = False,
 ):
     """Download Arizona campaign finance data from SeeTheMoney.
 
@@ -846,26 +1171,32 @@ def run(
                                   (non-numeric cycles like Recall_Fann skipped when active)
 
     Horizontal scope:
-        No flags                — download everything
-        transactions            — all cycle files (Income + Expenditures)
-        entities                — registry + committee details
-        contributions           — Income cycle files only
-        expenditures            — Expenditures cycle files only
-        candidates              — registry only (no committee details sweep)
-        committees              — registry + committee details
+        No flags                    — download everything
+        transactions                — all cycle files (Income + Expenditures + IE)
+        entities                    — registry + committee details
+        contributions                — Income cycle files only
+        expenditures                 — Expenditures cycle files only
+        independent_expenditures     — IndependentExpenditures cycle files only
+                                       (a separate source from Income/Expenditures —
+                                       see the module docstring)
+        candidates                   — registry only (no committee details sweep)
+        committees                   — registry + committee details
     """
     log = get_logger("arizona", "scrape")
     t0  = time.perf_counter()
     log._emit("scrape_started", force=force, entities=entities, transactions=transactions,
               start_year=start_year, end_year=end_year,
               contributions=contributions, expenditures=expenditures,
-              candidates=candidates, committees=committees)
+              candidates=candidates, committees=committees,
+              independent_expenditures=independent_expenditures)
 
     # ── Resolve granular scope ────────────────────────────────────────
     no_horizontal = not (entities or transactions or contributions or
-                         expenditures or candidates or committees)
+                         expenditures or candidates or committees or
+                         independent_expenditures)
 
     do_transactions = no_horizontal or transactions or contributions or expenditures
+    do_ie           = no_horizontal or transactions or independent_expenditures
     do_registry     = no_horizontal or entities or candidates or committees
     do_details      = no_horizontal or entities or committees
 
@@ -881,27 +1212,37 @@ def run(
     _tx_counts = [0, 0]
 
     try:
-        if force and do_transactions and MANIFEST.exists():
-            MANIFEST.unlink()
+        if (force or start_year is not None or end_year is not None) and (do_transactions or do_ie):
+            # force and/or a year range is active — wipe the manifest entries
+            # actually being (re)downloaded this run, and only those. Scoped by
+            # BOTH category (running --independent-expenditures alone must not
+            # wipe, and thus force a pointless future re-fetch of, Income/
+            # Expenditures manifest entries this run has no intention of
+            # refreshing, and vice versa) and, unless --force, year range —
+            # non-numeric cycles (Recall_Fann etc.) are only ever wiped by
+            # --force, never by a numeric --start-year/--end-year range.
+            wipe_categories = set()
+            if do_transactions:
+                wipe_categories.update(active_categories or CATEGORY_TYPES)
+            if do_ie:
+                wipe_categories.add("IndependentExpenditures")
 
-        elif (start_year is not None or end_year is not None) and do_transactions:
-            # Year range — wipe manifest entries within the range so they re-download.
-            # Non-numeric cycles (Recall_Fann etc.) are left untouched.
-            def _outside_range(r: dict) -> bool:
-                """Keep rows that are NOT in the wipe zone."""
+            def _in_wipe_scope(r: dict) -> bool:
+                if r.get("category_type") not in wipe_categories:
+                    return False   # different category scope — keep
+                if force:
+                    return True    # --force: every cycle within category scope
                 try:
                     cycle_year = int(r["cycle_label"])
                 except (ValueError, KeyError):
-                    return True   # non-numeric cycle — always keep
+                    return False   # non-numeric cycle — keep unless --force
                 if start_year is not None and cycle_year < start_year:
-                    return True   # below range — keep
+                    return False   # below range — keep
                 if end_year is not None and cycle_year > end_year:
-                    return True   # above range — keep
-                if active_categories and r.get("category_type") not in active_categories:
-                    return True   # different category scope — keep
-                return False      # within range and in scope — wipe
+                    return False   # above range — keep
+                return True        # within range and in scope — wipe
 
-            strip_manifest(_outside_range)
+            strip_manifest(lambda r: not _in_wipe_scope(r))
 
         done = load_manifest()
         session = build_session()
@@ -920,6 +1261,14 @@ def run(
                                             categories=active_categories,
                                             _counts=_tx_counts)
             files_ok += ok; files_err += err
+
+        if do_ie:
+            log.info("Downloading independent expenditures...")
+            ok, err = download_independent_expenditures_all(log, session, done,
+                                                             force=force,
+                                                             start_year=start_year,
+                                                             end_year=end_year)
+            pages_ok += ok; pages_err += err
 
         if do_details:
             log.info("Downloading committee details...")
@@ -1181,13 +1530,16 @@ if __name__ == "__main__":
     #   --force                      wipe manifest, re-download all in scope
     #
     # Horizontal scope:
-    #   (no flag)         all types
-    #   --transactions    Income + Expenditures cycle files
-    #   --entities        registry + committee details
-    #   --contributions   Income only
-    #   --expenditures    Expenditures only
-    #   --candidates      registry only (no committee details)
-    #   --committees      registry + committee details
+    #   (no flag)                      all types
+    #   --transactions                 Income + Expenditures + IE cycle files
+    #   --entities                     registry + committee details
+    #   --contributions                Income only
+    #   --expenditures                 Expenditures only
+    #   --independent-expenditures     IndependentExpenditures only (separate
+    #                                  source from Income/Expenditures — see
+    #                                  the module docstring)
+    #   --candidates                   registry only (no committee details)
+    #   --committees                   registry + committee details
     ap = argparse.ArgumentParser(
         description="Download Arizona campaign finance data from SeeTheMoney."
     )
@@ -1217,6 +1569,9 @@ if __name__ == "__main__":
                     help="Income cycle files only")
     ap.add_argument("--expenditures",  action="store_true",
                     help="Expenditures cycle files only")
+    ap.add_argument("--independent-expenditures", action="store_true",
+                    help="IndependentExpenditures cycle files only — a separate "
+                         "source from Income/Expenditures, see module docstring")
     ap.add_argument("--candidates",    action="store_true",
                     help="registry only (no committee details sweep)")
     ap.add_argument("--committees",    action="store_true",
@@ -1255,6 +1610,7 @@ if __name__ == "__main__":
             end_year=args.end_year,
             contributions=args.contributions,
             expenditures=args.expenditures,
+            independent_expenditures=args.independent_expenditures,
             candidates=args.candidates,
             committees=args.committees,
         )

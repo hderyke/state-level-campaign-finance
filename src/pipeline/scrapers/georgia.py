@@ -19,6 +19,17 @@ Peachfile API (new e-filing system, live Nov 2021):
     ballot-question committees. Records whose filerEntityId already appears
     in candidates.csv/committees.csv are skipped; the rest are written to
     public_committees.csv.
+  - Independent expenditures: PublicIndependentExpenditureDetails/
+    GetIndependentExpenditureDetails, paged JSON — a wholly separate data
+    category from the TCON/TEXP export above (backs the "Independent
+    Expenditures" tab at peachfile.ethics.ga.gov/public/cf/independent,
+    NOT reachable via the TCON/TEXP export endpoint with any TransactionType
+    guess). Each item nests a candidateMeasures[] array, one entry per
+    candidate/measure it names, each already carrying its own Support/Oppose
+    stance. Flattened one row per (transaction, target) to
+    independent_expenditures_{year}.csv. See the "independent expenditures
+    (Peachfile)" section below for the full story, including the overlap
+    check against TEXP's own "Independent Expenditure" rows.
 
 API base: https://api-peachfile.ethics.ga.gov/api
 Public frontend: https://peachfile.ethics.ga.gov
@@ -91,6 +102,11 @@ RAW_DIR.mkdir(parents=True, exist_ok=True)
 MANIFEST_COLS = ["transaction_type", "year", "filename", "downloaded_at", "row_count"]
 
 # ============================ constants ==============================
+
+SOURCES = [
+    {"name": "Georgia Government Transparency & Campaign Finance Commission — Peachfile",
+     "url": "https://peachfile.ethics.ga.gov"},
+]
 
 API_BASE        = "https://api-peachfile.ethics.ga.gov/api"
 EXPORT_ENDPOINT = f"{API_BASE}/ExportPublicData/GetExportPublicDownloadData"
@@ -465,6 +481,361 @@ def download_transaction(log, tx_type: str, year: str,
 
     out_path.write_text(text, encoding="utf-8")
 
+    log.file_download_ok(
+        filename=filename,
+        bytes=out_path.stat().st_size,
+        rows=row_count,
+        duration_s=round(time.perf_counter() - t0, 2),
+    )
+    return filename, row_count
+
+
+# ================ independent expenditures (Peachfile) ================
+#
+# A wholly separate Peachfile data category from the TCON/TEXP export
+# above -- backs the "Independent Expenditures" tab at
+# peachfile.ethics.ga.gov/public/cf/independent, NOT reachable via
+# ExportPublicData/GetExportPublicDownloadData (every guessed
+# TransactionTypeCode for it -- TIE, IE, TEXP-IE, IND48, IE48, TWOBIZ --
+# 404s there). Confirmed 2026-09-20 by intercepting the page's own network
+# calls: it POSTs a filter payload to GetIndependentExpenditureDetails and
+# gets back already-grouped JSON -- each item is one IE transaction with a
+# nested candidateMeasures[] array, one entry per candidate/measure it
+# names, already carrying a plain "Support"/"Oppose" stance per target --
+# no parent/target row-pairing needed the way the TEXP export requires
+# (see load_ie_targets() in the parser).
+#
+# Real, large, and was entirely missing before this: ~$3.26M opposing Burt
+# Jones from "Keep Georgia Strong Action" alone showed up here and nowhere
+# in TEXP -- confirmed via a user-reported gap (two $1M+ "Two Business Day
+# Report for Ind Com" expedited filings visible on the live site, absent
+# from our scraped data).
+#
+# Checked for overlap with the existing TEXP-sourced "Independent
+# Expenditure" rows before wiring this in (2026-09-20, 2026 data): 562 of
+# TEXP's 564 IE transactions are the exact same transactions as this new
+# source (same Transaction ID, matching dollar amounts to the cent) -- and
+# this source is also a strict superset for that year (620 vs 564). Only
+# 2 TEXP IE transactions (both small, both "Community Change Voters")
+# weren't found here under a 2026 electionYear filter. The parser treats
+# this source as authoritative for any Transaction ID it has, and falls
+# back to the TEXP-derived value only for stragglers this source doesn't
+# cover -- see the "independent expenditures" and "expenditures" parsing
+# blocks in parsers/georgia.py.
+#
+# No auth required -- plain public JSON POST. Same WAF as the rest of
+# Peachfile: pageSize >= 200 -> HTTP 400 "Potentially harmful payload
+# detected!" (confirmed same behavior/error text as recordsearch's WAF
+# below) -- capped at 100 like RECORDSEARCH_PAGE_SIZE. Pagination uses the
+# response's own data.totalItems, same pattern as
+# download_entities/download_recordsearch above.
+
+IE_ENDPOINT  = f"{API_BASE}/PublicIndependentExpenditureDetails/GetIndependentExpenditureDetails"
+IE_PAGE_SIZE = 100
+
+# Empty-string/null filters = no filter. electionYear/pageNumber/pageSize
+# are filled in per request in download_independent_expenditures().
+IE_BASE_PAYLOAD = {
+    "filerName": "", "candidateMeasure": "", "stance": "",
+    "disclosureReport": "", "payeeName": "", "officeSought": "",
+    "purpose": "", "electionType": None, "electionYear": "",
+    "filerType": "", "amountAppliedMax": None, "amountAppliedMin": None,
+    "toDate": None, "fromDate": None, "districtTypeId": "",
+    "jurisdictionTypeId": "", "jurisdictionId": "", "transactionType": None,
+    "sortBy": "Transaction Date", "sortType": "asc",
+}
+
+# Flattened output columns -- one row per (transaction, candidateMeasure).
+# Transaction-level fields repeat across a multi-target buy's rows;
+# target_* fields come from one entry of the item's candidateMeasures[]
+# array. A transaction with no candidateMeasures at all still gets one
+# row, with every target_* field blank, so no real spending is dropped by
+# the flattening step itself. Field names are the API's own camelCase
+# names verbatim (matching the RECORDSEARCH_FIELDS convention above),
+# except the target_ prefix, added to avoid colliding with top-level
+# fields of the same name (e.g. candidateMeasures[].filerRegistrationGuid
+# is the TARGET's own registration guid, not the filer/spender's).
+IE_FIELDS = [
+    "transactionId", "guid", "filerReportId", "filerReportGuid", "filerReportVersionId",
+    "filerRegistrationGuid", "filerName", "committeeName", "abbreviatedCommitteeName",
+    "committeeMailingAddress1", "committeeMailingAddress2",
+    "committeeCity", "committeeState", "committeeZipCode",
+    "committeeTreasurerName", "committeeChairPersonName",
+    "sourceName", "transactionSourceType", "transactionSourceTypeCode",
+    "payeeFirstName", "payeeMiddleName", "payeeLastName",
+    "payeeEmployer", "payeeOccupation",
+    "payeeMailingAddressLine1", "payeeMailingAddressLine2",
+    "payeeMailingCity", "payeeMailingState", "payeeMailingZipCode", "payeeCountry",
+    "transactionDate", "amountApplied",
+    "transactionType", "transactionTypeCode",
+    "electionTypeCode", "election", "electionYear",
+    "reportName", "timedReport", "transactionStatusCode",
+    "purpose", "purposeCode", "transactionDescription",
+    "parentTguid", "hasChild",
+    "target_candidate_measure_title", "target_office_name", "target_office_id",
+    "target_jurisdiction_type", "target_jurisdiction_type_id",
+    "target_jurisdiction_id", "target_jurisdiction_name",
+    "target_district_name", "target_district_id",
+    "target_stance", "target_support_oppose", "target_reason_type_code",
+    "target_is_unregister", "target_filer_registration_guid",
+]
+
+_IE_TOP_FIELDS    = [k for k in IE_FIELDS if not k.startswith("target_")]
+_IE_TARGET_FIELDS = [k for k in IE_FIELDS if k.startswith("target_")]
+
+
+def _flatten_ie_item(item: dict) -> list[dict]:
+    """One row per candidateMeasures[] entry; one blank-target row if none."""
+    base = {k: item.get(k, "") for k in _IE_TOP_FIELDS}
+    measures = item.get("candidateMeasures") or []
+    if not measures:
+        return [dict(base, **{k: "" for k in _IE_TARGET_FIELDS})]
+    rows = []
+    for cm in measures:
+        rows.append(dict(base, **{
+            "target_candidate_measure_title": cm.get("candidateMeasureTitle", ""),
+            "target_office_name":             cm.get("officeName", ""),
+            "target_office_id":               cm.get("officeId", ""),
+            "target_jurisdiction_type":       cm.get("jurisdictionType", ""),
+            "target_jurisdiction_type_id":    cm.get("jurisdictionTypeId", ""),
+            "target_jurisdiction_id":         cm.get("jurisdictionId", ""),
+            "target_jurisdiction_name":       cm.get("jurisdictionName", ""),
+            "target_district_name":           cm.get("districtName", ""),
+            "target_district_id":             cm.get("districtId", ""),
+            "target_stance":                  cm.get("stance", ""),
+            "target_support_oppose":          cm.get("supportOppose", ""),
+            "target_reason_type_code":        cm.get("reasonTypeCode", ""),
+            "target_is_unregister":           cm.get("isUnregister", ""),
+            "target_filer_registration_guid": cm.get("filerRegistrationGuid", ""),
+        }))
+    return rows
+
+
+def _fetch_ie_years(session: requests.Session) -> list[int]:
+    """
+    Ask Peachfile's own election-year lookup which years the Independent
+    Expenditures filter offers, rather than guessing/hardcoding a range --
+    confirmed 2026-09-20 to return [2022, 2024, 2025, 2026, 2027, 2028,
+    2029, 2030, 2032] (odd non-election years absent). Falls back to a
+    conservative hardcoded range if the lookup call fails for any reason.
+    """
+    try:
+        resp = session.post(
+            f"{API_BASE}/PublicLookup/GetPublicTransactionElectionYearLookup",
+            json={}, timeout=30)
+        resp.raise_for_status()
+        years = sorted({int(row["value"]) for row in resp.json()["data"]})
+        if years:
+            return years
+    except Exception:
+        pass
+    return list(range(2022, datetime.today().year + 3))
+
+
+def download_independent_expenditures(log, year: int,
+                                      session: requests.Session) -> tuple[str, int] | None:
+    """
+    Page through GetIndependentExpenditureDetails for one election year and
+    write all flattened rows to independent_expenditures_{year}.csv.
+
+    Follows the recordsearch download convention (retry-with-backoff per
+    page, totalItems-based pagination, write even a zero-row CSV as
+    success) rather than download_transaction()'s convention (header-only
+    treated as an error) -- this is a paginated JSON API like recordsearch,
+    not a bulk CSV export like TCON/TEXP.
+
+    Returns (filename, row_count) -- row_count is the transaction count,
+    not the flattened row count, matching the manifest convention
+    elsewhere (rows = source records) -- 0 is a valid success, not a
+    failure. Returns None only on repeated request failure.
+    """
+    filename = f"independent_expenditures_{year}.csv"
+    out_path = RAW_DIR / filename
+
+    log.file_download_start(filename=filename)
+    t0 = time.perf_counter()
+
+    all_items = []
+    total_items = None
+    page = 1
+
+    while True:
+        payload = dict(IE_BASE_PAYLOAD, electionYear=str(year),
+                       pageNumber=page, pageSize=IE_PAGE_SIZE)
+        body = None
+        for attempt in range(3):
+            try:
+                resp = session.post(IE_ENDPOINT, json=payload, timeout=60)
+                resp.raise_for_status()
+                body = resp.json()
+                break
+            except Exception as e:
+                if attempt == 2:
+                    log.file_download_error(filename=filename, error=str(e))
+                    return None
+                time.sleep(2 * (attempt + 1))
+
+        data = body.get("data") or {}
+        if total_items is None:
+            total_items = data.get("totalItems", 0)
+
+        items = data.get("items") or []
+        if not items:
+            break
+
+        all_items.extend(items)
+
+        if len(all_items) >= total_items:
+            break
+        page += 1
+        time.sleep(0.2)
+
+    rows = [r for item in all_items for r in _flatten_ie_item(item)]
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=IE_FIELDS, extrasaction="ignore", restval="")
+        writer.writeheader()
+        writer.writerows(rows)
+
+    row_count = len(all_items)
+    log.file_download_ok(
+        filename=filename,
+        bytes=out_path.stat().st_size,
+        rows=row_count,
+        duration_s=round(time.perf_counter() - t0, 2),
+    )
+    return filename, row_count
+
+
+# =================== two-business-day expedited reports ===============
+#
+# 2026-09-20: user-reported gap -- Keep Georgia Strong Action's $1M+$2M
+# contributions from Shaping Healthy Initiatives (an Oklahoma filer),
+# visible on peachfile.ethics.ga.gov's live "Browse Contribution Data"
+# search, were entirely absent from our TCON bulk export
+# (ExportPublicData/GetExportPublicDownloadData above) -- and still absent
+# after a same-day re-download of that export. Root cause, confirmed by
+# intercepting the live search page's own network call: the bulk export
+# only carries FINALIZED transactions (transactionStatusCode "TFIL"); the
+# live search additionally surfaces PENDING ones ("TPEN"/"TPAMD", still in
+# Georgia's own review workflow). This isn't just a processing lag that
+# resolves with time -- checked live, some January-2026 pending
+# transactions are STILL missing 8+ months later, sitting right alongside
+# other January-2026 pending transactions that DID make it into the bulk
+# export -- so waiting for a future bulk-export re-fetch to pick these up
+# is not reliable.
+#
+# The live search page POSTs to PublicTransactionDetails/GetTransactionDetails
+# (same endpoint name as recordsearch's own GetTransactionDetails below, but
+# on api-peachfile.ethics.ga.gov, a completely different host/database --
+# confirmed recordsearch's own raw data doesn't have these rows either, so
+# this really is a 5th distinct coverage gap, not something already covered
+# by the recordsearch source). Unlike the ~416K-row unfiltered contributions
+# set this endpoint can return (far too large to page through as a bulk-
+# export replacement), filtering to reportName="Two Business Day Report for
+# Ind Com" -- the expedited disclosure independent committees must file
+# within 2 business days of a large late-cycle transaction -- narrows it to
+# 77 total items per side (contributions/expenditures) as of 2026-09-20, a
+# single page. Always refetched in full (no manifest skip), same
+# "current year always re-fetched" convention as TCON/TEXP above, since a
+# transaction's pending/finalized status -- and the set of currently-
+# pending transactions -- can change on any given day.
+#
+# Written to two_business_day_{contributions,expenditures}.csv using the
+# same RECORDSEARCH_FIELDS column set -- this endpoint's JSON items are the
+# same field shape as recordsearch's own GetTransactionDetails/
+# GetExpenditureDetails responses (transactionId, filerName, sourceName,
+# transactionAmount, campaignCommittee, reportName, transactionStatusCode,
+# etc. all confirmed present live), just a different host/database.
+#
+# The parser treats this source as authoritative for any Transaction Id it
+# has (which may include some transactions that ALSO appear, now finalized,
+# in the bulk TCON/TEXP export -- 41 of 77 already did as of 2026-09-20) --
+# same "parsed first, skip-set" pattern already used for the independent-
+# expenditures-vs-TEXP overlap above. See parsers/georgia.py's
+# two_biz_contrib_txids/two_biz_expn_txids for the consuming side.
+
+TWOBIZ_ENDPOINT     = f"{API_BASE}/PublicTransactionDetails/GetTransactionDetails"
+TWOBIZ_PAGE_SIZE    = 100
+TWOBIZ_REPORT_NAME  = "Two Business Day Report for Ind Com"
+TWOBIZ_TX_TYPES     = {"contributions": "TCON", "expenditures": "TEXP"}
+
+# Empty-string/null filters = no filter, matching the IE_BASE_PAYLOAD
+# convention above. transactionTypeCode/pageNumber are filled in per
+# request in download_two_business_day().
+TWOBIZ_BASE_PAYLOAD = {
+    "byState": "", "committeeType": "", "electionID": "", "electionType": "",
+    "electionYear": "", "filerName": "", "filerRegistrationGuid": None,
+    "fromDate": None, "reportName": TWOBIZ_REPORT_NAME,
+    "sortBy": "TransactionAmount", "sortType": "desc",
+    "sourceName": "", "sourceTypeCode": "", "toDate": None,
+    "transactionAmountMax": None,
+}
+
+
+def download_two_business_day(log, kind: str, session: requests.Session) -> tuple[str, int] | None:
+    """
+    Page through GetTransactionDetails filtered to
+    reportName="Two Business Day Report for Ind Com" for one side
+    (kind="contributions" -> TCON, kind="expenditures" -> TEXP) and write
+    all rows to two_business_day_{kind}.csv. See the section header above
+    for the full story.
+
+    Follows the independent-expenditures download convention (retry-with-
+    backoff per page, totalItems-based pagination, write even a zero-row
+    CSV as success) -- this is a small paginated JSON API, not a bulk CSV
+    export. Returns (filename, row_count), or None on repeated request
+    failure.
+    """
+    filename = f"two_business_day_{kind}.csv"
+    out_path = RAW_DIR / filename
+    tx_type  = TWOBIZ_TX_TYPES[kind]
+
+    log.file_download_start(filename=filename)
+    t0 = time.perf_counter()
+
+    all_items = []
+    total_items = None
+    page = 1
+
+    while True:
+        payload = dict(TWOBIZ_BASE_PAYLOAD, transactionTypeCode=tx_type,
+                       pageNumber=page, pageSize=TWOBIZ_PAGE_SIZE)
+        body = None
+        for attempt in range(3):
+            try:
+                resp = session.post(TWOBIZ_ENDPOINT, json=payload, timeout=60)
+                resp.raise_for_status()
+                body = resp.json()
+                break
+            except Exception as e:
+                if attempt == 2:
+                    log.file_download_error(filename=filename, error=str(e))
+                    return None
+                time.sleep(2 * (attempt + 1))
+
+        data = body.get("data") or {}
+        if total_items is None:
+            total_items = data.get("totalItems", 0)
+
+        items = data.get("items") or []
+        if not items:
+            break
+
+        all_items.extend(items)
+
+        if len(all_items) >= total_items:
+            break
+        page += 1
+        time.sleep(0.2)
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=RECORDSEARCH_FIELDS,
+                                extrasaction="ignore", restval="")
+        writer.writeheader()
+        writer.writerows(all_items)
+
+    row_count = len(all_items)
     log.file_download_ok(
         filename=filename,
         bytes=out_path.stat().st_size,
@@ -1413,7 +1784,8 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
         # ------------------------------------------------------------------ #
         if do_transactions:
             if force:
-                strip_manifest(lambda r: r["transaction_type"] not in TRANSACTION_TYPES)
+                strip_manifest(lambda r: r["transaction_type"] not in TRANSACTION_TYPES
+                                     and r["transaction_type"] != "TIE")
 
             done = load_manifest()
 
@@ -1467,6 +1839,72 @@ def run(force: bool = False, entities: bool = False, transactions: bool = False)
                         })
 
                     time.sleep(0.5)
+
+            # -------------------------------------------------------------- #
+            # independent expenditures -- a separate Peachfile data category #
+            # from TCON/TEXP above, not reachable via the export endpoint    #
+            # those use. See the "independent expenditures (Peachfile)"      #
+            # section above download_transaction() for the full story.      #
+            # -------------------------------------------------------------- #
+            for year in _fetch_ie_years(session):
+                key      = ("TIE", str(year))
+                filename = f"independent_expenditures_{year}.csv"
+
+                if key in done and str(year) != current_year:
+                    log.file_download_skip(filename=filename)
+                    continue
+
+                result = download_independent_expenditures(log, year, session)
+                if result is None:
+                    files_err += 1
+                else:
+                    _, row_count = result
+                    files_ok += 1
+                    strip_manifest(
+                        lambda r, k=key: not (r["transaction_type"] == k[0]
+                                              and r["year"] == k[1])
+                    )
+                    append_manifest({
+                        "transaction_type": key[0],
+                        "year":             key[1],
+                        "filename":         filename,
+                        "downloaded_at":    today,
+                        "row_count":        row_count,
+                    })
+
+                time.sleep(0.5)
+
+            # -------------------------------------------------------------- #
+            # two-business-day expedited reports -- a small supplemental      #
+            # source catching PENDING transactions the bulk TCON/TEXP export  #
+            # excludes. See the "two-business-day expedited reports" section  #
+            # above download_independent_expenditures() for the full story.  #
+            # Always refetched in full, like the current-year TCON/TEXP      #
+            # convention -- no manifest-based skip.                          #
+            # -------------------------------------------------------------- #
+            for kind in ("contributions", "expenditures"):
+                filename = f"two_business_day_{kind}.csv"
+                key      = ("TWOBIZ", kind)
+
+                result = download_two_business_day(log, kind, session)
+                if result is None:
+                    files_err += 1
+                else:
+                    _, row_count = result
+                    files_ok += 1
+                    strip_manifest(
+                        lambda r, k=key: not (r["transaction_type"] == k[0]
+                                              and r["year"] == k[1])
+                    )
+                    append_manifest({
+                        "transaction_type": key[0],
+                        "year":             key[1],
+                        "filename":         filename,
+                        "downloaded_at":    today,
+                        "row_count":        row_count,
+                    })
+
+                time.sleep(0.5)
 
         duration = round(time.perf_counter() - t0, 1)
         log._emit("scrape_completed", status="completed", duration_s=duration,

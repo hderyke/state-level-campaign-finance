@@ -31,3 +31,12 @@ github_key.pub
 # personal AI-agent workflow notes — not needed to use the pipeline
 CLAUDE.md
 
+
+# the serving layer is its own repo (hderyke/state-cf-serving), checked out inside this folder
+serving/
+serving-colin/
+
+# local scratch: editing backups, agent outputs, heartbeat log
+*.pre-*-backup-*
+Claude outputs/
+_scratch_heartbeat.log

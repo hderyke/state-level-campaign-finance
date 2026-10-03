@@ -5,10 +5,24 @@ Requires a live browser session via Playwright — Alaska's WAF blocks datacente
 IPs, so this must be run from a local machine. Exports are triggered by clicking
 Search then Export, mirroring normal user interaction. GR and CR detail pages
 are scraped individually by numeric ID with a consecutive-blank cutoff.
+
+aws.state.ak.us is also fronted by DataDome (captcha-delivery.com) — confirmed
+live 2026-09-23 by firing a burst of export requests and getting back a real
+"Slide right to secure your access" interstitial, which explicitly names
+"Rapid taps or clicks" / "Automated (bot) activity" as trigger reasons. This
+matches the scraper's own back-to-back year-download pattern. The slider
+requires a genuine human drag gesture — it cannot be solved by script. Runs
+headless=False for exactly this reason (a headless browser is itself a bot
+signal DataDome checks for) and uses a persistent Playwright profile
+(PROFILE_DIR) so a human-solved challenge's trust cookie survives across runs
+instead of being thrown away every time — same fix already proven for
+Missouri's Incapsula CAPTCHA elsewhere in this repo. See
+_wait_out_datadome() below and docs/states/alaska.md.
 """
 
 import csv
 import html as html_mod
+import random
 import re
 import sys
 import time
@@ -27,11 +41,24 @@ from src.reporting.logger import get_logger
 RAW_DIR      = PROJECT_ROOT / "data" / "Alaska" / "raw"
 MANIFEST     = PROJECT_ROOT / "data" / "Alaska" / "manifest.csv"
 
+# Persistent Playwright profile directory -- NOT under data/Alaska/raw,
+# since parsers glob that tree for CSV exports and shouldn't see Chrome
+# profile internals. See the launch_persistent_context() note in run()
+# for why this needs to be persistent rather than a fresh throwaway
+# context (same reasoning/pattern as Missouri's PROFILE_DIR).
+PROFILE_DIR  = PROJECT_ROOT / ".playwright-profiles" / "alaska"
+
 RAW_DIR.mkdir(parents=True, exist_ok=True)
+PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
 MANIFEST_COLS = ["relation_type", "year", "filename", "row_count"]
 
 
+
+SOURCES = [
+    {"name": "Alaska Public Offices Commission (APOC)",
+     "url": "https://aws.state.ak.us/ApocReports/"},
+]
 
 # =============================== pages ================================
 
@@ -43,17 +70,78 @@ PAGES = {
     "expenditures": "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDExpenditures.aspx",
     "candidates":   "https://aws.state.ak.us/apocreports/Campaign/AllCandidates.aspx?type=all",
     "groups":       "https://aws.state.ak.us/apocreports/Registration/GroupRegistration/GRForms.aspx",
+    # Bulk candidate-registration listing -- the direct analog of GRForms
+    # for candidates, confirmed live 2026-09-23 via the Registration menu
+    # (same "Registration/{X}Registration/{X}Forms.aspx" URL shape as
+    # groups). Goes through the exact same year-based download_year() path
+    # as GRForms below -- a plain Select-Year/Search/Export bulk export,
+    # never the per-ID cr_details sweep pattern that gets bot-detected.
+    # Its on-screen "Additional Fields" column picker offers Name/Last
+    # Name/First Name/Address/City/State/Zip/Election/Office/Phone/Fax/
+    # Email/Submitted/Status but NOT Treasurer Name -- so this closes the
+    # candidate_name/city/zip gap for Candidate-type committees (the thing
+    # cr_details was mainly needed for) but treasurer_name still needs the
+    # per-ID sweep. Real exported CSV column names not yet confirmed
+    # against a live download -- see parser's load_cr_forms_bulk().
+    "cr_forms":     "https://aws.state.ak.us/apocreports/Registration/CandidateRegistration/CRForms.aspx",
+    # Independent Expenditure (Form 15-6) bulk exports -- same
+    # Select-Year/Status/Search/Export flow as income/expenditures/groups
+    # above (confirmed live 2026-09-24: identical ddlReportYear/ddlStatus/
+    # btnSearch/btnExport/hlAllCSV markup), NOT the per-ID Common/View.aspx
+    # detail sweep an earlier version of this scraper used -- that page-by-
+    # page approach was unnecessary since these bulk grids already export
+    # every filing. Two separate pages/exports (not one, like GR/CR) because
+    # IEExpenditures.aspx and IEContributions.aspx are two independent
+    # bulk-export grids, each with its own CSV, even though a single IE
+    # filing's detail page shows both sides.
+    "ie_expenditures":  "https://aws.state.ak.us/apocreports/IndependentExpenditures/IEExpenditures.aspx",
+    "ie_contributions": "https://aws.state.ak.us/apocreports/IndependentExpenditures/IEContributions.aspx",
 }
 
-TRANSACTION_RELATIONS = {"income", "expenditures"}
-ENTITY_RELATIONS      = {"candidates", "groups"}
+TRANSACTION_RELATIONS = {"income", "expenditures", "ie_expenditures", "ie_contributions"}
+ENTITY_RELATIONS      = {"candidates", "groups", "cr_forms"}
 
 STEMS = {
     "income":       "CDIncome",
     "expenditures": "CDExpense",
     "candidates":   "CDCandidates",
     "groups":       "GRForms",
+    "cr_forms":     "CRForms",
+    "ie_expenditures":  "IEExpenditures",
+    "ie_contributions": "IEContributions",
 }
+
+# ========================= anti-automation setup =========================
+# Chromium under CDP control (which is how Playwright drives it) sets
+# navigator.webdriver=true and a few other properties by default -- the
+# single most common signal basic bot-detection scripts check for. None of
+# this defeats a serious bot-mitigation vendor like DataDome on its own
+# (see the DataDome section below for the real handling), but it's the
+# standard first line of defense, costs nothing to include, and is already
+# the proven pattern in this repo for Nevada's WAF -- ported here as-is,
+# just with an Alaska-appropriate timezone.
+LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
+
+DESKTOP_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+VIEWPORT = {"width": 1440, "height": 900}
+LOCALE   = "en-US"
+TIMEZONE_ID = "America/Anchorage"
+
+STEALTH_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+window.chrome = window.chrome || { runtime: {} };
+const _origQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) => (
+    parameters.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission })
+        : _origQuery(parameters)
+);
+"""
 
 # ========================== GR detail scrape ==========================
 GR_DETAIL_URL        = "https://aws.state.ak.us/apocreports/Common/View.aspx?ID={id}&ViewType=GR"
@@ -350,7 +438,7 @@ def download_gr_details(page, log, force: bool = False) -> tuple[int, int]:
 
     write_header = force or not GR_DETAILS_PATH.exists()
 
-    ok = err = consecutive_blank = 0
+    ok = err = consecutive_blank = consecutive_datadome_blocks = processed = 0
     t0 = time.perf_counter()
 
     with open(GR_DETAILS_PATH, "a", newline="", encoding="utf-8") as fh:
@@ -381,11 +469,15 @@ def download_gr_details(page, log, force: bool = False) -> tuple[int, int]:
                         text = page.locator("body").inner_text()
 
                         # Detect WAF block
-                        if "Request Rejected" in text:
-                            log.warning(
-                                f"WAF rejection at GR ID {gr_id}; sleeping and retrying"
-                            )
-                            time.sleep(5)
+                        if "Request Rejected" in text or _content_has_datadome(html):
+                            still_blocked = False
+                            if _content_has_datadome(html):
+                                still_blocked = _wait_out_datadome(page, log, f"GR ID {gr_id}") is False
+                            else:
+                                log.warning(
+                                    f"WAF rejection at GR ID {gr_id}; sleeping and retrying"
+                                )
+                                time.sleep(5)
 
                             page.goto(url, timeout=30_000)
                             page.wait_for_load_state("load")
@@ -393,11 +485,26 @@ def download_gr_details(page, log, force: bool = False) -> tuple[int, int]:
                             html = page.content()
                             text = page.locator("body").inner_text()
 
-                            if "Request Rejected" in text:
+                            if "Request Rejected" in text or _content_has_datadome(html):
+                                still_blocked = still_blocked or _content_has_datadome(html)
+                                consecutive_datadome_blocks = (
+                                    consecutive_datadome_blocks + 1 if still_blocked
+                                    else consecutive_datadome_blocks
+                                )
+                                if consecutive_datadome_blocks >= DATADOME_MAX_CONSECUTIVE_BLOCKS:
+                                    log.warning(
+                                        f"  {consecutive_datadome_blocks} consecutive DataDome "
+                                        f"blocks -- aborting GR sweep at ID {gr_id} rather than "
+                                        f"hammering a live block; re-run later to resume"
+                                    )
+                                    err += 1
+                                    break
                                 err += 1
                                 gr_id += 1
                                 bar.update(1)
                                 continue
+
+                        consecutive_datadome_blocks = 0
 
                         parsed = parse_gr_page(html)
 
@@ -411,7 +518,8 @@ def download_gr_details(page, log, force: bool = False) -> tuple[int, int]:
                                 bar.update(1)
                                 break
 
-                            time.sleep(0.1)
+                            processed += 1
+                            _gr_cr_pace(processed)
                             gr_id += 1
                             bar.update(1)
                             continue
@@ -427,7 +535,8 @@ def download_gr_details(page, log, force: bool = False) -> tuple[int, int]:
                         )
 
                         ok += 1
-                        time.sleep(0.2)
+                        processed += 1
+                        _gr_cr_pace(processed)
 
                     except Exception as e:
                         log.page_scrape_error(entity="group", page_id=gr_id, error=str(e))
@@ -569,7 +678,7 @@ def download_cr_details(page, log, force: bool = False) -> tuple[int, int]:
         CR_DETAILS_PATH.unlink()
 
     write_header = force or not CR_DETAILS_PATH.exists()
-    ok = err = consecutive_blank = 0
+    ok = err = consecutive_blank = consecutive_datadome_blocks = processed = 0
     t0 = time.perf_counter()
 
     with open(CR_DETAILS_PATH, "a", newline="", encoding="utf-8") as fh:
@@ -593,18 +702,37 @@ def download_cr_details(page, log, force: bool = False) -> tuple[int, int]:
                         html = page.content()
                         text = page.locator("body").inner_text()
 
-                        if "Request Rejected" in text:
-                            log.warning(f"WAF rejection at CR ID {cr_id}; retrying")
-                            time.sleep(5)
+                        if "Request Rejected" in text or _content_has_datadome(html):
+                            still_blocked = False
+                            if _content_has_datadome(html):
+                                still_blocked = _wait_out_datadome(page, log, f"CR ID {cr_id}") is False
+                            else:
+                                log.warning(f"WAF rejection at CR ID {cr_id}; retrying")
+                                time.sleep(5)
                             page.goto(url, timeout=30_000)
                             page.wait_for_load_state("load")
                             html = page.content()
                             text = page.locator("body").inner_text()
-                            if "Request Rejected" in text:
+                            if "Request Rejected" in text or _content_has_datadome(html):
+                                still_blocked = still_blocked or _content_has_datadome(html)
+                                consecutive_datadome_blocks = (
+                                    consecutive_datadome_blocks + 1 if still_blocked
+                                    else consecutive_datadome_blocks
+                                )
+                                if consecutive_datadome_blocks >= DATADOME_MAX_CONSECUTIVE_BLOCKS:
+                                    log.warning(
+                                        f"  {consecutive_datadome_blocks} consecutive DataDome "
+                                        f"blocks -- aborting CR sweep at ID {cr_id} rather than "
+                                        f"hammering a live block; re-run later to resume"
+                                    )
+                                    err += 1
+                                    break
                                 err += 1
                                 cr_id += 1
                                 bar.update(1)
                                 continue
+
+                        consecutive_datadome_blocks = 0
 
                         parsed = parse_cr_page(html)
 
@@ -614,7 +742,8 @@ def download_cr_details(page, log, force: bool = False) -> tuple[int, int]:
                                 log.info(f"{MAX_CONSECUTIVE_CR_BLANK} consecutive blanks — stopping at CR ID {cr_id}")
                                 bar.update(1)
                                 break
-                            time.sleep(0.1)
+                            processed += 1
+                            _gr_cr_pace(processed)
                             cr_id += 1
                             bar.update(1)
                             continue
@@ -627,7 +756,8 @@ def download_cr_details(page, log, force: bool = False) -> tuple[int, int]:
                         bar.set_postfix_str(label.ljust(45), refresh=False)
 
                         ok += 1
-                        time.sleep(0.2)
+                        processed += 1
+                        _gr_cr_pace(processed)
 
                     except Exception as e:
                         log.page_scrape_error(entity="candidate", page_id=cr_id, error=str(e))
@@ -657,10 +787,187 @@ def get_available_years(page) -> list[str]:
     return sorted(set(years))
 
 
+# ========================= DataDome bot-check =========================
+# See module docstring for how this was confirmed. Detection is by content
+# signature (the delivery domain + the challenge's own copy) rather than a
+# specific DOM selector, since that's stable even if DataDome's widget
+# markup changes. Used as a logging/pause signal only -- the actual "did we
+# get real content" check downstream (dropdown present, csv_link present,
+# etc.) is the real source of truth, same structural-fallback approach
+# already used for Missouri's WAF handling in this repo.
+DATADOME_MARKERS = [
+    "captcha-delivery.com",
+    "slide right to secure your access",
+    "verification required",
+    "access is temporarily restricted",
+    "we detected unusual activity from your device or network",
+]
+
+# The hard-block variant above has no widget to solve -- it's a cooldown,
+# not a challenge -- so the "solve it by hand" prompt in _wait_out_datadome
+# would be actively misleading for it. Checked separately so the log
+# message matches what's actually on screen.
+DATADOME_HARD_BLOCK_MARKERS = [
+    "access is temporarily restricted",
+]
+
+DOWNLOAD_TIMEOUT_MS     = 600_000  # ms; confirmed clean downloads for the
+                                    # largest years take up to ~440s server-
+                                    # side alone, well past the old 180s cap
+DATADOME_WAIT_TIMEOUT_S = 900      # how long to wait for a human to solve it
+                                    # -- widened from 600s 2026-09-23: the
+                                    # GR/CR sweep can run long enough
+                                    # unattended that a shorter window risks
+                                    # giving up before anyone notices a
+                                    # slider needs solving
+DATADOME_POLL_S         = 3
+DATADOME_MAX_CONSECUTIVE_BLOCKS = 6  # abort the sweep rather than hammer a
+                                    # live block -- raised from 3 2026-09-23
+                                    # (GR ID 14 hit it on the first pass with
+                                    # the old, tighter pacing below; give a
+                                    # slider more chances to get solved
+                                    # before the whole sweep bails)
+
+# The GR/CR per-ID detail sweep is the single most repetitive, most
+# bot-shaped request pattern in this file -- thousands of sequential
+# integer IDs. First widened from a flat 0.1-0.2s to 0.6-1.8s + a break
+# every 40, but that still wasn't enough: a live run hit the DataDome
+# slider at GR ID 14, before even one break fired. Escalated further
+# 2026-09-23 -- real wall-clock cost here is acceptable, this is a
+# background sweep, not something anyone is waiting on interactively.
+GR_CR_ID_PAUSE    = (3.0, 6.0)   # normal per-ID pause
+GR_CR_BREAK_EVERY = 25           # take a longer break every N requests
+GR_CR_BREAK_PAUSE = (20.0, 45.0)
+
+
+def _gr_cr_pace(n: int) -> None:
+    """Call once per ID processed (blank or found) in the GR/CR sweep."""
+    time.sleep(random.uniform(*GR_CR_ID_PAUSE))
+    if n > 0 and n % GR_CR_BREAK_EVERY == 0:
+        time.sleep(random.uniform(*GR_CR_BREAK_PAUSE))
+
+
+def _content_has_datadome(content: str) -> bool:
+    lowered = content.lower()
+    return any(marker in lowered for marker in DATADOME_MARKERS)
+
+
+def _looks_like_datadome(page) -> bool:
+    try:
+        content = page.content()
+    except Exception:
+        return False
+    return _content_has_datadome(content)
+
+
+def _wait_out_datadome(page, log, where: str) -> bool | None:
+    """If DataDome is showing (either the interactive slider challenge or
+    the no-widget "Access is temporarily restricted" cooldown variant), log
+    an accurate message and poll until it clears or we give up after
+    DATADOME_WAIT_TIMEOUT_S.
+
+    Returns None if DataDome was never showing at all, True if it was
+    showing and cleared before the timeout, False if it was still showing
+    when we gave up -- callers should treat False as a signal to back off
+    hard (stop retrying at normal cadence) rather than just another
+    per-item failure, since hammering a live block only reinforces it."""
+    try:
+        content = page.content()
+    except Exception:
+        return None
+    if not _content_has_datadome(content):
+        return None
+
+    hard_block = any(m in content.lower() for m in DATADOME_HARD_BLOCK_MARKERS)
+    if hard_block:
+        log.warning(
+            f"[!] DataDome hard block ('Access is temporarily restricted') at "
+            f"{where} -- no widget to solve, this is an IP-level cooldown that "
+            f"only clears on its own (waiting up to {DATADOME_WAIT_TIMEOUT_S}s)"
+        )
+    else:
+        log.warning(
+            f"[!] DataDome challenge detected at {where} -- solve the slider "
+            f"in the visible browser window (waiting up to {DATADOME_WAIT_TIMEOUT_S}s)"
+        )
+
+    waited = 0
+    while waited < DATADOME_WAIT_TIMEOUT_S:
+        time.sleep(DATADOME_POLL_S)
+        waited += DATADOME_POLL_S
+        if not _looks_like_datadome(page):
+            log.info(f"  DataDome block at {where} cleared after {waited}s")
+            return True
+    log.warning(
+        f"  DataDome block at {where} still showing after "
+        f"{DATADOME_WAIT_TIMEOUT_S}s -- giving up on this attempt"
+    )
+    return False
+
+
+def _goto_export_link(page, csv_link, href: str | None, log) -> None:
+    """Trigger the CSV download by navigating directly to the export
+    link's href instead of clicking the <a> element.
+
+    Investigated live 2026-09-23 (see docs/states/alaska.md): the export
+    link (`a[id*='hlAllCSV']`) opens target="_blank", and confirmed the
+    underlying export URL is a plain, deterministic GET
+    (`?exportAll=True&exportFormat=CSV&isExport=True&...`) that returns the
+    CSV directly once Search+Export have set server-side state -- a real
+    in-page fetch() to it works standalone. Went as far as prototyping a
+    full fetch()-driven replacement for the Search/Export clicks too, but
+    backed off: a DataDome challenge triggered mid-fetch() would be
+    invisible (nothing renders in the browser for a human to solve), which
+    would quietly break the human-solvable design _wait_out_datadome()
+    depends on. So Search/Export stay real Playwright clicks -- any
+    DataDome hit there still renders normally in the visible window -- and
+    only this last step (which needs no further server-side interaction)
+    is a direct goto() to the href instead of a click. This makes download
+    capture unambiguous rather than depending on Playwright's context-level
+    accept_downloads correctly attributing a new-tab click's download back
+    to this page's expect_download(), which usually works but isn't
+    guaranteed across Chromium versions. Falls back to the original click()
+    if no href was found, so this is a pure improvement, not a behavior
+    change when the DOM doesn't look as expected."""
+    if href:
+        try:
+            # wait_until="commit" resolves as soon as the response headers
+            # arrive, instead of Playwright's default "load" -- a download
+            # response never fires "load" (no page loads), so the default
+            # would time out at 30s on every single successful download,
+            # trigger a needless fallback click() (itself racing the
+            # already-in-flight download and prone to its own timeout),
+            # and log a scary-looking warning for what was actually a
+            # clean success. Confirmed live 2026-09-23: without this, 3/5
+            # of one run's downloads succeeded silently via a fast
+            # ERR_ABORTED and 1/5 hit this exact false-alarm path.
+            page.goto(href, timeout=30_000, wait_until="commit")
+        except Exception as e:
+            # A download response reclassifies the navigation and goto()
+            # raises for it -- expected, the download itself is tracked
+            # separately by expect_download(). Anything else (bad URL,
+            # DNS, etc.) is a real failure and must not be swallowed
+            # silently -- that's exactly what let the 2026-09-23
+            # relative-href bug hide as "not hitting the csv button".
+            msg = str(e)
+            if "ERR_ABORTED" not in msg and "Download is starting" not in msg:
+                log.warning(f"  [!] goto(href) for CSV export failed unexpectedly: {msg!r} -- falling back to click()")
+                try:
+                    csv_link.click()
+                except Exception as e2:
+                    log.warning(f"  [!] fallback click() also failed: {e2!r}")
+    else:
+        try:
+            csv_link.click()
+        except Exception as e:
+            log.warning(f"  [!] csv_link.click() failed with no href available: {e!r}")
+
+
 def download_candidates(page, context, log) -> tuple[str, int] | None:
     page_url = PAGES["candidates"]
     page.goto(page_url, timeout=30_000)
     page.wait_for_load_state("networkidle")
+    _wait_out_datadome(page, log, "candidates page load")
 
     year_sel = page.locator("select[name*='ddlYear']")
     if year_sel.count():
@@ -670,6 +977,7 @@ def download_candidates(page, context, log) -> tuple[str, int] | None:
     if search_btn.count():
         page.click("input[value='Search']")
         page.wait_for_load_state("networkidle")
+        _wait_out_datadome(page, log, "candidates search")
 
     body_text = page.locator("body").inner_text()
     if "No records" in body_text or "0 records" in body_text.lower():
@@ -677,10 +985,17 @@ def download_candidates(page, context, log) -> tuple[str, int] | None:
         return None
 
     page.click("input[value='Export']")
+    _wait_out_datadome(page, log, "candidates export click")
 
     csv_link = page.locator("a[id*='hlAllCSV']")
     try:
         csv_link.wait_for(timeout=15_000)
+        # get_attribute("href") returns the raw HTML attribute, which on
+        # this ASP.NET page is relative -- page.goto() on a context with
+        # no baseURL throws on that. evaluate() reads the DOM's resolved
+        # (absolute) href property instead, matching what live DevTools
+        # testing confirmed works.
+        csv_href = csv_link.evaluate("el => el.href")
     except Exception:
         log.warning("  [!] Export dialog did not appear for candidates")
         return None
@@ -688,8 +1003,8 @@ def download_candidates(page, context, log) -> tuple[str, int] | None:
     filename = "CDCandidates_all.csv"
     out_path = RAW_DIR / filename
 
-    with page.expect_download(timeout=180_000) as dl_info:
-        csv_link.click()
+    with page.expect_download(timeout=DOWNLOAD_TIMEOUT_MS) as dl_info:
+        _goto_export_link(page, csv_link, csv_href, log)
 
     dl = dl_info.value
     dl.save_as(str(out_path))
@@ -703,6 +1018,7 @@ def download_year(page, context, relation_type: str, year: str, log) -> tuple[st
     page_url = PAGES[relation_type]
     page.goto(page_url, timeout=30_000)
     page.wait_for_load_state("networkidle")
+    _wait_out_datadome(page, log, f"{relation_type} {year} page load")
 
     year_sel = page.locator("select[name*='ddlReportYear']")
     if year_sel.count():
@@ -717,6 +1033,7 @@ def download_year(page, context, relation_type: str, year: str, log) -> tuple[st
 
     page.click("input[value='Search']")
     page.wait_for_load_state("networkidle")
+    _wait_out_datadome(page, log, f"{relation_type} {year} search")
 
     body_text = page.locator("body").inner_text()
     if "No records" in body_text or "0 records" in body_text.lower():
@@ -727,13 +1044,19 @@ def download_year(page, context, relation_type: str, year: str, log) -> tuple[st
     out_path = RAW_DIR / filename
     csv_link = page.locator("a[id*='hlAllCSV']")
 
-    with page.expect_download(timeout=180_000) as dl_info:
+    with page.expect_download(timeout=DOWNLOAD_TIMEOUT_MS) as dl_info:
         page.click("input[value='Export']")
+        _wait_out_datadome(page, log, f"{relation_type} {year} export click")
+        csv_href = None
         try:
             csv_link.wait_for(timeout=8_000)
-            csv_link.click()
+            # see download_candidates() above -- evaluate() gives the
+            # resolved absolute href, get_attribute() would give the raw
+            # (relative) one and silently break goto().
+            csv_href = csv_link.evaluate("el => el.href")
         except Exception:
             pass
+        _goto_export_link(page, csv_link, csv_href, log)
 
     dl = dl_info.value
     dl.save_as(str(out_path))
@@ -754,6 +1077,7 @@ def run(
     expenditures: bool = False,
     candidates: bool = False,
     committees: bool = False,
+    independent_expenditures: bool = False,
 ):
     """Orchestrate download of transaction CSVs and/or candidate/group entities.
 
@@ -767,8 +1091,9 @@ def run(
         entities                — candidates + groups + GR/CR details only
         contributions           — income only (implies transactions)
         expenditures            — expenditures only (implies transactions)
-        candidates              — CDCandidates + CR details only (implies entities)
+        candidates              — CDCandidates + CRForms bulk + CR details only (implies entities)
         committees              — groups + GR details only (implies entities)
+        independent_expenditures — IE (Form 15-6) bulk exports only (its own filing track, own manifest vertical -- not folded into entities/transactions so an --entities/--transactions caller doesn't unexpectedly pick it up). Uses the same year-based bulk Search/Export flow as income/expenditures/groups, not a per-ID detail sweep.
     """
     log = get_logger("alaska", "scrape")
     t0  = time.perf_counter()
@@ -776,7 +1101,8 @@ def run(
     log._emit("scrape_started", force=force, entities=entities, transactions=transactions,
               start_year=start_year, end_year=end_year,
               contributions=contributions, expenditures=expenditures,
-              candidates=candidates, committees=committees)
+              candidates=candidates, committees=committees,
+              independent_expenditures=independent_expenditures)
 
     try:
         from playwright.sync_api import sync_playwright
@@ -790,7 +1116,8 @@ def run(
     # ── Resolve granular scope ────────────────────────────────────────
     # Any horizontal flag set → only the named types; none → everything.
     no_horizontal = not (entities or transactions or contributions or
-                         expenditures or candidates or committees)
+                         expenditures or candidates or committees or
+                         independent_expenditures)
 
     do_income        = no_horizontal or transactions or contributions
     do_expend        = no_horizontal or transactions or expenditures
@@ -798,6 +1125,10 @@ def run(
     do_groups_dl     = no_horizontal or entities or committees
     do_gr_details    = no_horizontal or entities or committees
     do_cr_details    = no_horizontal or entities or candidates
+    # Independent_expenditures is its OWN horizontal flag, not folded into
+    # entities -- see run()'s docstring. no_horizontal alone still covers
+    # the plain-no-flags "download everything" case.
+    do_ie            = no_horizontal or independent_expenditures
 
     files_ok = files_err = pages_ok = pages_err = 0
     current_year = str(datetime.today().year)
@@ -808,7 +1139,10 @@ def run(
         if do_income:        relations_to_clear.add("income")
         if do_expend:        relations_to_clear.add("expenditures")
         if do_candidates_dl: relations_to_clear.add("candidates")
+        if do_candidates_dl: relations_to_clear.add("cr_forms")
         if do_groups_dl:     relations_to_clear.add("groups")
+        if do_ie:            relations_to_clear.add("ie_expenditures")
+        if do_ie:            relations_to_clear.add("ie_contributions")
         strip_manifest(lambda r: r["relation_type"] not in relations_to_clear)
         # Detail files are cleared inside their download functions when force=True
 
@@ -816,9 +1150,12 @@ def run(
         # Year range — wipe manifest entries for year-based relations within the range
         # so they get re-downloaded, not skipped as "already done".
         year_based = set()
-        if do_income:    year_based.add("income")
-        if do_expend:    year_based.add("expenditures")
-        if do_groups_dl: year_based.add("groups")
+        if do_income:        year_based.add("income")
+        if do_expend:        year_based.add("expenditures")
+        if do_groups_dl:     year_based.add("groups")
+        if do_candidates_dl: year_based.add("cr_forms")
+        if do_ie:            year_based.add("ie_expenditures")
+        if do_ie:            year_based.add("ie_contributions")
 
         def _outside_range(r: dict) -> bool:
             """Keep rows that are NOT in the wipe zone."""
@@ -843,14 +1180,39 @@ def run(
     if do_income:        pages_to_run.add("income")
     if do_expend:        pages_to_run.add("expenditures")
     if do_candidates_dl: pages_to_run.add("candidates")
+    if do_candidates_dl: pages_to_run.add("cr_forms")
     if do_groups_dl:     pages_to_run.add("groups")
+    if do_ie:            pages_to_run.add("ie_expenditures")
+    if do_ie:            pages_to_run.add("ie_contributions")
 
     try:
         # ── Playwright: transaction CSVs + candidate/group exports ────
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
-            context = browser.new_context(accept_downloads=True)
-            page    = context.new_page()
+            # Persistent profile (PROFILE_DIR), not a fresh launch()/
+            # new_context() pair. Confirmed live 2026-09-23: aws.state.ak.us
+            # is fronted by DataDome, which serves an interactive "slide to
+            # verify" challenge when it sees automated-looking traffic
+            # (explicitly names "rapid taps or clicks" / "automated bot
+            # activity" as trigger reasons -- matches this scraper's own
+            # back-to-back year-download pattern). It requires a real human
+            # drag gesture; it cannot be solved by script. A throwaway
+            # new_context() starts with zero cookies every run, so DataDome
+            # has no way to recognize a returning, already-trusted session,
+            # and a fresh challenge is effectively guaranteed every time.
+            # launch_persistent_context() writes cookies (including the
+            # `datadome` trust cookie set after a challenge is solved) to
+            # PROFILE_DIR on disk -- solve it once by hand and later runs
+            # reuse that cookie, same fix already proven for Missouri's
+            # Incapsula CAPTCHA elsewhere in this repo. If the challenge
+            # ever reappears, that's the trust cookie expiring or getting
+            # invalidated, not a code regression -- just solve it again once.
+            context = p.chromium.launch_persistent_context(
+                str(PROFILE_DIR), headless=False, accept_downloads=True,
+                args=LAUNCH_ARGS, user_agent=DESKTOP_USER_AGENT,
+                viewport=VIEWPORT, locale=LOCALE, timezone_id=TIMEZONE_ID,
+            )
+            context.add_init_script(STEALTH_INIT_SCRIPT)
+            page = context.new_page()
 
             for relation_type, page_url in PAGES.items():
                 if relation_type not in pages_to_run:
@@ -896,6 +1258,7 @@ def run(
                 # Year-based relations (income, expenditures, groups)
                 page.goto(page_url, timeout=30_000)
                 page.wait_for_load_state("networkidle")
+                _wait_out_datadome(page, log, f"{relation_type} years dropdown load")
 
                 years = get_available_years(page)
                 if not years:
@@ -903,6 +1266,7 @@ def run(
                     continue
 
                 log.info(f"  Available years: {years[0]}–{years[-1]} ({len(years)} total)")
+                consecutive_datadome_blocks = 0
 
                 for year in years:
                     yr_int        = int(year)
@@ -944,6 +1308,19 @@ def run(
                     if err_msg:
                         log.file_download_error(filename=expected_stem, error=err_msg)
                         files_err += 1
+                        try:
+                            was_datadome = not page.is_closed() and _content_has_datadome(page.content())
+                        except Exception:
+                            was_datadome = False
+                        if was_datadome:
+                            consecutive_datadome_blocks += 1
+                            if consecutive_datadome_blocks >= DATADOME_MAX_CONSECUTIVE_BLOCKS:
+                                log.warning(
+                                    f"  {consecutive_datadome_blocks} consecutive DataDome "
+                                    f"blocks on {relation_type} -- stopping this relation type "
+                                    f"rather than hammering a live block; re-run later to resume"
+                                )
+                                break
                         continue
 
                     if result is None:
@@ -954,6 +1331,7 @@ def run(
                     log.file_download_ok(filename=filename, bytes=size, rows=row_count,
                                          duration_s=time.perf_counter() - t_file)
                     files_ok += 1
+                    consecutive_datadome_blocks = 0
                     upsert_manifest({
                         "relation_type": relation_type,
                         "year":          year,
@@ -961,19 +1339,29 @@ def run(
                         "row_count":     row_count,
                     })
                     done.add(key)
-                    time.sleep(1)
+                    # DataDome's own challenge copy calls out "rapid taps or
+                    # clicks" as a trigger signal -- a little jitter between
+                    # years (vs. the old flat 1s) costs almost nothing over
+                    # a run and reduces how metronomic the request pattern
+                    # looks.
+                    time.sleep(random.uniform(2.0, 5.0))
 
-            browser.close()
+            context.close()
 
         # ── GR + CR detail scrapes ────────────────────────────────────
         if do_gr_details or do_cr_details:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=False)
-                context = browser.new_context(accept_downloads=True)
-                page    = context.new_page()
+                context = p.chromium.launch_persistent_context(
+                    str(PROFILE_DIR), headless=False, accept_downloads=True,
+                    args=LAUNCH_ARGS, user_agent=DESKTOP_USER_AGENT,
+                    viewport=VIEWPORT, locale=LOCALE, timezone_id=TIMEZONE_ID,
+                )
+                context.add_init_script(STEALTH_INIT_SCRIPT)
+                page = context.new_page()
 
                 page.goto(PAGES["groups"])
                 page.wait_for_load_state("networkidle")
+                _wait_out_datadome(page, log, "GR/CR warm-up page load")
 
                 if do_gr_details:
                     p_ok, p_err = download_gr_details(page, log, force=force)
@@ -985,7 +1373,7 @@ def run(
                     pages_ok  += p_ok
                     pages_err += p_err
 
-                browser.close()
+                context.close()
 
         duration = round(time.perf_counter() - t0, 1)
         log.info(f"Done in {duration}s")
@@ -1023,7 +1411,7 @@ if __name__ == "__main__":
     #   --entities        candidates + groups + GR/CR details
     #   --contributions   income only
     #   --expenditures    expenditures only
-    #   --candidates      CDCandidates + CR details
+    #   --candidates      CDCandidates + CRForms bulk + CR details
     #   --committees      groups + GR details
     import argparse
     ap = argparse.ArgumentParser(
@@ -1052,9 +1440,12 @@ if __name__ == "__main__":
     ap.add_argument("--expenditures",  action="store_true",
                     help="expenditure files only")
     ap.add_argument("--candidates",    action="store_true",
-                    help="CDCandidates export + CR details only")
+                    help="CDCandidates export + CRForms bulk + CR details only")
     ap.add_argument("--committees",    action="store_true",
                     help="GRForms + GR details only")
+    ap.add_argument("--independent-expenditures", action="store_true",
+                    dest="independent_expenditures",
+                    help="IE (Form 15-6) bulk exports only -- separate filing track from everything else this scraper covers")
 
     args, _ = ap.parse_known_args()
 
@@ -1081,6 +1472,7 @@ if __name__ == "__main__":
             expenditures=args.expenditures,
             candidates=args.candidates,
             committees=args.committees,
+            independent_expenditures=args.independent_expenditures,
         )
     except KeyboardInterrupt:
         sys.exit(130)

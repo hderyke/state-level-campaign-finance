@@ -46,7 +46,12 @@ COMMITTEES = [
     # identity -- this field would inherit the same unreliability if it
     # resolved to person_id instead of storing the name directly.
     "affiliated_candidate_name",
-    "support_oppose",   # "S" or "O" -- blank if not (yet) known
+    "support_oppose",   # "S" (support), "O" (oppose), or "U" (targets a
+                        # candidate/committee but no declared direction --
+                        # e.g. WI's own Support Stance field, populated on
+                        # only ~5% of its IE rows even though the targeted
+                        # committee is known on ~99%, confirmed 2026-09-26)
+                        # -- blank if not an IE row at all
     "raw_file",
     "row_num",
 ]

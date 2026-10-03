@@ -82,6 +82,11 @@ MANIFEST_COLS = [
 ]
 
 # ========================= source constants ===========================
+SOURCES = [
+    {"name": "Wisconsin Ethics Commission -- Sunshine Campaign Finance Disclosure",
+     "url": "https://campaignfinance.wi.gov/browse-data"},
+]
+
 BASE_URL   = "https://campaignfinance.wi.gov"
 API_BASE   = f"{BASE_URL}/api/data-download"
 BROWSE_URL = f"{BASE_URL}/browse-data"

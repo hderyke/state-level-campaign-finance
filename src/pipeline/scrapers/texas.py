@@ -110,6 +110,19 @@ MANIFEST_COLS = ["item", "published", "etag", "last_modified", "bytes", "rows",
 # ========================= state-specific constants ===================
 ARCHIVE_URL = "https://prd.tecprd.ethicsefile.com/public/cf/public/TEC_CF_CSV.zip"
 INDEX_URL   = "https://www.ethics.state.tx.us/search/cf/"
+
+# push_sources.py reads this literal list (see that module's docstring) to
+# back the "Sources" section on state/race/candidate profile pages -- points
+# at the public search portal, not the raw archive zip, same as every other
+# state's SOURCES entry links to a human-readable page rather than a
+# machine-facing download endpoint. Must be a fully literal list (matching
+# INDEX_URL above by value, not by reference) -- push_sources.py execs just
+# this assignment in isolation, so a name reference to INDEX_URL would raise
+# NameError there even though it resolves fine within this module itself.
+SOURCES = [
+    {"name": "Texas Ethics Commission — Campaign Finance Search",
+     "url": "https://www.ethics.state.tx.us/search/cf/"},
+]
 # Standalone copies of the two documentation files. Not fetched — the same
 # files ship inside the archive and are extracted from there, so they always
 # describe the snapshot they came with. Recorded for reference.

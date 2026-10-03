@@ -347,22 +347,65 @@ def parse_committees(log) -> int:
         # so synthesized rows get the real state_filer_id and election_year.
         # Keys are uppercased stripped committee names (lblCandName in TRACER), which
         # match what appears in the Candidate/Committee column of transaction files.
-        cand_acct: dict[str, tuple[str, str]] = {}  # norm_name → (AcctNum, elec_year)
+        # 2026-09-27: keyed by (name, OfficeCode), not name alone, and the
+        # NEWEST registration wins instead of the first file read. Before
+        # this, a candidate who had ever filed for another office (or for
+        # the same office in an earlier cycle) collapsed onto one
+        # synthesized committee carrying whichever AcctNum sorted first --
+        # fl_candidates_2024_* reads before fl_candidates_2026_* -- so e.g.
+        # Blaise Ingoglia's 2026 CFO account ("Ingoglia, Blaise (REP)(CFO)",
+        # AcctNum 89394) was stamped with his 2024 State Senate AcctNum
+        # 83632 / election_year 2024. The Supabase transform tracks
+        # committees by the current cycle's candidate AcctNums, so his
+        # entire CFO account was silently dropped ($0 on the site). The
+        # office code is the second trailing paren group in the
+        # transaction files' Candidate/Committee column, and matches the
+        # bulk candidate files' OfficeCode column (CFO, ATG, STR, STS ...).
+        #
+        # Names are also indexed both as "LAST, FIRST" and "LAST, FIRST
+        # MIDDLE": transaction files sometimes include the middle name
+        # ("Rodriguez, Jose Javier (DEM)(ATG)") while the bulk file splits
+        # it into NameMiddle, which left Jose Javier Rodriguez's AG account
+        # with a hashed fallback id and no link to his candidate row.
+        def _name_keys(last: str, first: str, middle: str) -> list[str]:
+            keys = []
+            base = utils.clean_name(f"{last}, {first}" if last else first)
+            if base:
+                keys.append(base)
+            if last and middle:
+                keys.append(utils.clean_name(f"{last}, {first} {middle}"))
+            return keys
+
+        # (norm_name, office_code) -> (AcctNum, elec_year, ElectionID);
+        # norm_name -> same, as a fallback when the transaction row carries
+        # no usable office code. Newest ElectionID wins in both.
+        cand_by_office: dict[tuple[str, str], tuple[str, str, str]] = {}
+        cand_by_name: dict[str, tuple[str, str, str]] = {}
+
+        def _keep_newest(d, key, val):
+            cur = d.get(key)
+            if cur is None or val[2] > cur[2]:
+                d[key] = val
+
         for cand_path in raw_files("fl_candidates_*.txt"):
             with open(cand_path, newline="", encoding="utf-8", errors="replace") as f:
                 for row in csv.DictReader(f, delimiter="\t"):
                     acct    = clean(row.get("AcctNum", ""))
                     last    = clean(row.get("NameLast",  ""))
                     first   = clean(row.get("NameFirst", ""))
+                    middle  = clean(row.get("NameMiddle", ""))
                     elec_id = clean(row.get("ElectionID", ""))
+                    office  = clean(row.get("OfficeCode", "")).upper()
                     if not acct:
                         continue
-                    # Transaction files use "Last, First" format for candidate committees
-                    norm = utils.clean_name(f"{last}, {first}" if last else first)
-                    if norm and norm not in cand_acct:
-                        cand_acct[norm] = (acct, election_year_from_id(elec_id))
+                    val = (acct, election_year_from_id(elec_id), elec_id)
+                    for norm in _name_keys(last, first, middle):
+                        if office:
+                            _keep_newest(cand_by_office, (norm, office), val)
+                        _keep_newest(cand_by_name, norm, val)
 
-        synthetic: dict[str, tuple[str, str, str]] = {}  # norm_name → (cand_name, acct, elec_year)
+        # (norm_name, office_code) -> (cand_name, acct, elec_year)
+        synthetic: dict[tuple[str, str], tuple[str, str, str]] = {}
         for pattern in ("fl_contributions_*.txt", "fl_expenditures_*.txt"):
             for tx_path in raw_files(pattern):
                 with open(tx_path, newline="", encoding="utf-8",
@@ -375,16 +418,30 @@ def parse_committees(log) -> int:
                         norm = utils.clean_name(cmte_name)
                         if not norm or norm.lower() in written_names:
                             continue
-                        if norm not in synthetic:
-                            acct, elec_year = cand_acct.get(norm, ("", ""))
-                            synthetic[norm] = (cand_name, acct, elec_year)
+                        trailing = re.findall(r"\(([A-Z]{2,5})\)", raw)
+                        office = trailing[-1] if cand_name and len(trailing) >= 2 else ""
+                        key = (norm, office)
+                        if key not in synthetic:
+                            hit = (cand_by_office.get((norm, office)) if office else None) \
+                                  or cand_by_name.get(norm)
+                            acct, elec_year = (hit[0], hit[1]) if hit else ("", "")
+                            synthetic[key] = (cand_name, acct, elec_year)
 
         synth_row_num = written + 2
-        for norm_name, (cand_name, acct, elec_year) in synthetic.items():
+        n_synth = 0
+        seen_accts: set[str] = set()
+        for (norm_name, office), (cand_name, acct, elec_year) in synthetic.items():
             # Fall back to name-hash only when no AcctNum was found
             if not acct:
-                key  = f"{STATE}|{norm_name}".encode()
+                key  = f"{STATE}|{norm_name}|{office}".encode() if office \
+                       else f"{STATE}|{norm_name}".encode()
                 acct = str(int(hashlib.md5(key).hexdigest(), 16) % 1_000_000_000_000)
+            # Two office codes can resolve to the same registration only via
+            # the name-only fallback -- never emit a duplicate state_filer_id
+            # (Supabase's committees table is unique on it).
+            if acct in seen_accts:
+                continue
+            seen_accts.add(acct)
             cmte_w.writerow({
                 "state":          STATE,
                 "committee_name": norm_name,
@@ -395,12 +452,12 @@ def parse_committees(log) -> int:
                 "raw_file":       "fl_contributions/expenditures (synthesized)",
                 "row_num":        synth_row_num,
             })
-            written_names.add(norm_name.lower())
             written       += 1
+            n_synth       += 1
             synth_row_num += 1
 
-        log.info(f"  committees: {written - len(synthetic):,} from details + "
-                 f"{len(synthetic):,} synthesized from transactions")
+        log.info(f"  committees: {written - n_synth:,} from details + "
+                 f"{n_synth:,} synthesized from transactions")
 
     finally:
         cmte_fh.close()
