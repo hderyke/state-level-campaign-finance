@@ -267,6 +267,33 @@ def _is_ie_ghost_registration(row: dict) -> bool:
 
 # ========================== registry loader ===========================
 
+def load_office_cycles() -> dict[tuple[str, str], str]:
+    """{(entity_id, office_name as the registry spells it): most recent cycle
+    that committee was registered for that office}, from
+    az_committee_cycles.csv (the scraper's per-cycle registry fetch).
+
+    This is where a candidate row's election_year comes from. The main
+    registry file has no cycle on its rows, so a committee that has run for
+    several offices lists all of them as if they were current. Here
+    ("201800057", "Governor") -> "2026" and ("201800057", "Secretary of
+    State") -> "2022", which is what lets everything downstream tell Katie
+    Hobbs's current race from her old ones. Empty when the file is missing
+    (an older raw directory): election_year stays blank, as it always was."""
+    path = RAW_DIR / "az_committee_cycles.csv"
+    out: dict[tuple[str, str], str] = {}
+    if not path.exists():
+        return out
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        for row in csv.DictReader(f):
+            cycle = clean(row.get("cycle", ""))
+            key = (clean(row.get("entity_id", "")), clean(row.get("office_name", "")))
+            if not (cycle.isdigit() and key[0]):
+                continue
+            if key not in out or int(cycle) > int(out[key]):
+                out[key] = cycle
+    return out
+
+
 def load_registry() -> tuple[dict, dict, dict]:
     """
     Build lookup dicts from az_committees_all.csv.
@@ -409,6 +436,7 @@ def run():
 
         # ── Candidates: Candidate entity types from registry ──────────────────
         log.info(f"  candidates     {reg_path.name if reg_path.exists() else '(not found)'}...")
+        office_cycles = load_office_cycles()
         ft = time.perf_counter()
         if reg_path.exists():
             with open(reg_path, newline="", encoding="utf-8", errors="replace") as f:
@@ -439,7 +467,8 @@ def run():
                         "district":        district,
                         "jurisdiction":    "",
                         "party":           party,
-                        "election_year":   "",
+                        "election_year":   office_cycles.get(
+                            (clean(row.get("entity_id", "")), office_raw), ""),
                         "status":          etype,
                         "incumbent":       "",
                         "raw_file":        reg_path.name,

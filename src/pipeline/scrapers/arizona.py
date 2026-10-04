@@ -377,6 +377,124 @@ def download_registry(log, session: req_lib.Session) -> tuple[int, int]:
 
 # =========================== transactions =============================
 
+# ====================== registry, one cycle at a time ==================
+#
+# az_committees_all.csv (above) is fetched with ShowAllYears=true: one row
+# per committee per year, across every cycle, with nothing on the row to say
+# WHICH cycle. A committee that has run for several offices over the years
+# therefore lists all of them with no way to tell the current one -- Katie
+# Hobbs's single committee appears under Secretary of State, Governor and a
+# state house seat, and downstream she landed in all three 2026 races.
+#
+# The site's own table answers the question when asked for one year range:
+# GetNEWTableData with startYear/endYear returns only the committees active
+# in that range, each with the office it was registered for THEN (2025-2026
+# gives Hobbs one row: Governor). Request shape copied from the site
+# (browser DevTools, 2026-10-03), not guessed. One request per cycle, written
+# to az_committee_cycles.csv; the parser turns it into election_year.
+
+REGISTRY_CYCLE_COLS = ["cycle", "entity_id", "committee_name", "office_name",
+                       "party_name", "income", "expense"]
+_REGISTRY_CYCLE_TABLE_COLS = ["EntityLastName", "CommitteeName", "OfficeName", "PartyName",
+                              "Income", "Expense", "CashBalance", "IESupport", "IEOpposition"]
+
+
+def fetch_registry_cycle(session: req_lib.Session, start_year: int, end_year: int) -> list[dict]:
+    """Candidate committees active in [start_year, end_year], with the office
+    each was registered for in that range."""
+    params = {
+        "Page":             "1",        # 1 = Candidate, same numbering as REGISTRY_PAGES
+        "startYear":        str(start_year),
+        "endYear":          str(end_year),
+        "JurisdictionId":   "0",
+        "TablePage":        "1",
+        "TableLength":      "10",
+        # true, not the false the site sends by default: false hides every
+        # committee the site calls "less active", which in 2025-2026 is 352
+        # of 717, including ones raising real money this cycle under an
+        # older registration (Arizonans for Matt Gress, Vote Bolick). true
+        # returns the full list, the default ones included.
+        "IsLessActive":     "true",
+        "ShowOfficeHolder": "false",
+        "ChartName":        "1",
+    }
+    body = {"draw": "1", "order[0][column]": "0", "order[0][dir]": "asc",
+            "start": "0", "length": "100000",
+            "search[value]": "", "search[regex]": "false"}
+    for i, col in enumerate(_REGISTRY_CYCLE_TABLE_COLS):
+        body[f"columns[{i}][data]"] = col
+        body[f"columns[{i}][name]"] = ""
+        body[f"columns[{i}][searchable]"] = "true"
+        body[f"columns[{i}][orderable]"] = "true"
+        body[f"columns[{i}][search][value]"] = ""
+        body[f"columns[{i}][search][regex]"] = "false"
+    r = session.post(f"{REPORTING_URL}/GetNEWTableData/", params=params, data=body,
+                     headers={"Referer": "https://seethemoney.az.gov/Reporting/Explore"},
+                     timeout=60)
+    r.raise_for_status()
+    payload = r.json()
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError(f"unexpected response shape: {type(payload).__name__}")
+    total = payload.get("recordsTotal")
+    # Fewer rows than the site says exist means the page was cut short.
+    # More is normal: recordsTotal runs a few under the row count in some
+    # cycles (2022: 511 reported, 513 returned), so it is not an exact match.
+    if isinstance(total, int) and len(rows) < total:
+        raise ValueError(f"asked for every row, got {len(rows)} of {total}")
+    return rows
+
+
+def download_registry_cycles(log, session: req_lib.Session) -> tuple[int, int]:
+    """Write az_committee_cycles.csv: one row per (cycle, candidate committee,
+    office). All-or-nothing: if any cycle fails, the previous file is left in
+    place, because a file missing one cycle would make that cycle's
+    candidates look like they have no year at all. Returns (ok, err)."""
+    out = RAW_DIR / "az_committee_cycles.csv"
+    t0 = time.perf_counter()
+    collected: list[dict] = []
+    ok = err = 0
+    for label, _ in CYCLES:
+        if not label.isdigit():
+            continue    # special cycles (a recall) are not a regular election year
+        end_year = int(label)
+        try:
+            rows = fetch_registry_cycle(session, end_year - 1, end_year)
+        except Exception as e:
+            log.page_scrape_error(entity="registry_cycle", page_id=label, error=str(e))
+            err += 1
+            continue
+        for raw in rows:
+            collected.append({
+                "cycle":          label,
+                "entity_id":      s(raw.get("EntityID")),
+                "committee_name": s(raw.get("CommitteeName")),
+                "office_name":    s(raw.get("OfficeName")),
+                "party_name":     s(raw.get("PartyName")),
+                "income":         s(raw.get("Income")),
+                "expense":        s(raw.get("Expense")),
+            })
+        ok += 1
+        log.info(f"    cycle {label}: {len(rows):,} candidate committees")
+        time.sleep(0.3)
+
+    if err:
+        log.info(f"  Registry cycles: {err} cycle(s) failed — keeping the previous "
+                 f"{out.name}" + ("" if out.exists() else " (none on disk yet)"))
+        return ok, err
+
+    tmp = out.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=REGISTRY_CYCLE_COLS)
+        writer.writeheader()
+        writer.writerows(collected)
+    tmp.replace(out)
+    log.page_scrape_complete(filename=str(out), rows=len(collected),
+                             duration_s=round(time.perf_counter() - t0, 2),
+                             ok=ok, err=err)
+    return ok, err
+
+
 def parse_cycle_dates(cycle_id_str: str) -> tuple[str, str]:
     _, raw_start, raw_end = cycle_id_str.split("~", 2)
     fmt   = "%m/%d/%Y %I:%M:%S %p"
@@ -1042,11 +1160,35 @@ def download_independent_expenditures_all(log, session: req_lib.Session, done: s
 
 # ========================= committee details ==========================
 
+def _ensure_detail_header(out: Path) -> None:
+    """Give az_committee_details.csv its header row if it has rows but no
+    header. download_committee_details() used to open the file in append
+    mode and only THEN ask whether it existed, so a file it had just created
+    never got a header; the next run's DictReader then took the first data
+    row as the header and died on row["entity_id"] (every scheduled run from
+    2026-08-26 on). Copies already on disk or in R2 are still headerless, so
+    this repairs them in place rather than relying on a re-download."""
+    if not out.exists() or out.stat().st_size == 0:
+        return
+    with open(out, newline="", encoding="utf-8") as f:
+        first = next(csv.reader(f), [])
+    if first[:1] == DETAIL_COLS[:1]:
+        return
+    tmp = out.with_suffix(".csv.tmp")
+    with open(out, newline="", encoding="utf-8") as src, \
+         open(tmp, "w", newline="", encoding="utf-8") as dst:
+        csv.writer(dst).writerow(DETAIL_COLS)
+        for line in src:
+            dst.write(line)
+    tmp.replace(out)
+
+
 def load_detail_done() -> set[str]:
     out = RAW_DIR / "az_committee_details.csv"
     if not out.exists():
         return set()
-    with open(out, newline="") as f:
+    _ensure_detail_header(out)
+    with open(out, newline="", encoding="utf-8") as f:
         return {row["entity_id"] for row in csv.DictReader(f)}
 
 
@@ -1107,9 +1249,12 @@ def download_committee_details(log, session: req_lib.Session,
     ok = err = 0
     t0 = time.perf_counter()
 
+    # Decided BEFORE open(): opening in append mode creates the file, so
+    # asking afterwards always said "exists" and the header was never written.
+    need_header = force or not out.exists() or out.stat().st_size == 0
     with open(out, "w" if force else "a", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=DETAIL_COLS, extrasaction="ignore")
-        if force or not out.exists():
+        if need_header:
             writer.writeheader()
 
         for i, eid in enumerate(todo, 1):
@@ -1250,6 +1395,9 @@ def run(
         if do_registry:
             log.info("Downloading registry...")
             ok, err = download_registry(log, session)
+            pages_ok += ok; pages_err += err
+            log.info("  Registry by cycle...")
+            ok, err = download_registry_cycles(log, session)
             pages_ok += ok; pages_err += err
 
         if do_transactions:
