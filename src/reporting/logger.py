@@ -6,10 +6,13 @@ Three modes, detected automatically from environment variables:
   Dev mode    — no CF_RUN_ID. Console at DEBUG, JSONL to:
                   logs/dev/{ts}-{state}-{operation}.jsonl
                   logs/dev/{ts}-{operation}.jsonl          (state-less, e.g. aggregate)
+                (single tools run by hand, Supabase dry runs, pushes to the
+                local database)
 
   Orc mode    — CF_RUN_ID set, CF_DAEMON not set. Console at INFO, JSONL to:
                   logs/prod/{YYYYMMDD_HHMMSS_command_states}/log.jsonl
-                (manual `main.py sync/reparse/push/pull` runs — "normal" use)
+                (`main.py sync/reparse` by hand, and pushes by hand to the live
+                database or R2, which start their run with start_manual_run())
 
   Daemon mode — CF_RUN_ID + CF_DAEMON set. Silent console, JSONL to:
                   logs/daemon/{YYYYMMDD_HHMMSS_command_states}/log.jsonl
@@ -54,6 +57,21 @@ def run_dir_for(run_id: str) -> Path:
     """
     bucket = "daemon" if os.environ.get("CF_DAEMON") else "prod"
     return LOGS_DIR / bucket / run_id
+
+
+def start_manual_run(command: str, states: list[str]) -> str:
+    """Starts a logs/prod run folder for a push run by hand against the live
+    database or R2, so it is filed with the other manual production runs and
+    not under logs/dev. Keeps a CF_RUN_ID that is already set (a daemon run,
+    or a caller that started its own). Returns the run id in use. Call it
+    before the first get_logger(): a logger picks its file when created."""
+    existing = os.environ.get("CF_RUN_ID")
+    if existing:
+        return existing
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_id = f"{ts}_{command}_{'-'.join(s.upper() for s in states)}"
+    os.environ["CF_RUN_ID"] = run_id
+    return run_id
 
 
 def _resolve_jsonl(state: str | None, operation: str) -> Path:

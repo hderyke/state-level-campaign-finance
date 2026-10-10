@@ -153,19 +153,35 @@ def build_report(events: list[dict]) -> dict:
         op   = e.get("operation", "")
 
         #  Run level
+        # ops/daemon.py runs main.py once per state into one run folder, so
+        # a log can hold several run_started/run_completed pairs: the first
+        # start and the last end are kept, states, counts and durations add up.
         if t == "run_started":
+            prev = r["run"]
+            states_ = list(prev.get("states", []))
+            states_ += [s for s in e.get("states", []) if s not in states_]
             r["run"] = {
-                "run_id":    e.get("run_id"),
-                "command":   e.get("command"),
-                "states":    e.get("states", []),
-                "ts_start":  e.get("ts"),
+                "run_id":    prev.get("run_id") or e.get("run_id"),
+                "command":   prev.get("command") or e.get("command"),
+                "states":    states_,
+                "ts_start":  prev.get("ts_start") or e.get("ts"),
+                **{k: prev[k] for k in ("status", "duration_s", "passed", "failed") if k in prev},
             }
         elif t == "run_completed":
+            prev = r["run"]
+
+            def _add(key):
+                a, b = prev.get(key), e.get(key)
+                return b if a is None else a if b is None else a + b
+
+            status = e.get("status")
+            if prev.get("status") not in (None, "completed"):
+                status = prev["status"]
             r["run"].update({
-                "status":    e.get("status"),
-                "duration_s": e.get("duration_s"),
-                "passed":    e.get("passed"),
-                "failed":    e.get("failed"),
+                "status":    status,
+                "duration_s": _add("duration_s"),
+                "passed":    _add("passed"),
+                "failed":    _add("failed"),
                 "ts_end":    e.get("ts"),
             })
 

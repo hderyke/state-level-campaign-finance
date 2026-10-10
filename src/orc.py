@@ -209,7 +209,12 @@ def _run_state(abbr: str, name: str, command: str,
 
 def _setup_run_id(command: str, state_abbrs: list[str],
                   extra_flags: list[str] | None = None) -> str:
-    """Build a human-readable run ID and set CF_RUN_ID for all subprocesses."""
+    """Build a human-readable run ID and set CF_RUN_ID for all subprocesses.
+    A CF_RUN_ID already in the environment is kept: ops/daemon.py starts one
+    run folder and calls main.py once per state into it."""
+    existing = os.environ.get("CF_RUN_ID")
+    if existing:
+        return existing
     ts     = datetime.now().strftime("%Y%m%d_%H%M%S")
     states = ("all" if (len(state_abbrs) == 1 and state_abbrs[0].lower() == "all")
               else "-".join(a.upper() for a in state_abbrs))
