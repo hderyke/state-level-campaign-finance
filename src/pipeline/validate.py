@@ -958,7 +958,7 @@ def _run(state_name: str, state_slug: str, state_upper: str, clean_dir: Path,
     # report below and the JSON report written at the end of this function.
     report = {
         "state":             state_upper,
-        "run_at":            datetime.today().isoformat(),
+        "run_at":            datetime.now().astimezone().isoformat(),  # with UTC offset
         "clean_dir":         str(clean_dir),
         "passed":            passed,
         "row_counts":        row_counts,
