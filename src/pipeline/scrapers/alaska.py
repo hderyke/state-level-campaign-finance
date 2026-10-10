@@ -3,8 +3,7 @@ scrapers/alaska.py — Download Alaska APOC campaign finance data.
 
 Requires a live browser session via Playwright — Alaska's WAF blocks datacenter
 IPs, so this must be run from a local machine. Exports are triggered by clicking
-Search then Export, mirroring normal user interaction. GR and CR detail pages
-are scraped individually by numeric ID with a consecutive-blank cutoff.
+Search then Export, mirroring normal user interaction.
 
 aws.state.ak.us is also fronted by DataDome (captcha-delivery.com) — confirmed
 live 2026-09-23 by firing a burst of export requests and getting back a real
@@ -21,16 +20,12 @@ _wait_out_datadome() below and docs/states/alaska.md.
 """
 
 import csv
-import html as html_mod
 import random
-import re
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-from tqdm import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 # Make project root and src/pipeline importable before importing local modules
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -70,19 +65,9 @@ PAGES = {
     "expenditures": "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDExpenditures.aspx",
     "candidates":   "https://aws.state.ak.us/apocreports/Campaign/AllCandidates.aspx?type=all",
     "groups":       "https://aws.state.ak.us/apocreports/Registration/GroupRegistration/GRForms.aspx",
-    # Bulk candidate-registration listing -- the direct analog of GRForms
-    # for candidates, confirmed live 2026-09-23 via the Registration menu
-    # (same "Registration/{X}Registration/{X}Forms.aspx" URL shape as
-    # groups). Goes through the exact same year-based download_year() path
-    # as GRForms below -- a plain Select-Year/Search/Export bulk export,
-    # never the per-ID cr_details sweep pattern that gets bot-detected.
-    # Its on-screen "Additional Fields" column picker offers Name/Last
-    # Name/First Name/Address/City/State/Zip/Election/Office/Phone/Fax/
-    # Email/Submitted/Status but NOT Treasurer Name -- so this closes the
-    # candidate_name/city/zip gap for Candidate-type committees (the thing
-    # cr_details was mainly needed for) but treasurer_name still needs the
-    # per-ID sweep. Real exported CSV column names not yet confirmed
-    # against a live download -- see parser's load_cr_forms_bulk().
+    # Bulk candidate-registration listing, the candidate analog of GRForms.
+    # Goes through the same year-based download_year() path. The export
+    # carries candidate name, committee, treasurer, city and zip.
     "cr_forms":     "https://aws.state.ak.us/apocreports/Registration/CandidateRegistration/CRForms.aspx",
     # Independent Expenditure (Form 15-6) bulk exports -- same
     # Select-Year/Status/Search/Export flow as income/expenditures/groups
@@ -143,93 +128,6 @@ window.navigator.permissions.query = (parameters) => (
 );
 """
 
-# ========================== GR detail scrape ==========================
-GR_DETAIL_URL        = "https://aws.state.ak.us/apocreports/Common/View.aspx?ID={id}&ViewType=GR"
-GR_DETAILS_PATH      = RAW_DIR / "gr_details.csv"
-MIN_GR_ID            = 0
-MAX_CONSECUTIVE_BLANK = 1000   # stop if this many consecutive IDs return blank
-
-GR_DETAILS_COLS = [
-    "gr_id", "group_name", "abbreviation", "group_type", "purpose",
-    "address", "city", "zip",
-    "chair_name", "chair_phone", "chair_email",
-    "treasurer_name", "treasurer_phone", "treasurer_email",
-    "election_year", "submission_date", "previously_registered",
-]
-
-# ========================== CR detail scrape ==========================
-CR_DETAIL_URL        = "https://aws.state.ak.us/apocreports/Common/View.aspx?ID={id}&ViewType=CR"
-CR_DETAILS_PATH      = RAW_DIR / "cr_details.csv"
-MIN_CR_ID            = 0
-MAX_CONSECUTIVE_CR_BLANK = 1500
-
-CR_DETAILS_COLS = [
-    "cr_id", "candidate_display_name", "candidate_first", "candidate_last",
-    "committee_name", "city", "zip",
-    "treasurer_name", "treasurer_phone", "treasurer_email",
-    "election_year", "election", "office_type",
-    "submission_date", "previously_registered",
-]
-
-# ======================== Field label pattern =========================
-FIELD_LABELS = [
-    # GR fields
-    "Group Name",
-    "Abbreviation",
-    "Purpose",
-    "Group Type",
-    "Group Mailing Address",
-    "Additional Email Addresses to Notify",
-    "Chair Name",
-    "Treasurer Name",
-    # CR fields
-    "Candidate Display Name",
-    "Candidate Legal First Name",
-    "Candidate Legal Last Name",
-    "Campaign Committee Name",
-    "Campaign Mailing Address",
-    "Office Type",
-    "Election",
-    "Name of Bank",
-    # Shared
-    "City, State Zip",
-    "Phone",
-    "E-mail",
-    "Fax (Optional)",
-    "Election Year",
-    "Submission Date",
-    "Previously Registered",
-]
-
-FIELD_PATTERN = "|".join(
-    re.escape(f)
-    for f in sorted(FIELD_LABELS, key=len, reverse=True)
-)
-
-def clean_date(value: str) -> str:
-    m = re.search(r"\d{1,2}/\d{1,2}/\d{4}", value)
-    return m.group(0) if m else value.strip()
-
-def _get(text: str, label: str) -> str:
-    pattern = rf"""
-        \b{re.escape(label)}
-        \s*:\s*
-        (.*?)
-        (?=
-            \b(?:{FIELD_PATTERN})\s*:
-            |\Z
-        )
-    """
-
-    m = re.search(
-        pattern,
-        text,
-        re.IGNORECASE | re.VERBOSE | re.DOTALL,
-    )
-
-    return " ".join(m.group(1).split()) if m else ""
-
-
 # ========================== Manifest helpers ==========================
 def load_manifest() -> tuple[set[tuple[str, str]], set[str]]:
     """Return (done, has_data) sets from the manifest; empty sets if it doesn't exist."""
@@ -274,505 +172,6 @@ def upsert_manifest(record: dict) -> None:
 
 
 
-# ========================== Field extractors ==========================
-def extract_name(section: str) -> str:
-    m = re.match(r"^(.*?)(?=\s+Address\s*:|\s+Phone\s*:|\Z)", section)
-    return " ".join(m.group(1).split()) if m else ""
-
-def parse_city_state_zip(text: str) -> tuple[str, str]:
-    csz = _get(text, "City, State Zip")
-
-    if not csz:
-        return "", ""
-
-    csz = " ".join(csz.split())
-
-    m = re.search(
-        r"^(.*?),\s+.*?\s+(\d{5}(?:-\d{4})?)",
-        csz
-    )
-
-    if not m:
-        return "", ""
-
-    city = m.group(1).strip()
-    zip_code = m.group(2)
-
-    return city, zip_code
-
-
-# ========================= GR detail helpers ==========================
-def _strip_html(raw: str) -> str:
-    raw = re.sub(
-        r"<script.*?</script>",
-        " ",
-        raw,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-
-    raw = re.sub(
-        r"<style.*?</style>",
-        " ",
-        raw,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-
-    text = re.sub(r"<[^>]+>", " ", raw)
-    text = html_mod.unescape(text)
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
-
-
-
-
-def _get_in(section: str, label: str) -> str:
-    """Same as _get but scoped to a pre-extracted section string."""
-    return _get(section, label)
-
-
-def parse_gr_page(raw_html: str) -> dict | None:
-    """Parse a GR detail page into a flat dict. Returns None if blank/invalid."""
-    text = _strip_html(raw_html)
-    if "Group Name" not in text:
-        return None
-
-    group_name = _get(text, "Group Name")
-    if not group_name:
-        return None
-
-    # Section-aware parsing — "Name:", "Phone:", "E-mail:" appear under both
-    # Chair and Treasurer sections; extract each section's text block first.
-    chair_m = re.search(
-        r"Chair\s+Name\s*:\s*(.+?)(?=Treasurer\s+Name\b|Deputy\b|Type of Group|\Z)",
-        text,
-        re.IGNORECASE,
-    )
-
-    treas_m = re.search(
-        r"Treasurer\s+Name\s*:\s*(.+?)(?=Deputy\b|Type of Group|\Z)",
-        text,
-        re.IGNORECASE,
-    )
-    chair_text = chair_m.group(1)  if chair_m  else ""
-    treas_text = treas_m.group(1) if treas_m else ""
-
-    city, zip_code = parse_city_state_zip(text)
-
-    def clean_email(value: str) -> str:
-        m = re.search(r"[\w.+-]+@[\w.-]+\.\w+", value)
-        return m.group(0) if m else value.strip()
-
-    return {
-        "group_name": group_name,
-        "abbreviation": _get(text, "Abbreviation"),
-        "group_type": _get(text, "Group Type"),
-        "purpose": _get(text, "Purpose"),
-        "address": _get(text, "Group Mailing Address"),
-        "city": city,
-        "zip": zip_code,
-
-        "chair_name": extract_name(chair_text),
-        "chair_phone": _get_in(chair_text, "Phone"),
-
-        "treasurer_name": extract_name(treas_text),
-        "treasurer_phone": _get_in(treas_text, "Phone"),
-
-        "chair_email": clean_email(_get_in(chair_text, "E-mail")),
-        "treasurer_email": clean_email(_get_in(treas_text, "E-mail")),
-
-        "election_year": _get(text, "Election Year"),
-        "submission_date": clean_date(_get(text, "Submission Date")),
-        "previously_registered": _get(text, "Previously Registered"),
-    }
-
-
-GR_INCREMENTAL_CUSHION = 1500  # IDs below current-year floor to re-check
-
-
-def load_done_gr_ids() -> tuple[set[int], int | None]:
-    """Return (done_ids, min_current_year_id).
-    min_current_year_id is the lowest gr_id whose submission_date is in the
-    current year, or None if no current-year records exist yet."""
-    if not GR_DETAILS_PATH.exists():
-        return set(), None
-    current_year = str(datetime.today().year)
-    done: set[int] = set()
-    min_cy: int | None = None
-    with open(GR_DETAILS_PATH, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            raw_id = row.get("gr_id", "")
-            if not raw_id:
-                continue
-            gid = int(raw_id)
-            done.add(gid)
-            sd = row.get("submission_date", "")
-            if sd.startswith(current_year):
-                if min_cy is None or gid < min_cy:
-                    min_cy = gid
-    return done, min_cy
-
-
-def _gr_sweep_floor(done_ids: set[int], min_cy: int | None) -> int:
-    """Return the lowest ID to include in an incremental sweep."""
-    if min_cy is not None:
-        return max(MIN_GR_ID, min_cy - GR_INCREMENTAL_CUSHION)
-    if done_ids:
-        return max(MIN_GR_ID, max(done_ids) - GR_INCREMENTAL_CUSHION)
-    return MIN_GR_ID
-
-
-def download_gr_details(page, log, force: bool = False) -> tuple[int, int]:
-    if force:
-        done_ids, min_cy = set(), None
-        floor = MIN_GR_ID
-    else:
-        done_ids, min_cy = load_done_gr_ids()
-        floor = _gr_sweep_floor(done_ids, min_cy)
-
-    log.info(f"GR details: probing from ID {floor} "
-             f"({len(done_ids)} already done, stops after {MAX_CONSECUTIVE_BLANK} consecutive blanks)")
-
-    if force and GR_DETAILS_PATH.exists():
-        GR_DETAILS_PATH.unlink()
-
-    write_header = force or not GR_DETAILS_PATH.exists()
-
-    ok = err = consecutive_blank = consecutive_datadome_blocks = processed = 0
-    t0 = time.perf_counter()
-
-    with open(GR_DETAILS_PATH, "a", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(
-            fh,
-            fieldnames=GR_DETAILS_COLS,
-            extrasaction="ignore",
-        )
-
-        if write_header:
-            writer.writeheader()
-
-        with logging_redirect_tqdm(loggers=[log._log]):
-            with tqdm(desc="  GR details", unit="id", dynamic_ncols=True, colour="green") as bar:
-                gr_id = floor
-                while True:
-                    if gr_id in done_ids:
-                        gr_id += 1
-                        continue
-
-                    url = GR_DETAIL_URL.format(id=gr_id)
-
-                    try:
-                        page.goto(url, timeout=30_000)
-                        page.wait_for_load_state("load")
-
-                        html = page.content()
-                        text = page.locator("body").inner_text()
-
-                        # Detect WAF block
-                        if "Request Rejected" in text or _content_has_datadome(html):
-                            still_blocked = False
-                            if _content_has_datadome(html):
-                                still_blocked = _wait_out_datadome(page, log, f"GR ID {gr_id}") is False
-                            else:
-                                log.warning(
-                                    f"WAF rejection at GR ID {gr_id}; sleeping and retrying"
-                                )
-                                time.sleep(5)
-
-                            page.goto(url, timeout=30_000)
-                            page.wait_for_load_state("load")
-
-                            html = page.content()
-                            text = page.locator("body").inner_text()
-
-                            if "Request Rejected" in text or _content_has_datadome(html):
-                                still_blocked = still_blocked or _content_has_datadome(html)
-                                consecutive_datadome_blocks = (
-                                    consecutive_datadome_blocks + 1 if still_blocked
-                                    else consecutive_datadome_blocks
-                                )
-                                if consecutive_datadome_blocks >= DATADOME_MAX_CONSECUTIVE_BLOCKS:
-                                    log.warning(
-                                        f"  {consecutive_datadome_blocks} consecutive DataDome "
-                                        f"blocks -- aborting GR sweep at ID {gr_id} rather than "
-                                        f"hammering a live block; re-run later to resume"
-                                    )
-                                    err += 1
-                                    break
-                                err += 1
-                                gr_id += 1
-                                bar.update(1)
-                                continue
-
-                        consecutive_datadome_blocks = 0
-
-                        parsed = parse_gr_page(html)
-
-                        if parsed is None:
-                            consecutive_blank += 1
-
-                            if consecutive_blank >= MAX_CONSECUTIVE_BLANK:
-                                log.info(
-                                    f"{MAX_CONSECUTIVE_BLANK} consecutive blanks — stopping at {gr_id}"
-                                )
-                                bar.update(1)
-                                break
-
-                            processed += 1
-                            _gr_cr_pace(processed)
-                            gr_id += 1
-                            bar.update(1)
-                            continue
-
-                        consecutive_blank = 0
-
-                        parsed["gr_id"] = gr_id
-                        writer.writerow(parsed)
-
-                        bar.set_postfix_str(
-                            parsed["group_name"][:45].ljust(45),
-                            refresh=False,
-                        )
-
-                        ok += 1
-                        processed += 1
-                        _gr_cr_pace(processed)
-
-                    except Exception as e:
-                        log.page_scrape_error(entity="group", page_id=gr_id, error=str(e))
-                        err += 1
-                        time.sleep(2)
-
-                    gr_id += 1
-                    bar.update(1)
-
-    total_rows = sum(1 for _ in open(GR_DETAILS_PATH, encoding="utf-8")) - 1 if GR_DETAILS_PATH.exists() else 0
-    log.page_scrape_complete(filename=str(GR_DETAILS_PATH), rows=total_rows,
-                             duration_s=time.perf_counter() - t0, ok=ok, err=err)
-    return ok, err
-
-
-# ========================== CR page parsing ===========================
-def _clean_na(val: str) -> str:
-    """Return '' for APOC's n/a / 'Did Not Report' sentinel values."""
-    v = " ".join(val.split())
-    return "" if v.lower() in ("n/a", "na", "did not report", "none", "") else v
-
-
-def parse_cr_page(raw_html: str) -> dict | None:
-    """Parse a CR detail page. Returns None if blank/invalid."""
-    text = _strip_html(raw_html)
-    if "Candidate Display Name" not in text and "Candidate Legal First Name" not in text:
-        return None
-
-    candidate_first = _clean_na(_get(text, "Candidate Legal First Name"))
-    candidate_last  = _clean_na(_get(text, "Candidate Legal Last Name"))
-    if not (candidate_first or candidate_last):
-        return None
-
-    # CR pages have <h2> section headers (Candidate Information, Chair,
-    # Treasurer, Deputy Treasurers, Bank Account) that become plain text after
-    # HTML stripping and leak into _get() captures.  This local helper adds
-    # those headers as extra stop markers (no colon required).
-    _CR_SECTION_STOPS = r"Candidate\s+Information|Deputy\s+Treasurers|Bank\s+Account"
-
-    def _get_cr(label: str) -> str:
-        pattern = rf"""
-            \b{re.escape(label)}
-            \s*:\s*
-            (.*?)
-            (?=
-                \b(?:{FIELD_PATTERN})\s*:
-                |\b(?:{_CR_SECTION_STOPS})\b
-                |\Z
-            )
-        """
-        m = re.search(pattern, text, re.IGNORECASE | re.VERBOSE | re.DOTALL)
-        return " ".join(m.group(1).split()) if m else ""
-
-    # Treasurer section
-    treas_m = re.search(
-        r"Treasurer\s+Name\s*:\s*(.+?)(?=\bDeputy\b|\bBank\b|\bName\s+of\s+Bank\b|\Z)",
-        text, re.IGNORECASE | re.DOTALL,
-    )
-    treas_text = treas_m.group(1) if treas_m else ""
-
-    city, zip_code = parse_city_state_zip(text)
-
-    def clean_email(value: str) -> str:
-        m = re.search(r"[\w.+-]+@[\w.-]+\.\w+", value)
-        return m.group(0) if m else value.strip()
-
-    # "Previously Registered" is a checkbox on the CR form — no colon label.
-    # Presence of the full parenthetical text in the stripped page means checked.
-    prev_registered = (
-        "Yes"
-        if re.search(r"Previously\s+Registered\s*\(From\s+MJE\s+or\s+LOI\s+Form\)",
-                     text, re.IGNORECASE)
-        else ""
-    )
-
-    return {
-        "candidate_display_name": _clean_na(_get(text, "Candidate Display Name")),
-        "candidate_first":        candidate_first,
-        "candidate_last":         candidate_last,
-        "committee_name":         _clean_na(_get(text, "Campaign Committee Name")),
-        "address":                _clean_na(_get(text, "Campaign Mailing Address")),
-        "city":                   city,
-        "zip":                    zip_code,
-        "treasurer_name":         _clean_na(extract_name(treas_text)),
-        "treasurer_phone":        _clean_na(_get_in(treas_text, "Phone")),
-        "treasurer_email":        clean_email(_clean_na(_get_in(treas_text, "E-mail"))),
-        "election_year":          _clean_na(_get_cr("Election Year")),
-        "election":               _clean_na(_get_cr("Election")),
-        "office_type":            _clean_na(_get_cr("Office Type")),
-        "submission_date":        clean_date(_get_cr("Submission Date")),
-        "previously_registered":  prev_registered,
-    }
-
-
-CR_INCREMENTAL_CUSHION = 1500
-
-
-def load_done_cr_ids() -> tuple[set[int], int | None]:
-    """Return (done_ids, min_current_year_id) based on submission_date."""
-    if not CR_DETAILS_PATH.exists():
-        return set(), None
-    current_year = str(datetime.today().year)
-    done: set[int] = set()
-    min_cy: int | None = None
-    with open(CR_DETAILS_PATH, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            raw_id = row.get("cr_id", "")
-            if not raw_id:
-                continue
-            cid = int(raw_id)
-            done.add(cid)
-            sd = row.get("submission_date", "")
-            if sd.startswith(current_year):
-                if min_cy is None or cid < min_cy:
-                    min_cy = cid
-    return done, min_cy
-
-
-def _cr_sweep_floor(done_ids: set[int], min_cy: int | None) -> int:
-    if min_cy is not None:
-        return max(MIN_CR_ID, min_cy - CR_INCREMENTAL_CUSHION)
-    if done_ids:
-        return max(MIN_CR_ID, max(done_ids) - CR_INCREMENTAL_CUSHION)
-    return MIN_CR_ID
-
-
-def download_cr_details(page, log, force: bool = False) -> tuple[int, int]:
-    if force:
-        done_ids, min_cy = set(), None
-        floor = MIN_CR_ID
-    else:
-        done_ids, min_cy = load_done_cr_ids()
-        floor = _cr_sweep_floor(done_ids, min_cy)
-
-    log.info(f"CR details: probing from ID {floor} "
-             f"({len(done_ids)} already done, stops after {MAX_CONSECUTIVE_CR_BLANK} consecutive blanks)")
-
-    if force and CR_DETAILS_PATH.exists():
-        CR_DETAILS_PATH.unlink()
-
-    write_header = force or not CR_DETAILS_PATH.exists()
-    ok = err = consecutive_blank = consecutive_datadome_blocks = processed = 0
-    t0 = time.perf_counter()
-
-    with open(CR_DETAILS_PATH, "a", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=CR_DETAILS_COLS, extrasaction="ignore")
-        if write_header:
-            writer.writeheader()
-
-        with logging_redirect_tqdm(loggers=[log._log]):
-            with tqdm(desc="  CR details", unit="id", dynamic_ncols=True, colour="cyan") as bar:
-                cr_id = floor
-                while True:
-                    if cr_id in done_ids:
-                        cr_id += 1
-                        continue
-
-                    url = CR_DETAIL_URL.format(id=cr_id)
-                    try:
-                        page.goto(url, timeout=30_000)
-                        page.wait_for_load_state("load")
-
-                        html = page.content()
-                        text = page.locator("body").inner_text()
-
-                        if "Request Rejected" in text or _content_has_datadome(html):
-                            still_blocked = False
-                            if _content_has_datadome(html):
-                                still_blocked = _wait_out_datadome(page, log, f"CR ID {cr_id}") is False
-                            else:
-                                log.warning(f"WAF rejection at CR ID {cr_id}; retrying")
-                                time.sleep(5)
-                            page.goto(url, timeout=30_000)
-                            page.wait_for_load_state("load")
-                            html = page.content()
-                            text = page.locator("body").inner_text()
-                            if "Request Rejected" in text or _content_has_datadome(html):
-                                still_blocked = still_blocked or _content_has_datadome(html)
-                                consecutive_datadome_blocks = (
-                                    consecutive_datadome_blocks + 1 if still_blocked
-                                    else consecutive_datadome_blocks
-                                )
-                                if consecutive_datadome_blocks >= DATADOME_MAX_CONSECUTIVE_BLOCKS:
-                                    log.warning(
-                                        f"  {consecutive_datadome_blocks} consecutive DataDome "
-                                        f"blocks -- aborting CR sweep at ID {cr_id} rather than "
-                                        f"hammering a live block; re-run later to resume"
-                                    )
-                                    err += 1
-                                    break
-                                err += 1
-                                cr_id += 1
-                                bar.update(1)
-                                continue
-
-                        consecutive_datadome_blocks = 0
-
-                        parsed = parse_cr_page(html)
-
-                        if parsed is None:
-                            consecutive_blank += 1
-                            if consecutive_blank >= MAX_CONSECUTIVE_CR_BLANK:
-                                log.info(f"{MAX_CONSECUTIVE_CR_BLANK} consecutive blanks — stopping at CR ID {cr_id}")
-                                bar.update(1)
-                                break
-                            processed += 1
-                            _gr_cr_pace(processed)
-                            cr_id += 1
-                            bar.update(1)
-                            continue
-
-                        consecutive_blank = 0
-                        parsed["cr_id"] = cr_id
-                        writer.writerow(parsed)
-
-                        label = (parsed["candidate_last"] + ", " + parsed["candidate_first"])[:45]
-                        bar.set_postfix_str(label.ljust(45), refresh=False)
-
-                        ok += 1
-                        processed += 1
-                        _gr_cr_pace(processed)
-
-                    except Exception as e:
-                        log.page_scrape_error(entity="candidate", page_id=cr_id, error=str(e))
-                        err += 1
-                        time.sleep(2)
-
-                    cr_id += 1
-                    bar.update(1)
-
-    total_rows = sum(1 for _ in open(CR_DETAILS_PATH, encoding="utf-8")) - 1 if CR_DETAILS_PATH.exists() else 0
-    log.page_scrape_complete(filename=str(CR_DETAILS_PATH), rows=total_rows,
-                             duration_s=time.perf_counter() - t0, ok=ok, err=err)
-    return ok, err
-
-
 # ========================= Playwright helpers =========================
 def get_available_years(page) -> list[str]:
     sel = page.locator("select[name*='ddlReportYear']")
@@ -815,36 +214,8 @@ DOWNLOAD_TIMEOUT_MS     = 600_000  # ms; confirmed clean downloads for the
                                     # largest years take up to ~440s server-
                                     # side alone, well past the old 180s cap
 DATADOME_WAIT_TIMEOUT_S = 900      # how long to wait for a human to solve it
-                                    # -- widened from 600s 2026-09-23: the
-                                    # GR/CR sweep can run long enough
-                                    # unattended that a shorter window risks
-                                    # giving up before anyone notices a
-                                    # slider needs solving
 DATADOME_POLL_S         = 3
-DATADOME_MAX_CONSECUTIVE_BLOCKS = 6  # abort the sweep rather than hammer a
-                                    # live block -- raised from 3 2026-09-23
-                                    # (GR ID 14 hit it on the first pass with
-                                    # the old, tighter pacing below; give a
-                                    # slider more chances to get solved
-                                    # before the whole sweep bails)
-
-# The GR/CR per-ID detail sweep is the single most repetitive, most
-# bot-shaped request pattern in this file -- thousands of sequential
-# integer IDs. First widened from a flat 0.1-0.2s to 0.6-1.8s + a break
-# every 40, but that still wasn't enough: a live run hit the DataDome
-# slider at GR ID 14, before even one break fired. Escalated further
-# 2026-09-23 -- real wall-clock cost here is acceptable, this is a
-# background sweep, not something anyone is waiting on interactively.
-GR_CR_ID_PAUSE    = (3.0, 6.0)   # normal per-ID pause
-GR_CR_BREAK_EVERY = 25           # take a longer break every N requests
-GR_CR_BREAK_PAUSE = (20.0, 45.0)
-
-
-def _gr_cr_pace(n: int) -> None:
-    """Call once per ID processed (blank or found) in the GR/CR sweep."""
-    time.sleep(random.uniform(*GR_CR_ID_PAUSE))
-    if n > 0 and n % GR_CR_BREAK_EVERY == 0:
-        time.sleep(random.uniform(*GR_CR_BREAK_PAUSE))
+DATADOME_MAX_CONSECUTIVE_BLOCKS = 6  # abort the run rather than hammer a live block
 
 
 def _content_has_datadome(content: str) -> bool:
@@ -1088,11 +459,11 @@ def run(
     Horizontal scope:
         No flags                — download everything
         transactions            — income + expenditures only
-        entities                — candidates + groups + GR/CR details only
+        entities                — candidates + groups only
         contributions           — income only (implies transactions)
         expenditures            — expenditures only (implies transactions)
-        candidates              — CDCandidates + CRForms bulk + CR details only (implies entities)
-        committees              — groups + GR details only (implies entities)
+        candidates              — CDCandidates + CRForms bulk only (implies entities)
+        committees              — GRForms bulk only (implies entities)
         independent_expenditures — IE (Form 15-6) bulk exports only (its own filing track, own manifest vertical -- not folded into entities/transactions so an --entities/--transactions caller doesn't unexpectedly pick it up). Uses the same year-based bulk Search/Export flow as income/expenditures/groups, not a per-ID detail sweep.
     """
     log = get_logger("alaska", "scrape")
@@ -1123,8 +494,6 @@ def run(
     do_expend        = no_horizontal or transactions or expenditures
     do_candidates_dl = no_horizontal or entities or candidates
     do_groups_dl     = no_horizontal or entities or committees
-    do_gr_details    = no_horizontal or entities or committees
-    do_cr_details    = no_horizontal or entities or candidates
     # Independent_expenditures is its OWN horizontal flag, not folded into
     # entities -- see run()'s docstring. no_horizontal alone still covers
     # the plain-no-flags "download everything" case.
@@ -1144,7 +513,6 @@ def run(
         if do_ie:            relations_to_clear.add("ie_expenditures")
         if do_ie:            relations_to_clear.add("ie_contributions")
         strip_manifest(lambda r: r["relation_type"] not in relations_to_clear)
-        # Detail files are cleared inside their download functions when force=True
 
     elif start_year is not None or end_year is not None:
         # Year range — wipe manifest entries for year-based relations within the range
@@ -1348,33 +716,6 @@ def run(
 
             context.close()
 
-        # ── GR + CR detail scrapes ────────────────────────────────────
-        if do_gr_details or do_cr_details:
-            with sync_playwright() as p:
-                context = p.chromium.launch_persistent_context(
-                    str(PROFILE_DIR), headless=False, accept_downloads=True,
-                    args=LAUNCH_ARGS, user_agent=DESKTOP_USER_AGENT,
-                    viewport=VIEWPORT, locale=LOCALE, timezone_id=TIMEZONE_ID,
-                )
-                context.add_init_script(STEALTH_INIT_SCRIPT)
-                page = context.new_page()
-
-                page.goto(PAGES["groups"])
-                page.wait_for_load_state("networkidle")
-                _wait_out_datadome(page, log, "GR/CR warm-up page load")
-
-                if do_gr_details:
-                    p_ok, p_err = download_gr_details(page, log, force=force)
-                    pages_ok  += p_ok
-                    pages_err += p_err
-
-                if do_cr_details:
-                    p_ok, p_err = download_cr_details(page, log, force=force)
-                    pages_ok  += p_ok
-                    pages_err += p_err
-
-                context.close()
-
         duration = round(time.perf_counter() - t0, 1)
         log.info(f"Done in {duration}s")
         log._emit("scrape_completed", status="completed", duration_s=duration,
@@ -1408,11 +749,11 @@ if __name__ == "__main__":
     # Horizontal scope:
     #   (no flag)         all types
     #   --transactions    income + expenditures
-    #   --entities        candidates + groups + GR/CR details
+    #   --entities        candidates + groups
     #   --contributions   income only
     #   --expenditures    expenditures only
-    #   --candidates      CDCandidates + CRForms bulk + CR details
-    #   --committees      groups + GR details
+    #   --candidates      CDCandidates + CRForms bulk
+    #   --committees      GRForms bulk
     import argparse
     ap = argparse.ArgumentParser(
         description="Download Alaska APOC campaign finance data."
@@ -1432,7 +773,7 @@ if __name__ == "__main__":
     ap.add_argument("--transactions", action="store_true",
                     help="transactions only (income + expenditures)")
     ap.add_argument("--entities",     action="store_true",
-                    help="entities only (candidates, groups, GR/CR details)")
+                    help="entities only (candidates, groups)")
 
     # Horizontal — second level
     ap.add_argument("--contributions", action="store_true",
@@ -1440,9 +781,9 @@ if __name__ == "__main__":
     ap.add_argument("--expenditures",  action="store_true",
                     help="expenditure files only")
     ap.add_argument("--candidates",    action="store_true",
-                    help="CDCandidates export + CRForms bulk + CR details only")
+                    help="CDCandidates export + CRForms bulk only")
     ap.add_argument("--committees",    action="store_true",
-                    help="GRForms + GR details only")
+                    help="GRForms bulk only")
     ap.add_argument("--independent-expenditures", action="store_true",
                     dest="independent_expenditures",
                     help="IE (Form 15-6) bulk exports only -- separate filing track from everything else this scraper covers")

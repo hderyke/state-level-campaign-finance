@@ -6,9 +6,7 @@ Raw files (all in data/Alaska/raw/):
   CDExpense_YYYY.csv     — expenditures made
   CDCandidates_all.csv   — candidate registry
   GRForms_YYYY.csv       — group/committee registrations (bulk export)
-  gr_details.csv         — group registration detail pages (scraped, richer)
   CRForms_YYYY.csv       — candidate registrations (bulk export, added 2026-09-23)
-  cr_details.csv         — candidate registration detail pages (scraped, richer)
 
 Output (data/Alaska/cleaned/):
   contributions.csv.gz, expenditures.csv.gz, committees.csv.gz,
@@ -179,64 +177,15 @@ def open_writer(filename: str, fieldnames: list):
     return fh, w
 
 
-# ========================= CR detail registry =========================
-def load_cr_registry() -> dict[str, dict]:
-    """
-    Returns dict keyed by committee_key(first + " " + last).
-    Also indexes by committee_key(committee_name) when that field is populated,
-    so "Andy Josephson for State House" can match if needed.
-    Most-recent filing per candidate wins.
-    """
-    path = RAW_DIR / "cr_details.csv"
-    if not path.exists():
-        return {}
-
-    registry: dict[str, dict] = {}
-
-    def _update(key: str, row: dict) -> None:
-        existing = registry.get(key)
-        if existing is None:
-            registry[key] = row
-            return
-        try:
-            new_date = datetime.strptime(row["submission_date"],      "%m/%d/%Y")
-            old_date = datetime.strptime(existing["submission_date"], "%m/%d/%Y")
-            if new_date > old_date:
-                registry[key] = row
-        except (ValueError, KeyError):
-            pass
-
-    with open(path, newline="", encoding="utf-8") as f:
-        for row_num, row in enumerate(csv.DictReader(f), start=2):
-            first = clean(row.get("candidate_first", ""))
-            last  = clean(row.get("candidate_last",  ""))
-            if not (first or last):
-                continue
-
-            row["_raw_file"] = "cr_details.csv"
-            row["_row_num"]  = row_num
-
-            # Primary key: legal first + last (no middle, matches CDIncome filer names)
-            _update(committee_key(first + " " + last), row)
-
-            # Secondary: campaign committee name when populated
-            cmte = clean(row.get("committee_name", ""))
-            if cmte:
-                _update(committee_key(cmte), row)
-
-    return registry
-
-
 # ========================= CR forms bulk registry ======================
 def load_cr_forms_registry() -> dict[str, dict]:
     """
-    Bulk analog of load_cr_registry() below, built from CRForms_YYYY.csv
-    bulk exports (safe Select-Year/Search/Export downloads, same pattern
-    as GRForms) instead of the slow, DataDome-prone per-ID cr_details.csv
-    sweep. Same dict shape as load_cr_registry() (candidate_display_name/
-    treasurer_name/city/zip/submission_date) so it can use the identical
-    matching logic where it's applied. Most-recent Submitted date wins
-    per key, same tie-break as load_cr_registry().
+    Candidate registrations from the CRForms_YYYY.csv bulk exports.
+
+    Returns a dict keyed by committee_key(first + " " + last), and also by
+    committee_key(committee name) when that column is populated, so
+    "Andy Josephson for State House" can match. Most recent Submitted
+    date wins per key.
     """
     registry: dict[str, dict] = {}
 
@@ -280,54 +229,6 @@ def load_cr_forms_registry() -> dict[str, dict]:
     return registry
 
 
-# ========================= GR detail registry =========================
-def load_gr_registry() -> tuple[dict[str, dict], dict[str, dict]]:
-    """
-    Returns (name_registry, abbr_registry).
-
-    name_registry : keyed by committee_key(group_name) — primary match path.
-    abbr_registry : keyed by committee_key(abbreviation) — fallback for groups
-                    whose filer name in transactions matches their APOC
-                    abbreviation rather than their full registered name.
-    Both keep the most-recent filing per group.
-    """
-    path = RAW_DIR / "gr_details.csv"
-    if not path.exists():
-        return {}, {}
-
-    name_registry: dict[str, dict] = {}
-    abbr_registry: dict[str, dict] = {}
-
-    def _update(registry: dict, key: str, row: dict) -> None:
-        existing = registry.get(key)
-        if existing is None:
-            registry[key] = row
-            return
-        try:
-            new_date = datetime.strptime(row["submission_date"],      "%m/%d/%Y")
-            old_date = datetime.strptime(existing["submission_date"], "%m/%d/%Y")
-            if new_date > old_date:
-                registry[key] = row
-        except (ValueError, KeyError):
-            pass
-
-    with open(path, newline="", encoding="utf-8") as f:
-        for row_num, row in enumerate(csv.DictReader(f), start=2):
-            name = clean(row.get("group_name", ""))
-            if not name:
-                continue
-
-            row["_raw_file"] = "gr_details.csv"
-            row["_row_num"]  = row_num
-
-            _update(name_registry, committee_key(name), row)
-
-            abbr = clean(row.get("abbreviation", ""))
-            if abbr and len(abbr) >= 2:
-                _update(abbr_registry, committee_key(abbr), row)
-
-    return name_registry, abbr_registry
-
 # ================================ Main ================================
 def run():
     log = get_logger("alaska", "parse")
@@ -355,10 +256,9 @@ def run():
             if key not in committees:
                 committees[key] = {
                     "state":          STATE,
-                    # Default to the filer name so candidates/PCCs are always
-                    # joinable to contributions. Groups get this overwritten with
-                    # their APOC abbreviation (GRForms) or numeric GR ID
-                    # (gr_details), which is higher-quality.
+                    # The filer name is the ID: APOC exposes no stable
+                    # numeric filer ID, and the name is what joins a
+                    # committee to its contributions.
                     "state_filer_id": name,
                     "committee_name": name,
                     "committee_type": ctype,
@@ -367,27 +267,6 @@ def run():
                     "city":           "",
                     "zip":            "",
                 }
-
-        # GR detail registry (loaded first — highest priority)
-        gr_registry, gr_abbr_registry = load_gr_registry()
-        if gr_registry:
-            _gr_path = RAW_DIR / "gr_details.csv"
-            log.registry_loaded(
-                "gr_details.csv",
-                entries=len(gr_registry),
-                relation="committees",
-                bytes=_gr_path.stat().st_size if _gr_path.exists() else 0,
-            )
-
-        cr_registry = load_cr_registry()
-        if cr_registry:
-            _cr_path = RAW_DIR / "cr_details.csv"
-            log.registry_loaded(
-                "cr_details.csv",
-                entries=len(cr_registry),
-                relation="committees",
-                bytes=_cr_path.stat().st_size if _cr_path.exists() else 0,
-            )
 
         # Candidates
         cand_path = RAW_DIR / "CDCandidates_all.csv"
@@ -575,8 +454,9 @@ def run():
             total_expenditures += count
 
         # Committees: enrich from GRForms bulk exports
-        # GRForms CSVs are secondary to gr_details; they fill gaps for groups
-        # that appear in transactions but weren't hit by the detail scrape.
+        # Fills fields still blank after the transaction pass, and adds groups
+        # that registered but have no transactions (those get their APOC
+        # abbreviation as state_filer_id).
         for path in raw_files("GRForms_*.csv"):
             ft         = time.perf_counter()
             file_count = 0
@@ -603,6 +483,11 @@ def run():
                                 clean(row.get("Subtype", "")),
                             ]))
                         )
+                    elif entry["committee_type"] == "Group" and clean(row.get("Type", "")):
+                        # "Group" is the transaction exports' generic filer
+                        # type; the registration names the specific one
+                        # (PAC, Political Party, Ballot Proposition, ...).
+                        entry["committee_type"] = clean(row.get("Type", ""))
                     if not entry.get("treasurer_name"):
                         entry["treasurer_name"] = clean(row.get("Treasurer Name", ""))
                     if not entry.get("city"):
@@ -616,73 +501,9 @@ def run():
             log.registry_loaded(path.name, entries=file_count, relation="committees",
                                bytes=path.stat().st_size)
 
-        # Apply GR detail registry (highest priority enrichment)
-        def _apply_gr_detail(entry: dict, detail: dict) -> None:
-            """Write gr_detail fields onto an existing committee entry."""
-            entry["state_filer_id"] = str(detail.get("gr_id", ""))
-            entry["committee_type"] = clean(detail.get("group_type",     "")) or entry.get("committee_type", "")
-            entry["treasurer_name"] = clean(detail.get("treasurer_name", "")) or entry.get("treasurer_name", "")
-            entry["city"]           = utils.clean_name(clean(detail.get("city", "")) or entry.get("city", ""))
-            entry["zip"]            = clean(detail.get("zip",            "")) or entry.get("zip",            "")
-            entry["raw_file"]       = detail.get("_raw_file", "")
-            entry["row_num"]        = detail.get("_row_num",  "")
-
-        gr_matched = gr_abbr_matched = 0
-
-        # Primary pass: full group name
-        for key, detail in gr_registry.items():
-            canonical_name = clean(detail.get("group_name", ""))
-            entry = committees.get(key) or {
-                "state": STATE,
-                "state_filer_id": "",
-                "committee_name": canonical_name,
-                "candidate_name": "",
-            }
-            committees[key] = entry
-            _apply_gr_detail(entry, detail)
-            gr_matched += 1
-
-        # Fallback pass: APOC abbreviation (e.g. filer uses "HDCC" in transactions
-        # but the full name in gr_details is "House Democratic Campaign Committee")
-        for key, entry in list(committees.items()):
-            if entry.get("state_filer_id"):
-                continue          # already enriched by primary pass
-            detail = gr_abbr_registry.get(key)
-            if detail is None:
-                continue
-            _apply_gr_detail(entry, detail)
-            gr_abbr_matched += 1
-
-        if gr_registry:
-            log.enrichment_summary(
-                gr_matched=gr_matched,
-                gr_abbr_matched=gr_abbr_matched,
-                total_committees=len(committees),
-            )
-
-        # Committees: enrich Candidate-type entries from CRForms bulk exports
-        # CRForms is the candidate-registration analog of GRForms bulk exports
-        # above -- a plain Select-Year/Search/Export bulk download (same safe
-        # request pattern already proven for GRForms/CDCandidates/CDIncome/
-        # CDExpense), NOT the per-ID cr_details sweep, which is the thing that
-        # gets DataDome-blocked. Added 2026-09-23. Uses the exact same
-        # matching strategy as the CR detail registry below (first+last
-        # primary key, committee-name secondary key, most-recent Submitted
-        # date wins per key) via load_cr_forms_registry(), and only fills
-        # gaps on committees that already exist from real transaction
-        # activity -- doesn't fabricate a committee row for a bare
-        # registration with no transactions, same restraint cr_details uses.
-        # Runs BEFORE cr_details so cr_details (richer/individually verified,
-        # where the sweep has reached it) still wins wherever it has data;
-        # this just backfills what it doesn't.
-        #
-        # Real export columns confirmed live 2026-09-23 (see
-        # data/Alaska/raw/CRForms_2024.csv): 35 columns, far more than the
-        # on-screen "Additional Fields" grid picker showed -- includes
-        # Display Name, Last Name, First Name, Committee, Treasurer Name,
-        # City, Zip, Submitted. An earlier version of this block guessed
-        # "Name" as the column (matching the grid's on-screen label) and
-        # silently matched nothing -- the real header is "Display Name".
+        # Committees: enrich Candidate-type entries from CRForms bulk exports.
+        # Only fills committees that already exist from transaction activity;
+        # a bare registration with no transactions does not create a row.
         cr_forms_registry = load_cr_forms_registry()
         cr_forms_matched  = 0
         for key, entry in committees.items():
@@ -691,7 +512,7 @@ def run():
 
             detail = cr_forms_registry.get(key)
 
-            # Fallback: drop middle tokens, same as the CR detail match below
+            # Fallback: drop middle tokens -- "pete b higgins" -> "pete higgins"
             if detail is None:
                 parts = entry.get("committee_name", "").split()
                 if len(parts) >= 3:
@@ -714,45 +535,6 @@ def run():
                 cr_forms_matched=cr_forms_matched,
                 total_committees=len(committees),
             )
-
-        # Apply CR detail registry (candidate/PCC enrichment)
-        # Matches by committee_key(first + last) against the candidate's filer
-        # name from CDIncome/CDExpense. Falls back to stripping middle tokens
-        # for names like "Pete B Higgins" → tries "pete higgins".
-        cr_matched = 0
-        for key, entry in committees.items():
-            if entry.get("committee_type") != "Candidate":
-                continue
-
-            detail = cr_registry.get(key)
-
-            # Fallback: drop middle tokens — "pete b higgins" → "pete higgins"
-            if detail is None:
-                parts = entry.get("committee_name", "").split()
-                if len(parts) >= 3:
-                    alt_key = committee_key(parts[0] + " " + parts[-1])
-                    detail = cr_registry.get(alt_key)
-
-            if detail is None:
-                continue
-
-            # CR data overwrites blank fields; it won't compete with GR
-            entry["state_filer_id"] = str(detail.get("cr_id", "")) or entry.get("state_filer_id", "")
-            entry["candidate_name"] = clean(detail.get("candidate_display_name", "")) or entry.get("candidate_name", "")
-            entry["city"]           = utils.clean_name(clean(detail.get("city", "")) or entry.get("city", ""))
-            entry["zip"]            = clean(detail.get("zip",            "")) or entry.get("zip",            "")
-            entry["treasurer_name"] = clean(detail.get("treasurer_name", "")) or entry.get("treasurer_name", "")
-            entry["raw_file"]       = detail.get("_raw_file", "")
-            entry["row_num"]        = detail.get("_row_num",  "")
-            cr_matched += 1
-
-        if cr_registry:
-            log.enrichment_summary(
-                cr_matched=cr_matched,
-                total_committees=len(committees),
-            )
-
-
 
         # Independent Expenditures (Form 15-6) -- IEExpenditures_<year>.csv /
         # IEContributions_<year>.csv, bulk-exported by scrapers/alaska.py the
