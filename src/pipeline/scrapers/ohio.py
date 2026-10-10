@@ -406,7 +406,7 @@ def run(
     expenditures: bool = False,
     candidates: bool = False,
     committees: bool = False,
-    fec_ie: bool = False,
+    fec_ie: bool = True,
 ):
     """
     Download Ohio campaign finance data from the File Transfer Page.
@@ -437,12 +437,12 @@ def run(
     parser currently ignores Cover Pages files but they're kept on disk in
     case a future totals cross-check wants them.
 
-    fec_ie=True additionally pulls FEC-reported "nonfederal candidate"
+    fec_ie=True (the default) additionally pulls FEC-reported "nonfederal candidate"
     independent-expenditure disbursements that mention Ohio (see
     src/pipeline/fec_ie.py for what this is and its limitations) — money
     spent by FEDERALLY-registered committees on Ohio's own (nonfederal)
     races, which Ohio's own File Transfer Page data never captures at all.
-    Opt-in and separate from do_all/--transactions/--expenditures since
+    Controlled separately from do_all/--transactions/--expenditures since
     it's a fundamentally different-reliability source (best-effort free-
     text search, not an official Ohio filing). Always re-fetches the
     current year and the prior year regardless of manifest state (FEC
@@ -666,10 +666,11 @@ if __name__ == "__main__":
     ap.add_argument("--expenditures",  action="store_true")
     ap.add_argument("--candidates",    action="store_true")
     ap.add_argument("--committees",    action="store_true")
-    ap.add_argument("--fec-ie",        action="store_true",
-                    help="also pull FEC-reported 'nonfederal candidate' independent-"
-                         "expenditure disbursements mentioning Ohio (opt-in enrichment "
-                         "from federally-registered committees; see src/pipeline/fec_ie.py)")
+    ap.add_argument("--fec-ie",        action=argparse.BooleanOptionalAction, default=True,
+                    help="pull FEC-reported 'nonfederal candidate' independent-"
+                         "expenditure disbursements mentioning Ohio, from "
+                         "federally-registered committees (on by default; "
+                         "--no-fec-ie skips it; see src/pipeline/fec_ie.py)")
 
     args, _ = ap.parse_known_args()
 

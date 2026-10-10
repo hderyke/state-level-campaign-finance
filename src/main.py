@@ -104,7 +104,8 @@ PIPELINE_COMMANDS = orc.PIPELINE_COMMANDS
 SCRAPER_FLAGS     = {"--force", "--transactions", "--entities",
                      "--contributions", "--expenditures",
                      "--candidates", "--committees",
-                     "--pacs", "--party-caucus", "--ballot-measure"}
+                     "--pacs", "--party-caucus", "--ballot-measure",
+                     "--no-fec-ie"}
 YEAR_FLAGS        = {"--start-year", "--end-year"}
 
 
