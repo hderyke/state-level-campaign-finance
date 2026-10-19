@@ -129,5 +129,15 @@ def test_cycle_fetch_refuses_an_unexpected_response():
         raise AssertionError(f"accepted {payload!r}")
 
 
+def test_small_gift_lumps_are_named_unitemized():
+    # "Multiple Contributors" / "Multiple Vendors": a period's aggregate of
+    # in-state gifts of $100 or less, which the donor lists leave out.
+    for name in ("Multiple Contributors", "Multiple Vendors", ""):
+        row = {"TransactionType": "In-State Contributions $100 or Less", "TransactionName": name}
+        assert parser.contributor_name(row) == "Unitemized"
+    assert parser.contributor_name({"TransactionType": "Contribution from Individuals",
+                                    "TransactionName": " Smith, Jane "}) == "Smith, Jane"
+
+
 if __name__ == "__main__":
     sys.exit(run(globals()))
