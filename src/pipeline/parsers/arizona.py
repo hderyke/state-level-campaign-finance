@@ -81,6 +81,21 @@ MAX_VALID_YEAR = date.today().year + 2
 
 # ============================== helpers ===============================
 
+
+# A.R.S. 16-926(B)(2)(b): in-state individuals giving $100 or less in the
+# cycle are reported only as an aggregate per period. Filers type whatever
+# name they like on that line ("Multiple Contributors", "Multiple Vendors");
+# it gets the name every parser gives such a lump (Oregon, Iowa), so the
+# donor lists can leave it out and it never ranks as a donor.
+UNITEMIZED_TYPE = "In-State Contributions $100 or Less"
+
+
+def contributor_name(row: dict) -> str:
+    if clean(row.get("TransactionType", "")) == UNITEMIZED_TYPE:
+        return "Unitemized"
+    return clean(row.get("TransactionName", ""))
+
+
 def clean(val) -> str:
     """Strip whitespace and coerce None to empty string."""
     return (val or "").strip()
@@ -512,7 +527,7 @@ def run():
                     cont_w.writerow({
                         "state":             STATE,
                         "committee_name":    committee_name,
-                        "contributor_name":  clean(row.get("TransactionName", "")),
+                        "contributor_name":  contributor_name(row),
                         "amount":            amount,
                         "date":              parse_date(row.get("TransactionDate", "")),
                         "transaction_type":  clean(row.get("TransactionType", "")),
